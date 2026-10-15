@@ -2,6 +2,8 @@
 
 This Compose project uses its own `ottv2` project name, image, container and named data volume. The API listens on host loopback port 8091 by default, so it does not take ports from other services. `sample-worker` is for internal testing with the three unchanged example bots only.
 
+When a remotely managed Cloudflare Tunnel is shared by connectors on different machines, its published application route must use an address reachable from every connector. Set `OTT_BIND_HOST` to this server's private LAN IP in `deploy/.env` and use `http://<LAN-IP>:8091` as the route's Service URL. Keep the port private to the LAN. Set `ARENA_ORIGIN` in `deploy/.env.server` to the exact public HTTPS origin before users sign in through Cloudflare.
+
 ```sh
 git clone https://github.com/btthanhk4/multiplayer-game.git ~/ottv2
 cd ~/ottv2

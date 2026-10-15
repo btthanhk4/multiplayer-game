@@ -12,7 +12,7 @@ services:
     environment:
       ARENA_DATA: /data
     ports:
-      - "127.0.0.1:${OTT_HOST_PORT:-8091}:8080"
+      - "${OTT_BIND_HOST:-127.0.0.1}:${OTT_HOST_PORT:-8091}:8080"
     volumes:
       - arena_data:/data
     healthcheck:
