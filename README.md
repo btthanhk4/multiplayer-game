@@ -26,7 +26,7 @@ Mở **http://localhost:8080/arena/**. Terminal thứ hai:
 
 Trong Xưởng bot, chọn bot mẫu và nộp nguyên bản để thử trọn luồng. Chế độ `samples` không chạy mã tùy chỉnh trên host. Để thử Docker, triển khai Linux, cài gVisor, cấu hình Cloudflare, sao lưu và chạy test: xem **[hướng dẫn triển khai](docs/ARENA_DEPLOY.md)**. Giao thức và thể lệ: **[sổ tay bot](arena/guide.html)**.
 
-V1 đã có luồng chức năng và kiểm thử phát triển; cần kiểm tra gVisor, đánh giá bảo mật và thử tải trên server thực trước khi tổ chức giải công khai. Chưa triển khai server/domain trong repo này. Kế hoạch PDF trước đó là định hướng; phạm vi V1 và các giới hạn thực tế được ghi trong hướng dẫn triển khai.
+V1 đã có luồng chức năng và kiểm thử phát triển; cần kiểm tra gVisor, đánh giá bảo mật và thử tải trên server thực trước khi tổ chức giải công khai. Có [cấu hình Docker riêng để chạy thử trên server](deploy/README.md); cấu hình đó chỉ bind API vào loopback và chưa phải triển khai công khai. Kế hoạch PDF trước đó là định hướng; phạm vi V1 và các giới hạn thực tế được ghi trong hướng dẫn triển khai.
 
 ---
 

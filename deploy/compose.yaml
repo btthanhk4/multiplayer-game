@@ -1,0 +1,47 @@
+name: ottv2
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    image: ottv2-arena-api:${OTT_IMAGE_TAG:-local}
+    container_name: ottv2-arena-api
+    restart: unless-stopped
+    env_file: .env.server
+    environment:
+      ARENA_DATA: /data
+    ports:
+      - "127.0.0.1:${OTT_HOST_PORT:-8091}:8080"
+    volumes:
+      - arena_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    mem_limit: 1g
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+
+  sample-worker:
+    profiles: ["demo"]
+    image: ottv2-arena-api:${OTT_IMAGE_TAG:-local}
+    container_name: ottv2-arena-sample-worker
+    restart: unless-stopped
+    env_file: .env.server
+    environment:
+      ARENA_DATA: /data
+    command: ["python", "-m", "arena_backend", "worker", "--mode", "samples"]
+    volumes:
+      - arena_data:/data
+    mem_limit: 1g
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  arena_data:
+

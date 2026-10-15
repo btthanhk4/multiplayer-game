@@ -1,0 +1,24 @@
+FROM node:22-bookworm-slim AS node
+
+FROM python:3.12-slim-bookworm
+
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PYTHONUTF8=1 ARENA_DATA=/data
+
+COPY arena_backend/requirements.txt /tmp/arena-requirements.txt
+RUN pip install --no-cache-dir -r /tmp/arena-requirements.txt \
+    && groupadd --gid 10001 ottv2 \
+    && useradd --uid 10001 --gid 10001 --no-create-home ottv2 \
+    && mkdir /data \
+    && chown ottv2:ottv2 /data
+
+COPY --chown=ottv2:ottv2 arena_backend /app/arena_backend
+COPY --chown=ottv2:ottv2 arena /app/arena
+COPY --chown=ottv2:ottv2 sdk /app/sdk
+COPY --chown=ottv2:ottv2 index.html main.js style.css rules.js online.js playhtml-session.js lobby-presence.js watch.html watch.css watch.js /app/
+
+USER 10001:10001
+EXPOSE 8080
+CMD ["python", "-m", "arena_backend", "serve", "--host", "0.0.0.0", "--port", "8080"]
+

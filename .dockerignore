@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+node_modules
+artifacts
+arena-data
+__pycache__
+*.pyc
+*.sqlite3*
+*.pdf
+.env
+.env.*
+docs
+test
+scripts
+
