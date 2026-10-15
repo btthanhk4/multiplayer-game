@@ -1,0 +1,24 @@
+[Unit]
+Description=OTTv2 Arena web and API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ottv2-web
+Group=ottv2
+WorkingDirectory=/opt/ottv2
+EnvironmentFile=/etc/ottv2.env
+ExecStart=/opt/ottv2/.venv/bin/python -m arena_backend serve --host 127.0.0.1 --port 8080
+Restart=on-failure
+RestartSec=5
+UMask=0007
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/ottv2
+MemoryMax=768M
+
+[Install]
+WantedBy=multi-user.target

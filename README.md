@@ -1,5 +1,35 @@
 # OTTv2
 
+## Đấu trường bot Python — V1
+
+Repo này bổ sung nền tảng thi đấu bằng code tại **`/arena/`**, bên cạnh game người chơi hiện có. Backend Python + SQLite chạy trên một máy; có thể public qua Cloudflare Tunnel khi có server. Không bắt buộc Workers, D1 hoặc R2.
+
+- Đăng nhập, nộp phiên bản Python riêng tư, kiểm tra bot, chọn phiên bản trước hạn.
+- Trận tập hai ván đổi màu; giải vòng tròn hoặc Swiss theo điểm; khóa hash bài thi, bảng điểm và điều hành.
+- Khán đài bốn bàn, cuộn trên mobile, replay đầy đủ và xem lại trận kết thúc.
+- Runner tách khỏi API; production yêu cầu Docker + gVisor. Có chế độ thử nguyên bản bot mẫu khi chưa có server.
+
+**Bắt đầu trên Windows** (Python 3.10+, Node.js 20+):
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -r arena_backend/requirements.txt
+.\.venv\Scripts\python -m arena_backend admin admin
+.\.venv\Scripts\python -m arena_backend serve
+```
+
+Mở **http://localhost:8080/arena/**. Terminal thứ hai:
+
+```powershell
+.\.venv\Scripts\python -m arena_backend worker --mode samples
+```
+
+Trong Xưởng bot, chọn bot mẫu và nộp nguyên bản để thử trọn luồng. Chế độ `samples` không chạy mã tùy chỉnh trên host. Để thử Docker, triển khai Linux, cài gVisor, cấu hình Cloudflare, sao lưu và chạy test: xem **[hướng dẫn triển khai](docs/ARENA_DEPLOY.md)**. Giao thức và thể lệ: **[sổ tay bot](arena/guide.html)**.
+
+V1 đã có luồng chức năng và kiểm thử phát triển; cần kiểm tra gVisor, đánh giá bảo mật và thử tải trên server thực trước khi tổ chức giải công khai. Chưa triển khai server/domain trong repo này. Kế hoạch PDF trước đó là định hướng; phạm vi V1 và các giới hạn thực tế được ghi trong hướng dẫn triển khai.
+
+---
+
 Trò chơi chiến thuật Đấm · Lá · Kéo trên bàn cờ 9×9. Hai người có thể chơi chung một máy hoặc vào cùng một phòng online; người vào sau hai ghế có thể xem trận đấu.
 
 ## Chơi

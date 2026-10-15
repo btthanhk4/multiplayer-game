@@ -1,0 +1,7 @@
+# Example for a named, locally managed tunnel. Replace the placeholders.
+tunnel: YOUR-TUNNEL-UUID
+credentials-file: /etc/cloudflared/YOUR-TUNNEL-UUID.json
+ingress:
+  - hostname: arena.example.org
+    service: http://127.0.0.1:8080
+  - service: http_status:404

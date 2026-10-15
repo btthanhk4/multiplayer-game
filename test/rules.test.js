@@ -2,6 +2,30 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyMove, legalMoves, makeBoard, newGame, pieceCounts } from '../rules.js';
 
+test('hòa ở lần lặp thế thứ ba, gồm bên đến lượt', () => {
+  let state = newGame();
+  const cycle = [
+    ['p1', [6,0], [5,0]], ['p2', [2,8], [3,8]],
+    ['p1', [5,0], [6,0]], ['p2', [3,8], [2,8]],
+  ];
+  for (let iteration=0;iteration<2;iteration++) for (const [side,from,to] of cycle) {
+    const result = applyMove(state,side,from,to);
+    assert.equal(result.ok,true);
+    state=result.state;
+  }
+  assert.equal(state.winner,'draw');
+  assert.equal(state.winReason,'repetition');
+  assert.equal(state.revision,8);
+});
+
+test('hòa khi nước thứ 80 liên tiếp không ăn quân', () => {
+  const state = newGame();
+  state.quietPly=79;
+  const result=applyMove(state,'p1',[6,0],[5,0]);
+  assert.equal(result.state.winner,'draw');
+  assert.equal(result.state.winReason,'quiet');
+});
+
 test('đội hình 9×9 đối xứng và có ba quân mỗi loại', () => {
   const board = makeBoard();
   assert.equal(board.length, 9);

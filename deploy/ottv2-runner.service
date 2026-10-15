@@ -1,0 +1,24 @@
+[Unit]
+Description=OTTv2 Python bot runner (gVisor)
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=ottv2-runner
+Group=ottv2
+SupplementaryGroups=docker
+WorkingDirectory=/opt/ottv2
+EnvironmentFile=/etc/ottv2.env
+ExecStart=/opt/ottv2/.venv/bin/python -m arena_backend worker --mode docker
+Restart=on-failure
+RestartSec=10
+UMask=0007
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/ottv2
+
+[Install]
+WantedBy=multi-user.target

@@ -4,3 +4,9 @@ artifacts/
 .wrangler/
 .env
 .env.*
+!.env.example
+.venv/
+__pycache__/
+*.pyc
+arena-data/
+*.sqlite3*

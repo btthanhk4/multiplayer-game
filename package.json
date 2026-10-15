@@ -5,6 +5,10 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
+    "arena": "python -m arena_backend serve",
+    "arena:worker": "python -m arena_backend worker",
+    "arena:test": "python -m unittest discover -s arena_backend/tests -v",
+    "arena:smoke": "node scripts/arena-smoke.mjs",
     "server": "partykit dev",
     "deploy:server": "partykit deploy"
   },

@@ -1,0 +1,25 @@
+name: OTTv2 checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: arena_backend/requirements.txt
+      - run: npm ci
+      - run: python -m pip install -r arena_backend/requirements.txt
+      - run: npm test
+      - run: python -m unittest discover -s arena_backend/tests -v
+      - run: docker build -t ottv2-bot:1 arena_backend/sandbox
+      # Docker-development isolation checks; this does not certify gVisor on production.
+      - run: python scripts/arena-sandbox-smoke.py --mode docker-dev
