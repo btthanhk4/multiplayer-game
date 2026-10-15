@@ -46,7 +46,7 @@ docker build -t ottv2-bot:1 arena_backend/sandbox
 
 Xem `/arena/guide.html` hoặc [sổ tay](../arena/guide.html). Bot export hàm `choose_move(observation)` trả `{from: [r,c], to: [r,c]}`. Python khởi tạo mới mỗi lượt, random seeded; không giữ trạng thái chạy nền. Runtime trong image: Python 3.12, thư viện chuẩn.
 
-Giới hạn: 1 giây CPU/process, 3 giây wall sau handshake, 256 MiB RAM, 4 KiB JSON, 4 KiB stderr/lượt. RLIMIT_NPROC hard=1 sau khởi động adapter, network none, cap-drop ALL, read-only rootfs, no-new-privileges, giới hạn PID/cgroup bên ngoài. Source/observation truyền qua stdin, không mount host vào sandbox; không đưa environment secret vào container. Docker daemon/socket chỉ runner sử dụng, không cấp cho API hoặc bot.
+Giới hạn: 1 giây CPU/process, 3 giây wall sau handshake, 256 MiB RAM, 4 KiB JSON, 4 KiB stderr/lượt. RLIMIT_NPROC hard=1 sau khởi động adapter, network none, cap-drop ALL, read-only rootfs, no-new-privileges. Giới hạn PID/cgroup ngoài là 64 để gVisor khởi động các tiến trình phụ trợ; kiểm thử child-process xác nhận bot vẫn không tạo được tiến trình con. Source/observation truyền qua stdin, không mount host vào sandbox; không đưa environment secret vào container. Docker daemon/socket chỉ runner sử dụng, không cấp cho API hoặc bot.
 
 Không có nước hợp lệ được tính hòa theo **bổ sung thể lệ Arena V1**; engine gốc không thay đổi. Bot lỗi là thua kỹ thuật; lỗi hạ tầng là job lỗi và BTC thử lại, không tự xử thua. Chẩn đoán lỗi bot trong trận được giữ ở audit BTC, không xuất traceback riêng tư trong replay công khai.
 

@@ -96,7 +96,7 @@ class Executor:
         else:
             command = ['docker','run','--rm','-i','--name',name,'--network=none','--read-only',
                        '--cap-drop=ALL','--security-opt=no-new-privileges','--memory=256m','--memory-swap=256m',
-                       '--cpus=1','--pids-limit=8','--ulimit','cpu=1:1',
+                       '--cpus=1','--pids-limit=64','--ulimit','cpu=1:1',
                        '--ulimit','nofile=64:64','--ulimit','core=0:0',
                        '--log-driver=none','--user=65532:65532']
             if self.mode == 'docker':
