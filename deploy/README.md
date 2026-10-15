@@ -32,4 +32,17 @@ docker compose -f deploy/compose.yaml --profile demo up -d sample-worker
 
 Open an SSH tunnel from a workstation with `ssh -L 8091:127.0.0.1:8091 USER@SERVER`, then visit `http://localhost:8091/arena/`. The database persists in the `ottv2_arena_data` Docker volume. Do not use `docker compose down -v` unless you intend to delete it.
 
-The public runner requires Docker with gVisor (`runsc`) and separate operational review. A public origin must use HTTPS; the sample worker deliberately refuses public origins. The host's existing Docker daemon and containers are not changed by this Compose file.
+The runner requires Docker with gVisor (`runsc`). Build the bot image, run the sandbox smoke test and start the runner only after `docker info` shows a `runsc` runtime:
+
+```sh
+docker build -t ottv2-bot:1 arena_backend/sandbox
+docker run --rm --network none \
+  --group-add "$(stat -c %g /var/run/docker.sock)" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --entrypoint python ottv2-arena-api:local \
+  scripts/arena-sandbox-smoke.py --mode docker
+OTT_DOCKER_GID="$(stat -c %g /var/run/docker.sock)" \
+  docker compose -f deploy/compose.yaml --profile runner up -d runner
+```
+
+The runner service shares the private data volume, has no network and accesses the Docker socket through the host socket group. Access to that socket grants powerful control of the host; only the runner receives it. The Compose file leaves the existing services and their ports alone. A public origin must use HTTPS; the sample worker deliberately refuses public origins.
