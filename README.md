@@ -1,15 +1,22 @@
-# OTTv2
+# OTTv2 Arena
 
-## Đấu trường bot Python — V1
+Trang chủ `/` là **Đấu trường bot Python**. Người chơi viết bot, nộp kiểm tra, đấu xếp hạng tự động hoặc đăng ký giải do ban tổ chức mở. `/arena/` vẫn dùng được cho các liên kết cũ. Bàn cờ chơi tay trước đây không còn được phục vụ trên website Arena.
 
-Repo này bổ sung nền tảng thi đấu bằng code tại **`/arena/`**, bên cạnh game người chơi hiện có. Backend Python + SQLite chạy trên một máy; có thể public qua Cloudflare Tunnel khi có server. Không bắt buộc Workers, D1 hoặc R2.
+## Luồng người chơi
 
-- Đăng nhập, nộp phiên bản Python riêng tư, kiểm tra bot, chọn phiên bản trước hạn.
-- Trận tập hai ván đổi màu; giải vòng tròn hoặc Swiss theo điểm; khóa hash bài thi, bảng điểm và điều hành.
-- Khán đài bốn bàn, cuộn trên mobile, replay đầy đủ và xem lại trận kết thúc.
-- Runner tách khỏi API; production yêu cầu Docker + gVisor. Có chế độ thử nguyên bản bot mẫu khi chưa có server.
+1. Đăng ký bằng mã tham gia do ban tổ chức cấp và đăng nhập.
+2. Viết một file Python UTF-8 tối đa 64 KiB, định nghĩa `choose_move(observation)` và trả `{'from': [row, col], 'to': [row, col]}`. Xem [giao thức bot](arena/guide.html).
+3. Nộp mã. Runner kiểm tra tối đa 12 nửa lượt mẫu. Bản hợp lệ có thể dùng để đấu tập, xếp hạng hoặc đăng ký giải.
+4. Ở **Đấu xếp hạng**, chọn bot hợp lệ và tìm đối thủ. Hệ thống ưu tiên người chưa gặp trong 24 giờ, sau đó Elo gần nhất. Nếu chưa có ai thì bot ở hàng chờ; có thể hủy trước khi ghép.
+5. Mỗi cặp có hai ván đổi màu. Sau khi cả hai kết thúc, Elo cập nhật một lần; người xem có thể mở từng ván và replay.
 
-**Bắt đầu trên Windows** (Python 3.10+, Node.js 20+):
+Elo bắt đầu ở 1000. Mỗi ván thắng/hòa/thua được 1/0,5/0 điểm; điểm cặp dùng tổng hai ván. Công thức Elo: `round(K × (điểm ván / 2 − kỳ vọng))`, K=32 và giảm cho các cặp gặp lại trong 24 giờ, tối thiểu 8. Điểm Elo **không** cộng vào bảng giải chính thức.
+
+Trong giải, ban tổ chức khóa bot sau hạn rồi mở từng vòng. Swiss ghép gần điểm và hoán đổi cặp để giảm tái đấu; vòng tròn cho mỗi cặp gặp một lần. Mỗi cặp thi hai ván đổi màu; thắng/hòa/thua cặp được 1/0,5/0 điểm. Đồng điểm xét Buchholz, sau đó điểm ván.
+
+## Chạy tại máy phát triển
+
+Yêu cầu Python 3.10+, Node.js 20+ và các package trong `arena_backend/requirements.txt`.
 
 ```powershell
 python -m venv .venv
@@ -18,60 +25,20 @@ python -m venv .venv
 .\.venv\Scripts\python -m arena_backend serve
 ```
 
-Mở **http://localhost:8080/arena/**. Terminal thứ hai:
+Mở `http://localhost:8080/`. Ở cửa sổ khác, có thể chạy runner chỉ dành cho **bot mẫu nguyên bản**:
 
 ```powershell
 .\.venv\Scripts\python -m arena_backend worker --mode samples
 ```
 
-Trong Xưởng bot, chọn bot mẫu và nộp nguyên bản để thử trọn luồng. Chế độ `samples` không chạy mã tùy chỉnh trên host. Để thử Docker, triển khai Linux, cài gVisor, cấu hình Cloudflare, sao lưu và chạy test: xem **[hướng dẫn triển khai](docs/ARENA_DEPLOY.md)**. Giao thức và thể lệ: **[sổ tay bot](arena/guide.html)**.
-
-V1 đã có luồng chức năng và kiểm thử phát triển; cần kiểm tra gVisor, đánh giá bảo mật và thử tải trên server thực trước khi tổ chức giải công khai. Có [cấu hình Docker riêng để chạy thử trên server](deploy/README.md); cấu hình đó chỉ bind API vào loopback và chưa phải triển khai công khai. Kế hoạch PDF trước đó là định hướng; phạm vi V1 và các giới hạn thực tế được ghi trong hướng dẫn triển khai.
-
----
-
-Trò chơi chiến thuật Đấm · Lá · Kéo trên bàn cờ 9×9. Hai người có thể chơi chung một máy hoặc vào cùng một phòng online; người vào sau hai ghế có thể xem trận đấu.
-
-## Chơi
-
-- Mỗi lượt đi một quân tới một trong tám ô kề cạnh hoặc chéo.
-- Đấm ăn Kéo, Kéo ăn Lá, Lá ăn Đấm. Quân đồng minh và quân đối thủ cùng loại chặn ô.
-- Thắng khi đưa quân Xanh tới **i9**, quân Đỏ tới **a1**, hoặc ăn hết cả ba quân thuộc cùng một loại của đối phương.
-- Ván hòa nếu thế cờ lặp lại ba lần hoặc 80 lượt liên tiếp không có quân bị ăn.
-- Mỗi bên có chín quân, ba quân mỗi loại. Đội hình ban đầu đối xứng qua tâm bàn cờ.
-
-## Chạy tại máy
-
-Mở `index.html` qua một máy chủ HTTP tĩnh, ví dụ:
-
-```sh
-python -m http.server 8000
-```
-
-Truy cập `http://localhost:8000`. Chế độ offline chạy hoàn toàn trên trình duyệt.
-
-Để chạy máy chủ phòng chơi có xác nhận nước đi:
-
-```sh
-npm install
-npm run server
-```
-
-Khi mở site ở `localhost`, game tự kết nối PartyKit cục bộ ở cổng `1999`. Có thể chỉ định host khác bằng `?server=host:port`. Mỗi phòng có mã riêng; hai người đầu tiên vào là hai phe, người tiếp theo xem trận. Máy chủ lưu trạng thái trận, kiểm tra lượt và nước đi, cho phép kết nối lại, rời ghế và đề nghị chơi ván mới.
-
-Trên GitHub Pages, chế độ online dùng [PlayHTML](https://playhtml.fun/) để đồng bộ bàn cờ và presence qua dịch vụ của thư viện. Có thể kiểm thử đường này ở máy cục bộ bằng `?backend=playhtml`. Vì trạng thái PlayHTML được ghi từ trình duyệt, đường này phù hợp chơi với bạn bè; máy chủ PartyKit là đường có xác nhận nước đi để triển khai riêng khi có host.
-
-Trang [xem trận](https://btthanhk4.github.io/OTTv2/watch.html) hiển thị các phòng đang có người chơi bằng presence của PlayHTML. Chọn nhiều phòng để theo dõi cùng lúc và cuộn trang để xem các bàn tiếp theo. Các khung xem mở với vai trò khán giả, không tự chiếm ghế và không gửi thao tác chơi. Trận kết thúc tự rời khỏi khán đài; phòng không còn người chơi biến mất khỏi danh sách.
-
-Nút **Ghép trận nhanh** tìm phòng đang có đúng một người chơi qua sảnh PlayHTML. Nếu chưa có phòng phù hợp, người chơi ở màn hình chờ và có thể hủy. Khi một người khác cũng vào hàng chờ, họ được ghép vào cùng một bàn cờ. Nếu ghế vừa được người khác chiếm, ghép trận sẽ quay lại sảnh chờ để tìm phòng khác.
+Runner production cần Docker và gVisor để chạy mã tùy ý của người chơi. Xem [triển khai](docs/ARENA_DEPLOY.md) và [Compose](deploy/README.md).
 
 ## Kiểm thử
 
-```sh
+```powershell
 npm test
+python -m unittest discover -s arena_backend/tests -v
+node scripts/arena-smoke.mjs
 ```
 
-`node scripts/browser-smoke.mjs` kiểm tra giao diện, offline và PartyKit khi cả HTTP tĩnh và PartyKit đang chạy. `node scripts/playhtml-smoke.mjs` kiểm tra hai người chơi và khán giả qua PlayHTML khi HTTP tĩnh đang chạy. Bài kiểm tra trình duyệt dùng Microsoft Edge cài trên máy.
-
-Để kiểm tra trang đã xuất bản: `node scripts/playhtml-smoke.mjs https://btthanhk4.github.io/OTTv2/`.
-`node scripts/watch-smoke.mjs` kiểm tra sảnh trận, cuộn xem hơn bốn khung, tự gỡ trận kết thúc và kích thước ô cờ. `node scripts/matchmaking-smoke.mjs` kiểm tra trạng thái chờ, ghép vào ghế có sẵn, ghép hai người đang chờ và hủy tìm trận.
+Các test chức năng không phải phép thử tải 5.000 người dùng. Trước khi mở giải lớn cần thử tải API, SQLite và nhiều runner với bộ bot đại diện.

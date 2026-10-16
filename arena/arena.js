@@ -21,7 +21,7 @@ async function api(path, data) {
 function notice(message, error=false) { $('#notice').hidden=false; $('#notice').classList.toggle('error',error); $('#notice').textContent=message; }
 function requireLogin() { if (me) return true; $('#auth-dialog').showModal(); return false; }
 function setTab(value) {
-  if (!['overview','lab','competition','watch','admin'].includes(value) || value==='admin' && me?.role!=='admin') value='overview';
+  if (!['overview','lab','ranked','competition','watch','admin'].includes(value) || value==='admin' && me?.role!=='admin') value='overview';
   tab=value;
   document.querySelectorAll('.view').forEach(el => el.hidden=el.id!==tab);
   document.querySelectorAll('[role=tab]').forEach(el => el.setAttribute('aria-selected', String(el.dataset.tab===tab)));
@@ -56,7 +56,29 @@ function submissionRows() {
   $('#submission-count').textContent=`${submissions.length} PHIÊN BẢN`;
   $('#submission-list').innerHTML=!me ? '<div class="empty">Đăng nhập để lưu chiến thuật và theo dõi bài nộp của bạn.</div>' : submissions.length ? submissions.map(s=>`<article class="submission"><div><strong>${escape(s.name)}</strong><small>${formatTime(s.created)} · ${escape(s.hash.slice(0,10))}</small></div>${badge(s.status)}<div class="submission-log">${escape(s.log || 'Bài đã được lưu. Chờ máy chạy bot tiếp nhận.')}</div><button class="text-link" data-source="${s.id}">Mở mã ↗</button></article>`).join('') : '<div class="empty">Chưa có bài nộp. Bắt đầu bằng một bot mẫu ở phía trên.</div>';
   const valid=submissions.filter(s=>s.status==='valid');
-  for (const id of ['#practice-a','#practice-b','#join-submission']) options(id,valid);
+  for (const id of ['#practice-a','#practice-b','#join-submission','#ranked-submission']) options(id,valid);
+}
+function renderRanked(data) {
+  $('#ranked-waiting').textContent=`${data.waiting} người đang tìm trận`;
+  const mine=data.mine;
+  $('#ranked-mine').textContent=mine ? `${mine.rating} Elo · ${mine.played} cặp đã đấu` : 'Đăng nhập để xem điểm của bạn.';
+  const active=data.series.find(series=>series.status==='running');
+  $('#ranked-form').hidden=Boolean(mine?.queued || active);
+  $('#ranked-cancel').hidden=!mine?.queued;
+  $('#ranked-queue').textContent=mine?.queued ? `Đang tìm đối thủ cho ${mine.queued.bot}. Bạn có thể rời trang; bot vẫn ở hàng chờ.` :
+    active ? [active.first_status,active.second_status].includes('failed') ? 'Một ván gặp sự cố hạ tầng. Ban tổ chức sẽ xử lý và chạy lại; chưa tính điểm.' :
+      `Đã ghép với ${active.a===me.id?active.b_name:active.a_name}. Hai ván đang chờ hoặc đang chạy trên server.` :
+    'Chọn bot hợp lệ để tìm một người chơi khác.';
+  $('#ranked-standings').innerHTML=data.leaderboard.length ? data.leaderboard.map((row,index)=>
+    `<tr><td class="rank">${index+1}</td><td>${escape(row.name)}<small>@${escape(row.username)}</small></td><td><strong>${row.rating}</strong></td><td>${row.played}</td><td>${row.wins} / ${row.draws} / ${row.losses}</td></tr>`).join('') :
+    '<tr><td colspan="5">Chưa có cặp trận xếp hạng hoàn thành.</td></tr>';
+  $('#ranked-series').innerHTML=data.series.length ? data.series.map(series=>{
+    const youAreA=series.a===me?.id;
+    const opponent=youAreA?series.b_name:series.a_name;
+    const yourPoints=series.a_points==null?'—':youAreA?series.a_points:2-series.a_points;
+    const delta=series.rating_change==null?'':(youAreA?series.rating_change:-series.rating_change);
+    return `<article class="series-card"><div><span class="eyebrow">${series.status==='done'?'ĐÃ KẾT THÚC':'ĐANG XỬ LÝ'}</span><h3>Bạn × ${escape(opponent)}</h3><p>${escape(youAreA?series.a_bot:series.b_bot)} / ${escape(youAreA?series.b_bot:series.a_bot)}</p><strong>${yourPoints} / 2 điểm ván${delta!==''?` · ${delta>=0?'+':''}${delta} Elo`:''}</strong></div><div class="series-actions"><button class="button" data-watch="${series.first_match}">Xem ván 1</button><button class="button" data-watch="${series.second_match}">Xem ván 2</button></div></article>`;
+  }).join('') : '<div class="empty">Chưa có cặp trận. Chọn bot hợp lệ để tìm đối thủ đầu tiên.</div>';
 }
 async function renderCompetition() {
   if (!selectedTournament) { $('#competition-info').innerHTML='<div class="empty">Chưa có giải đấu.</div>'; $('#join-form').hidden=true; $('#standings-body').innerHTML=''; return; }
@@ -144,6 +166,7 @@ async function refresh() {
     tournamentCards();
     if (me) submissions=(await api('/submissions')).items; else submissions=[];
     submissionRows(); matchDirectory();
+    if (tab==='ranked') renderRanked(await api('/ranked'));
     if (tab==='competition') await renderCompetition();
     if (tab==='watch') await updateWatched();
     if (tab==='admin'&&me?.role==='admin') await renderJobs();
@@ -186,6 +209,8 @@ $('#source').addEventListener('keydown',event=>{if(event.key==='Tab'){event.prev
 $('#source-file').addEventListener('change',()=>action(null,async()=>{const file=$('#source-file').files[0];if(!file)return;if(file.size>65536)throw new Error('File vượt quá 64 KiB.');$('#source').value=await file.text();$('#bot-name').value=file.name.replace(/\.py$/i,'');updateSize();}));
 $('#submit-form').addEventListener('submit',event=>{event.preventDefault();if(!requireLogin())return;action(event.submitter,async()=>{await api('/submissions',{name:$('#bot-name').value,source:$('#source').value.replace(/\r\n/g,'\n')});notice('Đã lưu phiên bản. Kết quả kiểm tra sẽ cập nhật trong danh sách bên dưới.');await refresh();});});
 $('#practice-form').addEventListener('submit',event=>{event.preventDefault();if(!requireLogin())return;action(event.submitter,async()=>{const result=await api('/practice',{p1:$('#practice-a').value,p2:$('#practice-b').value});notice('Đã xếp hai ván đổi màu vào hàng đợi.');setTab('watch');await toggleWatch(result.ids[0]);});});
+$('#ranked-form').addEventListener('submit',event=>{event.preventDefault();if(!requireLogin())return;action(event.submitter,async()=>{const result=await api('/ranked/queue',{submission_id:$('#ranked-submission').value});notice(result.status==='matched'?'Đã ghép đối thủ. Hai ván đổi màu được xếp vào hàng đợi.':'Đã vào hàng chờ. Hệ thống sẽ tự ghép khi có đối thủ.');await refresh();});});
+$('#ranked-cancel').addEventListener('click',event=>action(event.target,async()=>{const result=await api('/ranked/cancel',{});notice(result.cancelled?'Đã hủy tìm trận.':'Đối thủ vừa được ghép; cặp trận đã bắt đầu.');await refresh();}));
 $('#join-form').addEventListener('submit',event=>{event.preventDefault();if(!requireLogin())return;action(event.submitter,async()=>{await api(`/tournaments/${selectedTournament}/join`,{submission_id:$('#join-submission').value});notice('Đã lưu phiên bản thi đấu.');await refresh();});});
 $('#tournament-form').addEventListener('submit',event=>{event.preventDefault();action(event.submitter,async()=>{const data=Object.fromEntries(new FormData(event.target));data.rounds=Number(data.rounds);data.deadline=new Date(data.deadline).getTime()/1000;const result=await api('/admin/tournaments',data);adminTournament=selectedTournament=result.id;notice('Đã mở giải mới. Thí sinh có thể đăng ký bot hợp lệ.');await refresh();});});
 $('#freeze-button').addEventListener('click',event=>action(event.target,async()=>{await api(`/admin/tournaments/${adminTournament}/freeze`,{});notice('Đã khóa danh sách và mã băm của các bot.');await refresh();}));
@@ -199,5 +224,6 @@ $('#source').value="def choose_move(observation):\n    # Thay chiến thuật c�
 try { const sample=await fetch('../sdk/examples/first.py'); if(sample.ok){$('#source').value=await sample.text();$('#bot-name').value='Nước đầu tiên';updateSize();} } catch {}
 try {const result=await api('/me');me=result.user;csrf=result.csrf;}catch{}
 updateAccount();setTab(location.hash.slice(1)||'overview');
-setInterval(()=>{if(!document.hidden)refresh();},7000);
+function scheduleRefresh(){setTimeout(()=>{if(!document.hidden)refresh();scheduleRefresh();},tab==='ranked'||tab==='watch'?7000:20000);}
+scheduleRefresh();
 setInterval(()=>{if(document.hidden||tab!=='watch')return;for(const [id,item] of watched){if(item.playing){item.position=Math.min(item.position+1,item.states.length-1);if(item.position===item.states.length-1)item.playing=false;renderWatch(id);}}},650);

@@ -14,8 +14,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from .store import Store, Problem, ROOT, RULES_HASH, LIMITS, uid, now
 
-PUBLIC_FILES = {'index.html', 'main.js', 'style.css', 'rules.js', 'online.js', 'playhtml-session.js',
-                'lobby-presence.js', 'watch.html', 'watch.css', 'watch.js'}
+PUBLIC_FILES = {'rules.js'}
 
 
 def text(data, key, minimum=1, maximum=80):
@@ -75,9 +74,9 @@ def create_app(directory=None, origin=None, registration_code=None):
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'same-origin'
         response.headers['X-Frame-Options'] = 'SAMEORIGIN'
-        if request.path.startswith(('/api/', '/arena')):
+        if request.path == '/' or request.path.startswith(('/api/', '/arena')):
             response.headers['Cache-Control'] = 'no-store' if request.path.startswith('/api/') else 'no-cache'
-            response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+            response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
         return response
 
     @app.errorhandler(Problem)
@@ -228,6 +227,21 @@ def create_app(directory=None, origin=None, registration_code=None):
             ids = [store.create_match(db, a, b, user), store.create_match(db, b, a, user)]
         return jsonify(ids=ids), 201
 
+    @app.get('/api/ranked')
+    def ranked():
+        return jsonify(store.ranked_snapshot(g.user['id'] if g.user else None))
+
+    @app.post('/api/ranked/queue')
+    def ranked_queue():
+        user = auth()
+        store.rate('ranked:' + user, 20)
+        result = store.join_ranked(user, text(body(), 'submission_id', 24, 24))
+        return jsonify(result), 201
+
+    @app.post('/api/ranked/cancel')
+    def ranked_cancel():
+        return jsonify(cancelled=store.cancel_ranked(auth()))
+
     @app.get('/api/matches')
     def matches():
         tid = request.args.get('tournament')
@@ -304,7 +318,7 @@ def create_app(directory=None, origin=None, registration_code=None):
 
     @app.get('/')
     def home():
-        return send_from_directory(ROOT, 'index.html')
+        return send_from_directory(ROOT / 'arena', 'index.html')
 
     @app.get('/arena')
     @app.get('/arena/')

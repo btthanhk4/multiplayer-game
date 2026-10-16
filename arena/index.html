@@ -1,19 +1,105 @@
 <!doctype html>
 <html lang="vi">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#eeeae0"><title>Đấu trường lập trình — OTTv2</title><link rel="stylesheet" href="./arena.css"><script type="module" src="./arena.js"></script></head>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#eeeae0">
+  <base href="/arena/">
+  <title>Đấu trường Python — OTTv2</title>
+  <link rel="stylesheet" href="./arena.css">
+  <script type="module" src="./arena.js"></script>
+</head>
 <body>
-<header class="masthead"><a class="brand" href="../">ott<span>v2</span><sup>arena</sup></a><nav aria-label="Điều hướng chính"><a href="../">Chơi bàn cờ ↗</a><a href="./guide.html">Sổ tay Python</a><button id="account-button" class="small-button">Đăng nhập</button></nav></header>
-<main>
-  <section class="intro"><div><p class="eyebrow">CỜ CHIẾN THUẬT / ĐẤU TRƯỜNG LẬP TRÌNH</p><h1>Nước đi của bạn.<br><em>Trí tuệ trong từng dòng.</em></h1><p class="intro-copy">Viết một bot Python. Chọn chiến thuật. Để chín quân cờ kể câu chuyện của bạn trên đấu trường.</p><div class="hero-actions"><button class="button primary" data-tab="lab">Viết bot đầu tiên <span>↗</span></button><button class="button" data-tab="watch">Vào khán đài</button></div></div><aside class="manifesto"><span class="eyebrow">01 / NGÔN NGỮ CỦA CHIẾN THẮNG</span><div class="symbols"><span>Đ</span><span>L</span><span>K</span></div><p>Ba loại quân.<br>Vô vàn cách nghĩ.</p><div class="manifesto-foot"><span>PYTHON</span><span>9 × 9</span><span>ĐỔI MÀU / 2 VÁN</span></div></aside></section>
-  <div class="service-strip"><span id="service-status" role="status">Đang kết nối đấu trường…</span><span id="service-detail">Mỗi phiên bản là một chiến thuật mới.</span></div>
-  <div class="section-nav" role="tablist" aria-label="Khu vực đấu trường"><button role="tab" aria-selected="true" data-tab="overview">01 <span>Sảnh giải</span></button><button role="tab" aria-selected="false" data-tab="lab">02 <span>Xưởng bot</span></button><button role="tab" aria-selected="false" data-tab="competition">03 <span>Bảng điểm</span></button><button role="tab" aria-selected="false" data-tab="watch">04 <span>Khán đài</span></button><button role="tab" aria-selected="false" data-tab="admin" id="admin-tab" hidden>05 <span>Điều hành</span></button></div>
-  <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
-  <section id="overview" class="view" role="tabpanel"><div class="section-heading"><div><p class="eyebrow">MỖI GIẢI ĐẤU, MỘT BÀI TOÁN</p><h2>Chọn nơi thử sức.</h2></div><span id="tournament-count" class="caption"></span></div><div id="tournament-list" class="tournament-list"><div class="empty">Đang tải danh sách giải…</div></div><div class="onboarding"><article><span>01</span><h3>Bắt đầu từ một nước đi</h3><p>Tải bot mẫu, sửa hàm <code>choose_move</code> để chọn một nước hợp lệ.</p></article><article><span>02</span><h3>Thử trước khi ra sân</h3><p>Nộp bot, đọc kết quả kiểm tra rồi cho hai phiên bản đấu đổi màu.</p></article><article><span>03</span><h3>Chốt phiên bản của bạn</h3><p>Chọn bot đã hợp lệ trước hạn. Bài thi được giữ kín, kết quả có replay.</p></article></div></section>
-  <section id="lab" class="view" role="tabpanel" hidden><div class="section-heading"><div><p class="eyebrow">THỬ. QUAN SÁT. CẢI TIẾN.</p><h2>Xưởng chiến thuật.</h2></div><a class="text-link" href="./guide.html">Đọc giao thức bot ↗</a></div><div class="lab-layout"><form id="submit-form" class="editor-panel"><div class="editor-bar"><span>bot.py</span><label class="file-button">Mở file .py<input id="source-file" type="file" accept=".py,text/x-python" hidden></label></div><label for="source" class="sr-only">Mã nguồn Python</label><textarea id="source" spellcheck="false" autocapitalize="off" aria-describedby="source-hint"></textarea><div class="editor-bottom"><span id="source-hint">Python · Một file · Tối đa 64 KiB</span><span id="source-size">0 B</span></div><div class="submit-fields"><label>Tên phiên bản<input name="name" id="bot-name" required minlength="2" maxlength="50" placeholder="Ví dụ: Người gác v2"></label><button class="button primary" type="submit">Nộp kiểm tra ↗</button></div></form><aside class="lab-sidebar"><div class="paper-card"><p class="eyebrow">MỘT ĐIỂM KHỞI ĐẦU</p><h3>Mượn một chiến thuật.</h3><p>Các bot mẫu có thể tải về và sửa tự do.</p><button class="sample-button" data-sample="first">01 · Nước đầu tiên <span>↙</span></button><button class="sample-button" data-sample="hunter">02 · Thợ săn <span>↙</span></button><button class="sample-button" data-sample="guardian">03 · Người gác <span>↙</span></button></div><form id="practice-form" class="paper-card"><p class="eyebrow">PHÒNG LUYỆN / KHÔNG TÍNH ĐIỂM</p><h3>Phiên bản nào tốt hơn?</h3><label>Bot A<select id="practice-a" required></select></label><label>Bot B<select id="practice-b" required></select></label><button class="button" type="submit">Đấu hai ván đổi màu</button><p class="caption">Chọn hai bot đã hợp lệ của bạn. Trận tập và replay hiển thị công khai; mã nguồn giữ riêng tư.</p></form></aside></div><div class="section-heading minor"><h3>Những lần thử của bạn</h3><span id="submission-count" class="caption"></span></div><div id="submission-list" class="submission-list"></div></section>
-  <section id="competition" class="view" role="tabpanel" hidden><div class="section-heading"><div><p class="eyebrow">ĐIỂM SỐ ĐẾN TỪ NHỮNG NƯỚC ĐI</p><h2>Bảng thành tích.</h2></div><label class="select-label">Giải đấu<select id="competition-select"></select></label></div><div id="competition-info"></div><form id="join-form" class="join-panel"><label>Phiên bản bạn muốn thi đấu<select id="join-submission" required></select></label><button class="button primary" type="submit">Đăng ký / Đổi phiên bản</button><p id="entry-status" class="caption"></p></form><div class="table-scroll"><table><thead><tr><th>HẠNG</th><th>THÍ SINH / BOT</th><th>ĐIỂM CẶP</th><th>T / H / B</th><th>BUCHHOLZ</th><th>ĐIỂM VÁN</th></tr></thead><tbody id="standings-body"></tbody></table></div><p class="caption">Mỗi cặp gồm hai ván đổi màu. Cặp thắng / hòa / thua: 1 / 0,5 / 0 điểm. Đồng điểm sau các tiêu chí được đồng hạng.</p></section>
-  <section id="watch" class="view" role="tabpanel" hidden><div class="section-heading"><div><p class="eyebrow">ĐỨNG NGOÀI BÀN CỜ. NHÌN SÂU HƠN.</p><h2>Khán đài mở.</h2></div><span id="watch-count" class="caption">0 / 4 BÀN</span></div><div class="watch-layout"><aside class="match-directory"><label>Lọc trận<select id="match-filter"><option value="all">Tất cả</option><option value="running">Đang đấu</option><option value="done">Đã kết thúc</option><option value="queued">Đang chờ</option></select></label><div id="match-list"></div></aside><div id="watch-grid" class="watch-grid"><div class="empty">Chọn một ván ở bên trái để theo dõi hoặc xem lại.</div></div></div></section>
-  <section id="admin" class="view" role="tabpanel" hidden><div class="section-heading"><div><p class="eyebrow">BAN TỔ CHỨC</p><h2>Giữ nhịp đấu trường.</h2></div></div><div class="admin-layout"><form id="tournament-form" class="paper-card"><h3>Mở một giải mới</h3><label>Tên giải<input name="name" required minlength="3" maxlength="80" placeholder="OTTv2 · Giải khai màn"></label><label>Thể thức<select name="format"><option value="swiss">Swiss theo điểm · tối đa 500 bot</option><option value="round_robin">Vòng tròn · tối đa 32 bot</option></select></label><label>Số vòng Swiss<input name="rounds" type="number" min="1" max="20" value="5" required></label><label>Hạn đăng ký/chọn bot (giờ máy bạn)<input name="deadline" id="deadline" type="datetime-local" required></label><button class="button primary">Tạo giải</button></form><div><div class="paper-card"><h3>Điều khiển giải</h3><label>Giải đấu<select id="admin-tournament"></select></label><p id="admin-tournament-state" class="caption"></p><div class="action-row"><button id="freeze-button" class="button">Khóa danh sách</button><button id="next-round-button" class="button primary">Mở vòng / Hoàn tất giải</button></div><p class="caption">Chỉ khóa sau hạn. Vòng tiếp theo mở khi hai ván của mọi cặp đã kết thúc. Không sửa mã bot sau khóa.</p></div><div class="paper-card"><h3>Hàng đợi xử lý</h3><div id="job-list"></div></div></div></div><details class="audit-panel"><summary>Nhật ký điều hành</summary><div id="audit-list"></div></details></section>
-</main>
-<footer><span>OTT<span class="red">v2</span> / ARENA</span><span>Một nước đi nhỏ. Một ý tưởng lớn.</span><a href="./guide.html">Luật & giao thức ↗</a></footer>
-<dialog id="auth-dialog"><form id="auth-form"><div class="dialog-top"><span class="eyebrow">CHÀO MỪNG TỚI ĐẤU TRƯỜNG</span><button type="button" class="close-button" id="close-auth" aria-label="Đóng">×</button></div><h2 id="auth-title">Trở lại bàn cờ.</h2><label>Tên đăng nhập<input name="username" autocomplete="username" required minlength="3" maxlength="32" pattern="[a-z0-9_]{3,32}"></label><label>Mật khẩu<input name="password" type="password" autocomplete="current-password" required maxlength="128"></label><div id="register-fields" hidden><label>Tên hiển thị<input name="name" minlength="2" maxlength="40"></label><label>Mã tham gia (nếu BTC yêu cầu)<input name="invite" autocomplete="off"></label><p class="caption">Mật khẩu tối thiểu 12 ký tự. Mã bot riêng tư; tên, trận đấu và replay được công khai. V1 chưa có tự khôi phục mật khẩu: liên hệ BTC.</p></div><p id="auth-error" class="error-text" role="alert"></p><button class="button primary" id="auth-submit">Đăng nhập</button><button type="button" id="toggle-auth" class="text-link">Chưa có tài khoản? Đăng ký</button></form></dialog>
-</body></html>
+  <header class="masthead">
+    <a class="brand" href="/">ott<span>v2</span><sup>arena</sup></a>
+    <nav aria-label="Điều hướng chính">
+      <button class="top-link" data-tab="lab">Viết bot</button>
+      <button class="top-link" data-tab="ranked">Đấu xếp hạng</button>
+      <a href="./guide.html">Luật & giao thức</a>
+      <button id="account-button" class="small-button">Đăng nhập</button>
+    </nav>
+  </header>
+  <main>
+    <section class="compact-hero">
+      <div>
+        <p class="eyebrow">OTTv2 / ĐẤU TRƯỜNG LẬP TRÌNH</p>
+        <h1>Viết bot. <em>Thử sức.</em> Lên hạng.</h1>
+        <p>Chọn nước đi bằng Python trên bàn cờ 9×9. Bot của bạn đấu hai ván đổi màu với người chơi khác; mọi kết quả đều có thể xem lại.</p>
+      </div>
+      <div class="hero-actions">
+        <button class="button primary" data-tab="lab">Bắt đầu viết bot ↗</button>
+        <button class="button" data-tab="ranked">Tìm đối thủ</button>
+      </div>
+    </section>
+    <div class="service-strip"><span id="service-status" role="status">Đang kết nối đấu trường…</span><span id="service-detail">Đang tải hàng đợi</span></div>
+    <div class="section-nav" role="tablist" aria-label="Khu vực đấu trường">
+      <button role="tab" aria-selected="true" data-tab="overview">01 <span>Bắt đầu</span></button>
+      <button role="tab" aria-selected="false" data-tab="lab">02 <span>Viết & kiểm tra</span></button>
+      <button role="tab" aria-selected="false" data-tab="ranked">03 <span>Đấu xếp hạng</span></button>
+      <button role="tab" aria-selected="false" data-tab="competition">04 <span>Giải đấu</span></button>
+      <button role="tab" aria-selected="false" data-tab="watch">05 <span>Xem trận</span></button>
+      <button role="tab" aria-selected="false" data-tab="admin" id="admin-tab" hidden>06 <span>Điều hành</span></button>
+    </div>
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+
+    <section id="overview" class="view" role="tabpanel">
+      <div class="section-heading"><div><p class="eyebrow">LỘ TRÌNH THI ĐẤU</p><h2>Ba bước để vào trận.</h2></div></div>
+      <div class="route-cards">
+        <article><span>01 / TẠO BOT</span><h3>Viết một hàm Python</h3><p>Dùng bot mẫu hoặc mở file .py. Hàm <code>choose_move</code> trả một nước trong danh sách hợp lệ.</p><button class="button" data-tab="lab">Mở xưởng bot ↗</button></article>
+        <article><span>02 / KIỂM TRA</span><h3>Nộp và xem kết quả</h3><p>Hệ thống chạy bot trong môi trường riêng. Bản hợp lệ mới được đưa vào đấu tập, xếp hạng hoặc giải.</p><button class="button" data-tab="lab">Xem các phiên bản ↗</button></article>
+        <article><span>03 / THI ĐẤU</span><h3>Ghép người, đổi màu</h3><p>Chọn bot đã hợp lệ, tìm đối thủ. Hai ván đổi màu quyết định điểm xếp hạng.</p><button class="button primary" data-tab="ranked">Tìm đối thủ ↗</button></article>
+      </div>
+      <div class="section-heading minor"><div><p class="eyebrow">GIẢI DO BAN TỔ CHỨC MỞ</p><h2>Giải đang có</h2></div><span id="tournament-count" class="caption"></span></div>
+      <div id="tournament-list" class="tournament-list"><div class="empty">Đang tải danh sách giải…</div></div>
+    </section>
+
+    <section id="lab" class="view" role="tabpanel" hidden>
+      <div class="section-heading"><div><p class="eyebrow">BƯỚC 01 / VIẾT & KIỂM TRA</p><h2>Xưởng bot Python</h2><p class="caption">Nộp mỗi phiên bản một lần. Sau khi hiện “Hợp lệ”, bạn có thể tìm đối thủ hoặc đăng ký giải.</p></div><a class="text-link" href="./guide.html">Đọc giao thức bot ↗</a></div>
+      <div class="lab-layout">
+        <form id="submit-form" class="editor-panel">
+          <div class="editor-bar"><span>bot.py</span><label class="file-button">Mở file .py<input id="source-file" type="file" accept=".py,text/x-python" hidden></label></div>
+          <label for="source" class="sr-only">Mã nguồn Python</label><textarea id="source" spellcheck="false" autocapitalize="off" aria-describedby="source-hint"></textarea>
+          <div class="editor-bottom"><span id="source-hint">Python · Một file · Tối đa 64 KiB</span><span id="source-size">0 B</span></div>
+          <div class="submit-fields"><label>Tên phiên bản<input name="name" id="bot-name" required minlength="2" maxlength="50" placeholder="Ví dụ: Người gác v2"></label><button class="button primary" type="submit">Nộp để kiểm tra ↗</button></div>
+        </form>
+        <aside class="lab-sidebar">
+          <div class="paper-card"><p class="eyebrow">BẮT ĐẦU NHANH</p><h3>Chọn một bot mẫu</h3><p>Chạy thử nguyên bản hoặc sửa hàm <code>choose_move</code> theo chiến thuật của bạn.</p><button class="sample-button" data-sample="first">01 · Nước đầu tiên <span>↙</span></button><button class="sample-button" data-sample="hunter">02 · Thợ săn <span>↙</span></button><button class="sample-button" data-sample="guardian">03 · Người gác <span>↙</span></button></div>
+          <form id="practice-form" class="paper-card"><p class="eyebrow">ĐẤU TẬP / KHÔNG TÍNH ĐIỂM</p><h3>So hai phiên bản của bạn</h3><label>Bot A<select id="practice-a" required></select></label><label>Bot B<select id="practice-b" required></select></label><button class="button" type="submit">Đấu hai ván đổi màu</button><p class="caption">Chỉ dùng bot hợp lệ của chính bạn. Replay được công khai; mã nguồn vẫn riêng tư.</p></form>
+        </aside>
+      </div>
+      <div class="section-heading minor"><h3>Các phiên bản đã nộp</h3><span id="submission-count" class="caption"></span></div>
+      <div id="submission-list" class="submission-list"></div>
+    </section>
+
+    <section id="ranked" class="view" role="tabpanel" hidden>
+      <div class="section-heading"><div><p class="eyebrow">BƯỚC 02 / TÌM ĐỐI THỦ</p><h2>Đấu xếp hạng</h2><p class="caption">Mỗi cặp đấu hai ván đổi màu. Điểm Elo cập nhật sau khi cả hai ván kết thúc.</p></div><span id="ranked-waiting" class="badge wait">Đang tải…</span></div>
+      <div class="ranked-layout">
+        <div class="paper-card ranked-entry"><h3>Đưa bot vào hàng chờ</h3><p id="ranked-mine" class="rating-summary">Đăng nhập để xem điểm của bạn.</p><form id="ranked-form"><label>Chọn phiên bản hợp lệ<select id="ranked-submission" required></select></label><button class="button primary" type="submit">Tìm đối thủ ↗</button></form><div id="ranked-queue" class="queue-status" role="status">Chọn bot đã được kiểm tra để bắt đầu.</div><button id="ranked-cancel" class="button" hidden>Hủy tìm trận</button><p class="caption">Hệ thống ưu tiên người có điểm gần bạn nhất trong hàng chờ. Không ghép hai bot cùng tài khoản. Khi ghép xong, bot tự thi đấu trên server.</p></div>
+        <div class="paper-card ranked-board"><p class="eyebrow">BẢNG XẾP HẠNG</p><h3>Những chiến thuật dẫn đầu</h3><div class="table-scroll"><table><thead><tr><th>HẠNG</th><th>NGƯỜI CHƠI</th><th>ELO</th><th>CẶP TRẬN</th><th>THẮNG / HÒA / THUA</th></tr></thead><tbody id="ranked-standings"></tbody></table></div></div>
+      </div>
+      <div class="section-heading minor"><h3>Cặp trận của bạn</h3><span class="caption">Chọn một ván để xem trực tiếp hoặc phát lại</span></div><div id="ranked-series" class="ranked-series"></div>
+      <p class="caption">Mỗi người bắt đầu ở 1000 Elo. Hai ván được tính như một cặp: tổng điểm ván 0–2, thắng 1 / hòa 0,5 / thua 0 mỗi ván. Elo thay đổi theo sức mạnh đối thủ, tối đa khoảng 16 điểm khi hai người cùng 1000 Elo. Điểm giải đấu được tính riêng.</p>
+    </section>
+
+    <section id="competition" class="view" role="tabpanel" hidden>
+      <div class="section-heading"><div><p class="eyebrow">BƯỚC 03 / GIẢI CHÍNH THỨC</p><h2>Giải đấu & bảng điểm</h2><p class="caption">Chọn một bot hợp lệ trước hạn. Ban tổ chức khóa bài và mở từng vòng đấu.</p></div><label class="select-label">Giải đấu<select id="competition-select"></select></label></div>
+      <div id="competition-info"></div>
+      <form id="join-form" class="join-panel"><label>Phiên bản bạn muốn thi đấu<select id="join-submission" required></select></label><button class="button primary" type="submit">Đăng ký / Đổi phiên bản</button><p id="entry-status" class="caption"></p></form>
+      <div class="table-scroll"><table><thead><tr><th>HẠNG</th><th>THÍ SINH / BOT</th><th>ĐIỂM CẶP</th><th>T / H / B</th><th>BUCHHOLZ</th><th>ĐIỂM VÁN</th></tr></thead><tbody id="standings-body"></tbody></table></div>
+      <p class="caption">Mỗi cặp gồm hai ván đổi màu; thắng cặp được 1 điểm, hòa 0,5. Đồng điểm xét Buchholz rồi điểm ván. Bảng Elo ở mục xếp hạng độc lập với điểm giải.</p>
+    </section>
+
+    <section id="watch" class="view" role="tabpanel" hidden>
+      <div class="section-heading"><div><p class="eyebrow">XEM TRỰC TIẾP & REPLAY</p><h2>Khán đài</h2></div><span id="watch-count" class="caption">0 / 4 BÀN</span></div>
+      <div class="watch-layout"><aside class="match-directory"><label>Lọc trận<select id="match-filter"><option value="all">Tất cả</option><option value="running">Đang đấu</option><option value="done">Đã kết thúc</option><option value="queued">Đang chờ</option></select></label><div id="match-list"></div></aside><div id="watch-grid" class="watch-grid"><div class="empty">Chọn một ván ở bên trái để theo dõi hoặc xem lại.</div></div></div>
+    </section>
+
+    <section id="admin" class="view" role="tabpanel" hidden>
+      <div class="section-heading"><div><p class="eyebrow">BAN TỔ CHỨC</p><h2>Điều hành giải</h2></div></div>
+      <div class="admin-layout"><form id="tournament-form" class="paper-card"><h3>Mở giải mới</h3><label>Tên giải<input name="name" required minlength="3" maxlength="80" placeholder="OTTv2 · Giải khai màn"></label><label>Thể thức<select name="format"><option value="swiss">Swiss theo điểm · tối đa 500 bot</option><option value="round_robin">Vòng tròn · tối đa 32 bot</option></select></label><label>Số vòng Swiss<input name="rounds" type="number" min="1" max="20" value="5" required></label><label>Hạn đăng ký/chọn bot (giờ máy bạn)<input name="deadline" id="deadline" type="datetime-local" required></label><button class="button primary">Tạo giải</button></form><div><div class="paper-card"><h3>Điều khiển giải</h3><label>Giải đấu<select id="admin-tournament"></select></label><p id="admin-tournament-state" class="caption"></p><div class="action-row"><button id="freeze-button" class="button">Khóa danh sách</button><button id="next-round-button" class="button primary">Mở vòng / Hoàn tất giải</button></div><p class="caption">Chỉ khóa sau hạn. Vòng tiếp theo mở khi hai ván của mọi cặp đã xong.</p></div><div class="paper-card"><h3>Hàng đợi xử lý</h3><div id="job-list"></div></div></div></div><details class="audit-panel"><summary>Nhật ký điều hành</summary><div id="audit-list"></div></details>
+    </section>
+  </main>
+  <footer><span>OTT<span class="red">v2</span> / ARENA</span><span>Bot của bạn. Nước đi của bạn.</span><a href="./guide.html">Luật & giao thức ↗</a></footer>
+  <dialog id="auth-dialog"><form id="auth-form"><div class="dialog-top"><span class="eyebrow">TÀI KHOẢN ĐẤU TRƯỜNG</span><button type="button" class="close-button" id="close-auth" aria-label="Đóng">×</button></div><h2 id="auth-title">Đăng nhập để lưu bot.</h2><label>Tên đăng nhập<input name="username" autocomplete="username" required minlength="3" maxlength="32" pattern="[a-z0-9_]{3,32}"></label><label>Mật khẩu<input name="password" type="password" autocomplete="current-password" required maxlength="128"></label><div id="register-fields" hidden><label>Tên hiển thị<input name="name" minlength="2" maxlength="40"></label><label>Mã tham gia do BTC cung cấp<input name="invite" autocomplete="off"></label><p class="caption">Mật khẩu tối thiểu 12 ký tự. Mã nguồn bot riêng tư; tên và kết quả thi đấu công khai.</p></div><p id="auth-error" class="error-text" role="alert"></p><button class="button primary" id="auth-submit">Đăng nhập</button><button type="button" id="toggle-auth" class="text-link">Chưa có tài khoản? Đăng ký</button></form></dialog>
+</body>
+</html>

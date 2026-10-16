@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from arena_backend.app import create_app
-from arena_backend.store import Store, ROOT, RULES_HASH, LIMITS, Problem, uid, now
+from arena_backend.store import Store, ROOT, RULES_HASH, LIMITS, Problem, uid, now, swiss_pairs
 from arena_backend.runner import Worker, Executor, Referee, observation, checked_move, BotFault, InfrastructureError
 
 
@@ -78,6 +78,12 @@ class ArenaTest(unittest.TestCase):
         response=self.client.get('/arena/')
         self.assertEqual(response.status_code,200)
         response.close()
+        response=self.client.get('/')
+        self.assertEqual(response.status_code,200)
+        self.assertIn(b'id="ranked"',response.data)
+        response.close()
+        self.assertEqual(self.client.get('/index.html').status_code,404)
+        self.assertEqual(self.client.get('/main.js').status_code,404)
         self.post('/logout',{})
         self.assertIsNone(self.client.get('/api/me').json['user'])
         self.assertEqual(self.post('/login',{'username':'alice','password':'incorrect'}).status_code,401)
@@ -226,6 +232,96 @@ class ArenaTest(unittest.TestCase):
             row=db.execute('SELECT * FROM matches WHERE id=?',(mid,)).fetchone()
             self.assertEqual(row['status'],'failed')
             self.assertIsNone(row['winner'])
+
+    def test_ranked_queue_swaps_colors_and_settles_once(self):
+        a,b=self.user('alice'),self.user('bob')
+        sa,sb=self.valid(a),self.valid(b)
+        self.assertEqual(self.store.join_ranked(a,sa)['status'],'queued')
+        with self.assertRaises(Problem): self.store.join_ranked(a,sa)
+        result=self.store.join_ranked(b,sb)
+        self.assertEqual(result['status'],'matched')
+        self.assertEqual(len(result['matches']),2)
+        with self.assertRaises(Problem): self.store.join_ranked(a,sa)
+        with self.store.connect() as db:
+            games=db.execute('SELECT p1,p2 FROM matches WHERE id IN (?,?) ORDER BY created,id',
+                             result['matches']).fetchall()
+            self.assertEqual({(row['p1'],row['p2']) for row in games},{(sa,sb),(sb,sa)})
+        first=self.store.claim('test','samples')
+        with self.store.connect() as db:
+            first_p1=db.execute('SELECT p1 FROM matches WHERE id=?',(first['ref'],)).fetchone()[0]
+        self.assertTrue(self.store.finish(first,{'winner':'p1' if first_p1==sa else 'p2','reason':'goal'}))
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT rating FROM ratings WHERE user_id=?',(a,)).fetchone()[0],1000)
+        second=self.store.claim('test','samples')
+        with self.store.connect() as db:
+            second_p1=db.execute('SELECT p1 FROM matches WHERE id=?',(second['ref'],)).fetchone()[0]
+        self.assertTrue(self.store.finish(second,{'winner':'p1' if second_p1==sa else 'p2','reason':'goal'}))
+        self.assertFalse(self.store.finish(second,{'winner':'p1','reason':'goal'}))
+        with self.store.connect() as db:
+            series=db.execute('SELECT * FROM ranked_series WHERE id=?',(result['series_id'],)).fetchone()
+            self.assertEqual((series['status'],series['a_points'],series['rating_change']),('done',2,16))
+            self.assertEqual(db.execute('SELECT rating,played,wins FROM ratings WHERE user_id=?',(a,)).fetchone()[:],(1016,1,1))
+            self.assertEqual(db.execute('SELECT rating,played,losses FROM ratings WHERE user_id=?',(b,)).fetchone()[:],(984,1,1))
+
+    def test_ranked_cancel_and_split_results_draw(self):
+        a,b=self.user('alice'),self.user('bob')
+        sa,sb=self.valid(a),self.valid(b)
+        self.store.join_ranked(a,sa)
+        self.assertTrue(self.store.cancel_ranked(a))
+        self.assertFalse(self.store.cancel_ranked(a))
+        self.store.join_ranked(a,sa)
+        series=self.store.join_ranked(b,sb)
+        self.assertFalse(self.store.cancel_ranked(a))
+        first=self.store.claim('test','samples')
+        self.store.finish(first,{'winner':'p1','reason':'goal'})
+        second=self.store.claim('test','samples')
+        self.store.finish(second,{'winner':'p1','reason':'goal'})
+        with self.store.connect() as db:
+            row=db.execute('SELECT a_points,rating_change FROM ranked_series WHERE id=?',(series['series_id'],)).fetchone()
+            self.assertEqual(tuple(row),(1,0))
+            self.assertEqual([r['rating'] for r in db.execute('SELECT rating FROM ratings ORDER BY user_id')],[1000,1000])
+
+    def test_ranked_repeat_pair_has_smaller_rating_change(self):
+        a,b=self.user('alice'),self.user('bob')
+        sa,sb=self.valid(a),self.valid(b)
+        changes=[]
+        for _ in range(2):
+            self.store.join_ranked(a,sa)
+            series=self.store.join_ranked(b,sb)
+            for turn in range(2):
+                job=self.store.claim('test','samples')
+                with self.store.connect() as db:
+                    p1=db.execute('SELECT p1 FROM matches WHERE id=?',(job['ref'],)).fetchone()[0]
+                self.store.finish(job,{'winner':'p1' if p1==sa else 'p2','reason':'goal'})
+            with self.store.connect() as db:
+                changes.append(db.execute('SELECT rating_change FROM ranked_series WHERE id=?',
+                                          (series['series_id'],)).fetchone()[0])
+        self.assertEqual(changes[0],16)
+        self.assertLess(changes[1],changes[0])
+
+    def test_ranked_pair_runs_both_games_and_replays(self):
+        a,b=self.user('alice'),self.user('bob')
+        sa,sb=self.valid(a),self.valid(b)
+        self.store.join_ranked(a,sa)
+        series=self.store.join_ranked(b,sb)
+        worker=Worker(self.store,Executor('samples'))
+        self.assertTrue(worker.run_once())
+        self.assertTrue(worker.run_once())
+        with self.store.connect() as db:
+            row=db.execute('SELECT status,a_points,rating_change FROM ranked_series WHERE id=?',
+                           (series['series_id'],)).fetchone()
+            self.assertEqual(row['status'],'done')
+            self.assertEqual(db.execute('SELECT SUM(played) FROM ratings').fetchone()[0],2)
+            games=db.execute('SELECT status,replay FROM matches WHERE id IN (?,?)',series['matches']).fetchall()
+            self.assertTrue(all(game['status']=='done' and json.loads(game['replay'])['moves'] for game in games))
+
+    def test_swiss_pairing_swaps_to_avoid_rematch_without_large_score_gap(self):
+        standings=[{'user_id':str(i),'points':4-i//2} for i in range(6)]
+        history={frozenset(('0','1'))}
+        pairs=swiss_pairs(standings,history)
+        self.assertEqual({user for pair in pairs for user in pair},{str(i) for i in range(6)})
+        self.assertTrue(all(frozenset(pair) not in history for pair in pairs))
+        self.assertLessEqual(sum(abs(standings[int(a)]['points']-standings[int(b)]['points']) for a,b in pairs),2)
 
 
 if __name__=='__main__': unittest.main()

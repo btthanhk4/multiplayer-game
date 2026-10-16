@@ -27,6 +27,34 @@ def now():
     return time.time()
 
 
+def swiss_pairs(standings, history):
+    """Pair nearby scores, then remove repeat opponents with local pair swaps."""
+    users = [row['user_id'] for row in standings]
+    points = {row['user_id']: row['points'] for row in standings}
+    positions = {user: index for index, user in enumerate(users)}
+    pairs = [(users[i], users[i+1]) for i in range(0, len(users), 2)]
+
+    def cost(a, b):
+        return (1000000 if frozenset((a, b)) in history else 0) + \
+               round(abs(points[a]-points[b])*1000) + abs(positions[a]-positions[b])
+
+    for _ in range(4):
+        changed = False
+        for i in range(len(pairs)):
+            for j in range(i+1, len(pairs)):
+                a, b = pairs[i]
+                c, d = pairs[j]
+                before = cost(a, b) + cost(c, d)
+                alternatives = [((a,c),(b,d)), ((a,d),(b,c))]
+                best = min(alternatives, key=lambda candidate: sum(cost(*pair) for pair in candidate))
+                if sum(cost(*pair) for pair in best) < before:
+                    pairs[i], pairs[j] = best
+                    changed = True
+        if not changed:
+            break
+    return pairs
+
+
 class Store:
     def __init__(self, directory):
         self.directory = Path(directory).resolve()
@@ -75,6 +103,23 @@ class Store:
             CREATE TABLE IF NOT EXISTS audit (
                 id INTEGER PRIMARY KEY, actor TEXT, action TEXT NOT NULL, detail TEXT NOT NULL, created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS rate_limits (key TEXT PRIMARY KEY, start REAL NOT NULL, count INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS ratings (
+                user_id TEXT PRIMARY KEY REFERENCES users(id), rating INTEGER NOT NULL DEFAULT 1000,
+                played INTEGER NOT NULL DEFAULT 0, wins INTEGER NOT NULL DEFAULT 0,
+                draws INTEGER NOT NULL DEFAULT 0, losses INTEGER NOT NULL DEFAULT 0);
+            CREATE INDEX IF NOT EXISTS ratings_order ON ratings(rating DESC,played DESC);
+            CREATE TABLE IF NOT EXISTS ranked_queue (
+                user_id TEXT PRIMARY KEY REFERENCES users(id),
+                submission_id TEXT NOT NULL REFERENCES submissions(id), joined REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS ranked_series (
+                id TEXT PRIMARY KEY, a TEXT NOT NULL REFERENCES users(id), b TEXT NOT NULL REFERENCES users(id),
+                a_submission TEXT NOT NULL REFERENCES submissions(id),
+                b_submission TEXT NOT NULL REFERENCES submissions(id),
+                first_match TEXT REFERENCES matches(id), second_match TEXT REFERENCES matches(id),
+                status TEXT NOT NULL DEFAULT 'running', a_points REAL, rating_change INTEGER,
+                created REAL NOT NULL, finished REAL);
+            CREATE INDEX IF NOT EXISTS ranked_series_a ON ranked_series(a,created);
+            CREATE INDEX IF NOT EXISTS ranked_series_b ON ranked_series(b,created);
             ''')
 
     @contextmanager
@@ -126,6 +171,108 @@ class Store:
             self.job(db, 'validate', sid)
             self.audit(db, user, 'submission.created', {'id': sid})
         return sid
+
+    def ranked_snapshot(self, user=None):
+        with self.connect() as db:
+            waiting = db.execute('SELECT COUNT(*) FROM ranked_queue').fetchone()[0]
+            leaders = db.execute('SELECT u.name,u.username,r.rating,r.played,r.wins,r.draws,r.losses '
+                                 'FROM ratings r JOIN users u ON u.id=r.user_id '
+                                 'WHERE r.played>0 ORDER BY r.rating DESC,r.played DESC,u.id LIMIT 30').fetchall()
+            mine = None
+            series = []
+            if user:
+                rating = db.execute('SELECT * FROM ratings WHERE user_id=?', (user,)).fetchone()
+                queued = db.execute('SELECT q.submission_id,s.name bot,q.joined FROM ranked_queue q '
+                                    'JOIN submissions s ON s.id=q.submission_id WHERE q.user_id=?', (user,)).fetchone()
+                mine = {'rating': rating['rating'] if rating else 1000,
+                        'played': rating['played'] if rating else 0,
+                        'queued': dict(queued) if queued else None}
+                rows = db.execute('SELECT rs.*,ua.name a_name,ub.name b_name,sa.name a_bot,sb.name b_bot, '
+                                  'm1.status first_status,m2.status second_status '
+                                  'FROM ranked_series rs JOIN users ua ON ua.id=rs.a JOIN users ub ON ub.id=rs.b '
+                                  'JOIN submissions sa ON sa.id=rs.a_submission '
+                                  'JOIN submissions sb ON sb.id=rs.b_submission '
+                                  'LEFT JOIN matches m1 ON m1.id=rs.first_match '
+                                  'LEFT JOIN matches m2 ON m2.id=rs.second_match '
+                                  'WHERE rs.a=? OR rs.b=? ORDER BY rs.created DESC LIMIT 10', (user,user)).fetchall()
+                series = [dict(row) for row in rows]
+        return {'waiting': waiting, 'leaderboard': [dict(row) for row in leaders],
+                'mine': mine, 'series': series}
+
+    def join_ranked(self, user, sid):
+        with self.connect(True) as db:
+            submission = db.execute("SELECT 1 FROM submissions WHERE id=? AND user_id=? AND status='valid'",
+                                    (sid,user)).fetchone()
+            if not submission:
+                raise Problem('Chỉ được ghép trận với bot hợp lệ của bạn.')
+            if db.execute('SELECT 1 FROM ranked_queue WHERE user_id=?', (user,)).fetchone():
+                raise Problem('Bạn đã ở hàng chờ. Hủy tìm trận trước khi chọn bot khác.', 409)
+            if db.execute("SELECT 1 FROM ranked_series WHERE status='running' AND (a=? OR b=?)",
+                          (user,user)).fetchone():
+                raise Problem('Bạn đang có cặp trận xếp hạng chưa hoàn tất.', 409)
+            db.execute('INSERT OR IGNORE INTO ratings(user_id) VALUES(?)', (user,))
+            rating = db.execute('SELECT rating FROM ratings WHERE user_id=?', (user,)).fetchone()[0]
+            opponent = db.execute('SELECT q.user_id,q.submission_id FROM ranked_queue q '
+                                  'JOIN ratings r ON r.user_id=q.user_id '
+                                  'WHERE q.user_id!=? AND NOT EXISTS '
+                                  '(SELECT 1 FROM ranked_series rs WHERE rs.status=\'running\' '
+                                  'AND (rs.a=q.user_id OR rs.b=q.user_id)) '
+                                  'ORDER BY (SELECT COUNT(*) FROM ranked_series recent WHERE recent.status=\'done\' '
+                                  'AND recent.finished>? AND ((recent.a=q.user_id AND recent.b=?) '
+                                  'OR (recent.b=q.user_id AND recent.a=?))) ASC, '
+                                  'ABS(r.rating-?) ASC,q.joined ASC,q.user_id ASC LIMIT 1',
+                                  (user,now()-86400,user,user,rating)).fetchone()
+            if not opponent:
+                db.execute('INSERT INTO ranked_queue VALUES(?,?,?)', (user,sid,now()))
+                self.audit(db,user,'ranked.queued',{'submission':sid})
+                return {'status':'queued'}
+            db.execute('DELETE FROM ranked_queue WHERE user_id=?', (opponent['user_id'],))
+            series_id = uid()
+            db.execute('INSERT INTO ranked_series(id,a,b,a_submission,b_submission,created) '
+                       'VALUES(?,?,?,?,?,?)',
+                       (series_id,opponent['user_id'],user,opponent['submission_id'],sid,now()))
+            first = self.create_match(db,opponent['submission_id'],sid)
+            second = self.create_match(db,sid,opponent['submission_id'])
+            db.execute('UPDATE ranked_series SET first_match=?,second_match=? WHERE id=?',
+                       (first,second,series_id))
+            self.audit(db,user,'ranked.matched',{'series':series_id,'opponent':opponent['user_id']})
+            return {'status':'matched','series_id':series_id,'matches':[first,second]}
+
+    def cancel_ranked(self, user):
+        with self.connect(True) as db:
+            removed = db.execute('DELETE FROM ranked_queue WHERE user_id=?', (user,)).rowcount
+            if removed:
+                self.audit(db,user,'ranked.cancelled',{})
+            return bool(removed)
+
+    @staticmethod
+    def settle_ranked(db, match_id):
+        series = db.execute("SELECT * FROM ranked_series WHERE status='running' "
+                            'AND (first_match=? OR second_match=?)', (match_id,match_id)).fetchone()
+        if not series:
+            return
+        games = db.execute('SELECT id,p1,winner,status FROM matches WHERE id IN (?,?)',
+                           (series['first_match'],series['second_match'])).fetchall()
+        if len(games)!=2 or any(game['status']!='done' for game in games):
+            return
+        a_points = sum(.5 if game['winner']=='draw' else
+                       1 if (game['winner']=='p1') == (game['p1']==series['a_submission']) else 0
+                       for game in games)
+        ra = db.execute('SELECT rating FROM ratings WHERE user_id=?', (series['a'],)).fetchone()[0]
+        rb = db.execute('SELECT rating FROM ratings WHERE user_id=?', (series['b'],)).fetchone()[0]
+        expected = 1/(1+10**((rb-ra)/400))
+        recent = db.execute("SELECT COUNT(*) FROM ranked_series WHERE status='done' AND finished>? "
+                            'AND ((a=? AND b=?) OR (a=? AND b=?))',
+                            (now()-86400,series['a'],series['b'],series['b'],series['a'])).fetchone()[0]
+        change = round(max(8,32//(recent+1))*(a_points/2-expected))
+        result = 'draw' if a_points==1 else 'a' if a_points>1 else 'b'
+        for user,delta,won in ((series['a'],change,result=='a'),
+                               (series['b'],-change,result=='b')):
+            db.execute('UPDATE ratings SET rating=rating+?,played=played+1,wins=wins+?,draws=draws+?,losses=losses+? '
+                       'WHERE user_id=?', (delta,int(won),int(result=='draw'),int(result!='draw' and not won),user))
+        db.execute("UPDATE ranked_series SET status='done',a_points=?,rating_change=?,finished=? WHERE id=?",
+                   (a_points,change,now(),series['id']))
+        Store.audit(db,'runner','ranked.settled',{'series':series['id'],'a_points':a_points,'change':change})
 
     def join(self, user, tid, sid):
         with self.connect(True) as db:
@@ -239,12 +386,8 @@ class Store:
                     waiting.remove(bye)
                     pairs.append((bye, None))
                 history = {frozenset((p['a'], p['b'])) for p in db.execute(
-                    'SELECT a,b FROM pairings WHERE tournament_id=?', (tid,))}
-                # Deterministic Swiss-style pairing: closest score first, avoid rematches where possible.
-                while waiting:
-                    a = waiting.pop(0)
-                    i = next((i for i, b in enumerate(waiting) if frozenset((a, b)) not in history), 0)
-                    pairs.append((a, waiting.pop(i)))
+                    'SELECT a,b FROM pairings WHERE tournament_id=? AND b IS NOT NULL', (tid,))}
+                pairs.extend(swiss_pairs([s for s in standings if s['user_id'] in waiting], history))
             for a, b in pairs:
                 if a is None:
                     a, b = b, a
@@ -276,7 +419,7 @@ class Store:
                     db.execute('UPDATE matches SET status=?,progress=NULL WHERE id=?', (status, job['ref']))
                 else:
                     db.execute('UPDATE submissions SET status=?,log=? WHERE id=?', (status, 'Chờ runner khôi phục.', job['ref']))
-            row = db.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY created,id LIMIT 1").fetchone()
+            row = db.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY created,rowid LIMIT 1").fetchone()
             if not row:
                 return None
             token = uid()
@@ -315,6 +458,7 @@ class Store:
             else:
                 db.execute("UPDATE matches SET status='done',winner=?,reason=?,replay=?,progress=NULL WHERE id=?",
                            (result['winner'], result['reason'], json.dumps(result, ensure_ascii=False), job['ref']))
+                self.settle_ranked(db, job['ref'])
             db.execute("UPDATE jobs SET status='done',token=NULL,expires=NULL,error='' WHERE id=?", (job['id'],))
             self.audit(db, 'runner', 'job.completed', {'id': job['id'], 'attempt': job['attempts']})
             return True
