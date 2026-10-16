@@ -54,7 +54,7 @@ function tournamentCards() {
 }
 function submissionRows() {
   $('#submission-count').textContent=`${submissions.length} PHIÊN BẢN`;
-  $('#submission-list').innerHTML=!me ? '<div class="empty">Đăng nhập để lưu chiến thuật và theo dõi bài nộp của bạn.</div>' : submissions.length ? submissions.map(s=>`<article class="submission"><div><strong>${escape(s.name)}</strong><small>${formatTime(s.created)} · ${escape(s.hash.slice(0,10))}</small></div>${badge(s.status)}<div class="submission-log">${escape(s.log || 'Bài đã được lưu. Chờ máy chạy bot tiếp nhận.')}</div><button class="text-link" data-source="${s.id}">Mở mã ↗</button></article>`).join('') : '<div class="empty">Chưa có bài nộp. Bắt đầu bằng một bot mẫu ở phía trên.</div>';
+  $('#submission-list').innerHTML=!me ? '<div class="empty">Đăng nhập để lưu chiến thuật và theo dõi bài nộp của bạn.</div>' : submissions.length ? submissions.map(s=>`<article class="submission"><div><strong>${escape(s.name)}</strong><small>${formatTime(s.created)} · ${escape(s.hash.slice(0,10))}</small></div>${badge(s.status)}<div class="submission-log">${escape(s.log || 'Bài đã được lưu. Chờ máy chạy bot tiếp nhận.')}</div><div class="submission-actions"><button class="text-link" data-source="${s.id}">Mở mã ↗</button>${s.status==='valid'?`<button class="text-link" data-rank-bot="${s.id}">Tìm đối thủ ↗</button>`:''}</div></article>`).join('') : '<div class="empty">Chưa có bài nộp. Bắt đầu bằng một bot mẫu ở phía trên.</div>';
   const valid=submissions.filter(s=>s.status==='valid');
   for (const id of ['#practice-a','#practice-b','#join-submission','#ranked-submission']) options(id,valid);
 }
@@ -193,6 +193,7 @@ document.addEventListener('click', event=>{
     $('#source').value=await response.text(); $('#bot-name').value={first:'Nước đầu tiên',hunter:'Thợ săn',guardian:'Người gác'}[button.dataset.sample]; updateSize();
   });
   if (button.dataset.source) action(button,async()=>{ const result=await api(`/submissions/${button.dataset.source}/source`); $('#source').value=result.source; updateSize(); $('#source').focus(); });
+  if (button.dataset.rankBot) { setTab('ranked'); $('#ranked-submission').value=button.dataset.rankBot; }
   if (button.dataset.watch) action(button,()=>toggleWatch(button.dataset.watch));
   if (button.dataset.step) {const item=watched.get(button.dataset.id);item.position=Math.max(0,Math.min(item.states.length-1,item.position+Number(button.dataset.step)));item.playing=false;renderWatch(button.dataset.id);}
   if (button.dataset.play) {const item=watched.get(button.dataset.play);if(item.position===item.states.length-1)item.position=0;item.playing=!item.playing;renderWatch(button.dataset.play);}

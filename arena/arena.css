@@ -32,5 +32,6 @@
 .series-card strong{font-size:11px;color:var(--green)}
 .series-actions{display:flex;flex-direction:column;gap:8px;flex:none}
 .series-actions .button{min-width:105px}
+.submission-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px 14px}
 @media(max-width:1000px){.compact-hero{align-items:start;flex-direction:column}.ranked-layout{grid-template-columns:1fr}.ranked-series{grid-template-columns:1fr}}
 @media(max-width:700px){.masthead nav{gap:10px}.masthead .top-link{display:none}.compact-hero{padding:32px 0 24px}.compact-hero .hero-actions{width:100%}.compact-hero .button{flex:1}.section-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0;overflow:visible}.section-nav button{text-align:left;white-space:normal;padding:12px 5px}.route-cards{grid-template-columns:1fr}.route-cards article{min-height:0}.series-card{flex-direction:column}.series-actions{flex-direction:row}.series-actions .button{flex:1}.ranked-board{padding:14px}}

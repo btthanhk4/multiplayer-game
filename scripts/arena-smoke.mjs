@@ -39,7 +39,8 @@ try {
   await page.locator('#submit-form button[type=submit]').click();
   await page.locator('.submission .badge').filter({hasText:'Hợp lệ'}).waitFor({timeout:60000});
   await page.screenshot({path:'artifacts/arena-lab.png',fullPage:true});
-  await page.locator('[role=tab][data-tab=ranked]').click();
+  await page.locator('.submission [data-rank-bot]').first().click();
+  assert.equal(await page.locator('#ranked-submission').inputValue(),await page.locator('.submission [data-rank-bot]').first().getAttribute('data-rank-bot'));
   await page.locator('#ranked-form button[type=submit]').click();
   await page.locator('#ranked-cancel').waitFor({state:'visible'});
   await page.screenshot({path:'artifacts/arena-ranked.png',fullPage:true});
