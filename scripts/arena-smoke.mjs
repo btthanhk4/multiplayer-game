@@ -114,11 +114,14 @@ try {
   await page.locator('#join-form button[type=submit]').click();
   await page.locator('#entry-status').filter({hasText:'Đội đã chọn'}).waitFor();
   await page.locator('[role=tab][data-tab=overview]').click();
-  await page.locator('#checklist li.done').nth(4).waitFor();
+  await page.locator('#next-step .progress-dots li.done').nth(3).waitFor();
+  assert.equal(await page.locator('#gate').evaluate(el=>getComputedStyle(el).display),'none','sign-in gate never shows to a signed-in user');
+  assert.equal(await page.locator('#dashboard-cards .tile').count(),4);
   await page.locator('#feed li').filter({hasText:'Boss 1'}).first().waitFor({timeout:30000});
-  await page.locator('#badge-summary .badge-score').waitFor();
-  assert.ok(Number(await page.locator('#badge-summary .badge-score strong').textContent())>=3,'first bot, first win and boss badges');
   await page.screenshot({path:'artifacts/arena-dashboard.png',fullPage:true});
+  await page.locator('[role=tab][data-tab=team]').click();
+  await page.locator('#team-badges .achievement.earned').nth(2).waitFor();
+  await page.locator('[role=tab][data-tab=overview]').click();
   await page.locator('#feed .team-link').first().click();
   await page.locator('#team-dialog[open] h2').filter({hasText:'Kéo Thần Tốc'}).waitFor();
   await page.screenshot({path:'artifacts/arena-profile.png'});

@@ -1026,6 +1026,55 @@ class SignInCornerCases(Base):
             self.assertEqual(db.execute("SELECT COUNT(*) FROM users WHERE username='race'").fetchone()[0], 1)
 
 
+class LocalArena(unittest.TestCase):
+    """The offline tool students use must agree with the real referee move by move."""
+
+    def test_rules_copy_matches_referee_on_random_games(self):
+        import importlib.util
+        import random
+        spec = importlib.util.spec_from_file_location('local_arena', ROOT / 'sdk/local_arena.py')
+        local = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(local)
+        referee, rng, moves_checked, endings = Referee(), random.Random(7), 0, set()
+        try:
+            for game in range(60):
+                packet, state = referee.call('new'), local.new_game()
+                for _ in range(400):
+                    theirs = packet['legalMoves']
+                    self.assertEqual(local.legal_moves(state), theirs, (game, state['revision']))
+                    if packet['state']['winner'] or not theirs:
+                        break
+                    captures = [m for m in theirs if m['capture']]
+                    # Bias towards captures and goals so every kind of ending is exercised.
+                    pool = captures if captures and rng.random() < .8 else theirs
+                    goal = [m for m in theirs if m['to'] == list(local.GOALS[packet['state']['turn']])]
+                    move = goal[0] if goal else rng.choice(pool)
+                    packet = referee.call('move', **{'from': move['from'], 'to': move['to']})
+                    state, error = local.apply_move(state, state['turn'], move['from'], move['to'])
+                    self.assertIsNone(error)
+                    expected = packet['state']
+                    for key in ('board', 'turn', 'winner', 'winReason', 'revision', 'quietPly', 'repetitions'):
+                        self.assertEqual(state[key], expected[key], (game, state['revision'], key))
+                    self.assertEqual(state['lastMove']['notation'], expected['lastMove']['notation'])
+                    moves_checked += 1
+                endings.add(packet['state']['winReason'])
+        finally:
+            referee.close()
+        self.assertGreater(moves_checked, 500)
+        self.assertTrue({'goal', 'quiet'} <= endings and any(e.startswith('eliminate') for e in endings), endings)
+
+    def test_illegal_moves_are_rejected_like_the_referee(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('local_arena', ROOT / 'sdk/local_arena.py')
+        local = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(local)
+        state = local.new_game()
+        for bad in (([0, 0], [1, 1]), ([7, 0], [7, 0]), ([7, 0], [3, 3]), ([0, 8], [0, 7]), ([9, 9], [8, 8]),
+                    ([7, 0], [6.0, 0]), ('ab', [1, 1]), ([7, 0], None)):
+            self.assertIsNotNone(local.apply_move(state, 'p1', *bad)[1], bad)
+        self.assertIsNotNone(local.apply_move(state, 'p2', [1, 8], [2, 8])[1])
+
+
 class AdminMatches(Base):
     def admin_client(self):
         self.register('boss_admin')

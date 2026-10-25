@@ -1,49 +1,363 @@
 <!doctype html>
 <html lang="vi">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#eeeae0"><base href="/arena/"><title>Sổ tay bot Python — OTTv2</title><link rel="stylesheet" href="./arena.css"></head>
-<body>
-  <header class="masthead"><a class="brand" href="/">ott<span>v2</span><sup>arena</sup></a><nav><a href="/#lab">Về xưởng bot</a><a href="/#competition">Giải đấu</a></nav></header>
-  <main><article class="guide">
-    <p class="eyebrow">SỔ TAY DỰ THI / GIAO THỨC 02</p>
-    <h1>Một hàm Python.<br><em>Một nước đi mỗi lượt.</em></h1>
-    <p>Bot nhận toàn bộ thế cờ và chọn một nước hợp lệ. Mỗi ván, bot của bạn được nạp <b>một lần</b> trong một môi trường riêng và phục vụ mọi nước đi của ván đó; biến toàn cục giữ giá trị giữa các lượt <b>trong cùng một ván</b>, nhưng không sang ván khác.</p>
-    <h2>00 / Lập đội</h2>
-    <ol><li>Mỗi sinh viên tạo một tài khoản (cần mã tham gia do ban tổ chức cấp).</li><li>Một bạn vào <b>Đội của tôi → Tạo đội</b> và gửi <b>mã đội 8 ký tự</b> cho các bạn còn lại; các bạn vào đội bằng mã đó. Mỗi đội tối đa 4 người; đi một mình thì tạo đội một người.</li><li>Bot, điểm Elo và đăng ký giải thuộc về đội. Thành viên nào nộp cũng được; bản đăng ký giải là bản đội chọn gần nhất trước hạn.</li><li>Nếu ban tổ chức thu bài qua Google Form: điền đúng <b>mã đội</b> (hoặc tên đội) và dán mã Python vào ô trả lời, hoặc tải file tên <code>MÃĐỘI.py</code>. Chỉ câu trả lời mới nhất của mỗi đội được dùng.</li></ol>
-    <h2>01 / Viết bot</h2>
-    <pre>def choose_move(observation):
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#eeeae0"><base href="/arena/"><title>Sổ tay viết bot — OTTv2 Arena</title><link rel="stylesheet" href="./arena.css"></head>
+<body class="guide-page">
+  <header class="masthead"><a class="brand" href="/">ott<span>v2</span><sup>arena</sup></a><nav><a href="/">← Về đấu trường</a></nav></header>
+  <div class="guide-layout">
+    <aside class="guide-toc" aria-label="Mục lục">
+      <p class="eyebrow">MỤC LỤC</p>
+      <ol>
+        <li><a href="#nhanh">Bắt đầu trong 5 phút</a></li>
+        <li><a href="#luat">Luật chơi</a></li>
+        <li><a href="#toado">Tọa độ và hướng đi</a></li>
+        <li><a href="#bot">Cấu trúc một bot</a></li>
+        <li><a href="#observation">Dữ liệu bot nhận được</a></li>
+        <li><a href="#ham">Hàm trợ giúp thường dùng</a></li>
+        <li><a href="#chienthuat">Gợi ý chiến thuật</a></li>
+        <li><a href="#gioihan">Giới hạn và môi trường chạy</a></li>
+        <li><a href="#thu">Thử bot tại máy</a></li>
+        <li><a href="#loi">Lỗi thường gặp</a></li>
+        <li><a href="#diem">Cách tính điểm và giải đấu</a></li>
+        <li><a href="#faq">Câu hỏi hay gặp</a></li>
+      </ol>
+    </aside>
+    <main><article class="guide">
+      <p class="eyebrow">SỔ TAY DỰ THI · GIAO THỨC 2</p>
+      <h1>Một hàm Python.<br><em>Một nước đi mỗi lượt.</em></h1>
+      <p class="lead">Bạn không điều khiển quân cờ bằng tay. Bạn viết một hàm tên <code>choose_move</code>: máy nhận thế cờ, gọi hàm của bạn và đi đúng nước hàm đó trả về. Trang này giải thích mọi thứ bạn cần: luật chơi, dữ liệu đầu vào, cách trả kết quả, giới hạn, cách thử tại máy và các lỗi hay gặp.</p>
+
+      <section id="nhanh">
+        <h2>1. Bắt đầu trong 5 phút</h2>
+        <ol class="steps">
+          <li><b>Lập đội.</b> Vào <i>Đội của tôi</i>: tạo đội mới (bạn là trưởng nhóm) rồi gửi <b>mã đội 8 ký tự</b> cho bạn cùng nhóm, hoặc nhập mã bạn bè gửi. Mỗi đội tối đa 4 người; đi một mình thì tạo đội một người. Bot, điểm Elo và đăng ký giải thuộc về <b>đội</b>.</li>
+          <li><b>Lấy bot khung.</b> Ở <i>Viết &amp; kiểm tra</i> bấm <b>04 · Khung chiến thuật</b> để nạp một bot hoàn chỉnh có chú thích. Hoặc tải <a href="../sdk/examples/template.py">template.py</a>.</li>
+          <li><b>Thử tại máy.</b> Tải <a href="../sdk/local_arena.py">local_arena.py</a> và chạy <code>python local_arena.py bot.py</code>. Không cần cài thêm gì. Xem <a href="#thu">mục 9</a>.</li>
+          <li><b>Nộp.</b> Dán mã vào trình soạn thảo, đặt tên phiên bản, bấm <i>Nộp để kiểm tra</i>. Sau vài chục giây trạng thái chuyển thành <b>Hợp lệ</b> (hoặc <b>Cần sửa</b> kèm lý do).</li>
+          <li><b>Leo tháp.</b> Vào <i>Chiến dịch boss</i> và đánh Boss 1. Qua ải thì bot của bạn đã chạy đúng; từ đó có thể đấu xếp hạng và đăng ký giải.</li>
+        </ol>
+        <p class="callout">Mỗi lần nộp là một <b>phiên bản mới</b>; bản cũ không bị ghi đè. Bạn nộp thoải mái, nhưng mỗi đội chỉ được có tối đa 3 bài đang chờ kiểm tra cùng lúc.</p>
+      </section>
+
+      <section id="luat">
+        <h2>2. Luật chơi</h2>
+        <h3>2.1. Bàn cờ và quân</h3>
+        <p>Bàn cờ <b>9 × 9</b>, hai phe: <b>Xanh</b> (<code>p1</code>, đi trước) và <b>Đỏ</b> (<code>p2</code>). Mỗi phe có <b>9 quân</b>: ba <b>Đấm</b> (<code>rock</code>), ba <b>Lá</b> (<code>paper</code>) và ba <b>Kéo</b> (<code>scissors</code>). Chữ cái viết tắt: Đ = Đấm, L = Lá, K = Kéo.</p>
+        <p>Thế cờ ban đầu (chữ thường = Xanh, chữ hoa = Đỏ; hàng 9 ở trên cùng):</p>
+<pre class="board">    a b c d e f g h i
+ 9  · · · · · · Đ L ·  9
+ 8  · · · · · L L K Đ  8
+ 7  · · · · · · K Đ K  7
+ 6  · · · · · · · · ·  6
+ 5  · · · · · · · · ·  5
+ 4  · · · · · · · · ·  4
+ 3  k đ k · · · · · ·  3
+ 2  đ k l l · · · · ·  2
+ 1  · l đ · · · · · ·  1
+    a b c d e f g h i</pre>
+        <p>Ô <b>đích</b> của Xanh là <b>i9</b> (góc trên bên phải), ô đích của Đỏ là <b>a1</b> (góc dưới bên trái). Hai ô này lúc đầu để trống.</p>
+
+        <h3>2.2. Cách đi</h3>
+        <ul>
+          <li>Mỗi lượt, phe đang đến lượt di chuyển <b>đúng một quân của mình, đúng một ô</b>, theo một trong <b>8 hướng</b> (ngang, dọc, chéo).</li>
+          <li>Được đi vào <b>ô trống</b>.</li>
+          <li>Được đi vào ô có <b>quân đối phương</b> nếu quân của bạn <b>khắc chế</b> loại quân đó: bạn <b>ăn</b> quân ấy (quân bị ăn biến mất).</li>
+          <li>Không được đi vào ô có quân của mình. Không được đi vào quân đối phương mà mình không khắc chế (quân <b>cùng loại</b> cũng chặn nhau).</li>
+          <li>Không được bỏ lượt và không có nước đi "đứng yên".</li>
+        </ul>
+        <h3>2.3. Ai khắc chế ai</h3>
+        <table class="small-table"><thead><tr><th>Quân của bạn</th><th>Ăn được</th><th>Bị ăn bởi</th></tr></thead><tbody>
+          <tr><td>Đấm (rock)</td><td>Kéo</td><td>Lá</td></tr>
+          <tr><td>Lá (paper)</td><td>Đấm</td><td>Kéo</td></tr>
+          <tr><td>Kéo (scissors)</td><td>Lá</td><td>Đấm</td></tr>
+        </tbody></table>
+        <p>Nhớ nhanh: <b>Đấm thắng Kéo, Kéo thắng Lá, Lá thắng Đấm.</b> Quân Kéo của bạn đứng cạnh quân Đấm của đối phương thì <b>bạn</b> là bên bị ăn nếu đến lượt họ.</p>
+
+        <h3>2.4. Thắng</h3>
+        <ol>
+          <li><b>Chạm ô đích:</b> đưa một quân của mình vào ô đích của phe mình (Xanh vào i9, Đỏ vào a1). Thắng ngay.</li>
+          <li><b>Xóa sổ một loại quân:</b> ăn con cuối cùng của một loại (ví dụ ăn nốt quân Lá cuối cùng của đối thủ). Thắng ngay.</li>
+        </ol>
+        <p class="callout warn">Đây là điều dễ thua nhất: chỉ cần <b>một loại quân</b> của bạn bị ăn hết là thua, dù bạn còn 8 quân khác. Hãy cẩn thận khi chỉ còn 1 quân của một loại.</p>
+
+        <h3>2.5. Hòa</h3>
+        <ul>
+          <li><b>Lặp thế:</b> cùng một thế cờ (cùng vị trí quân, cùng bên đến lượt) xuất hiện <b>3 lần</b>. Sau mỗi lần ăn quân, lịch sử lặp được tính lại từ đầu.</li>
+          <li><b>80 nửa lượt không ăn quân</b> (mỗi lượt của mỗi phe là một nửa lượt).</li>
+          <li><b>Chỉ có trong Arena:</b> đến nửa lượt thứ <b>400</b> mà chưa ai thắng thì hòa; phe đến lượt không còn nước hợp lệ cũng hòa.</li>
+        </ul>
+        <h3>2.6. Ví dụ</h3>
+        <p>Xanh có quân Đấm ở <code>[3,3]</code> và Đỏ có quân Kéo ở <code>[2,4]</code> (hai ô chéo nhau). Đấm ăn Kéo nên Xanh được đi <code>[3,3] → [2,4]</code> và ăn quân Kéo; trong <code>legalMoves</code> nước này có <code>"capture": true</code>. Ngược lại, nếu quân Đỏ là Lá thì Đấm <i>không</i> ăn được Lá, và nước đi vào ô đó <b>không</b> nằm trong <code>legalMoves</code>.</p>
+      </section>
+
+      <section id="toado">
+        <h2>3. Tọa độ và hướng đi</h2>
+        <p>Mọi tọa độ là cặp <b><code>[hàng, cột]</code></b>, đếm từ 0:</p>
+        <ul>
+          <li><b>Hàng 0 là hàng trên cùng</b> (hàng 9 theo tên ô), hàng 8 là hàng dưới cùng (hàng 1).</li>
+          <li><b>Cột 0 là cột bên trái</b> (cột a), cột 8 là cột bên phải (cột i).</li>
+          <li>Ô <b>a1 = <code>[8, 0]</code></b>, ô <b>i9 = <code>[0, 8]</code></b>, ô <b>e5 = <code>[4, 4]</code></b>. Công thức: hàng = 9 − số hàng, cột = vị trí chữ cái (a = 0).</li>
+        </ul>
+        <p>Vì vậy <b>Xanh (p1) tiến lên và sang phải</b> (hàng giảm, cột tăng) tới <code>[0, 8]</code>; <b>Đỏ (p2) tiến xuống và sang trái</b> (hàng tăng, cột giảm) tới <code>[8, 0]</code>. Bot luôn nhận <code>mySide</code> để biết mình là phe nào; <b>đừng giả định mình luôn là Xanh</b>, vì các ván đổi màu.</p>
+<pre>GOAL = [0, 8] if observation['mySide'] == 'p1' else [8, 0]
+
+def distance_to_goal(square):          # số nước đi (8 hướng) tới ô đích
+    return max(abs(square[0] - GOAL[0]), abs(square[1] - GOAL[1]))</pre>
+      </section>
+
+      <section id="bot">
+        <h2>4. Cấu trúc một bot</h2>
+        <p>Một bot là <b>một file Python UTF-8</b>, tối đa <b>64 KiB</b>, có hàm <code>choose_move(observation)</code>. Bot ngắn nhất, luôn đi nước hợp lệ đầu tiên:</p>
+<pre>def choose_move(observation):
     move = observation['legalMoves'][0]
     return {'from': move['from'], 'to': move['to']}</pre>
-    <p>Nộp một file <code>.py</code> UTF-8, tối đa 64 KiB. Chỉ dùng thư viện chuẩn Python 3.12; không cài thêm package. Hàm trả đúng hai trường <code>from</code> và <code>to</code>. <code>print()</code> được phép: nội dung đi vào nhật ký lỗi (tối đa 1 MiB mỗi ván), không ảnh hưởng nước đi.</p>
-    <p><a class="text-link" href="../sdk/examples/first.py">Bot đầu tiên ↗</a> · <a class="text-link" href="../sdk/examples/hunter.py">Thợ săn ↗</a> · <a class="text-link" href="../sdk/examples/guardian.py">Người gác ↗</a></p>
-    <h2>02 / Dữ liệu bot nhận</h2>
-    <table><thead><tr><th>Trường</th><th>Ý nghĩa</th></tr></thead><tbody>
-      <tr><td><code>board</code></td><td>Mảng 9×9. Ô trống là None; quân có owner (<code>p1</code>/<code>p2</code>) và type (<code>rock</code>/<code>paper</code>/<code>scissors</code>).</td></tr>
-      <tr><td><code>mySide, turn</code></td><td>Phe của bot và phe đến lượt. p1 là Xanh, p2 là Đỏ.</td></tr>
-      <tr><td><code>legalMoves</code></td><td>Danh sách các nước hợp lệ với <code>from</code>, <code>to</code> và <code>capture</code>.</td></tr>
-      <tr><td><code>ply, quietPly, repetitions</code></td><td>Số nửa lượt, số lượt không ăn quân và lịch sử thế cờ phục vụ luật hòa.</td></tr>
-      <tr><td><code>timeLeft, turnLimit</code></td><td>Số giây suy nghĩ còn lại của bot trong ván, và giới hạn mỗi lượt.</td></tr>
-      <tr><td><code>maxPly</code></td><td>Số nửa lượt tối đa của một ván trong Arena (đủ thì hòa).</td></tr>
-      <tr><td><code>seed</code></td><td>Seed theo ván và lượt. Module <code>random</code> được khởi tạo một lần mỗi ván.</td></tr>
-      <tr><td><code>protocol_version, ruleset_hash</code></td><td>Phiên bản giao thức (2) và hash engine.</td></tr>
-    </tbody></table>
-    <p>Tọa độ là <code>[hàng, cột]</code>, bắt đầu từ 0 ở góc trên trái: <b>a1 = [8,0]</b>, <b>i9 = [0,8]</b>. Chỉ trả một nước nằm trong <code>legalMoves</code>.</p>
-    <h2>03 / Luật và giới hạn</h2>
-    <ul><li>Mỗi bên có ba Đấm, ba Lá, ba Kéo. Đi một ô theo tám hướng; Đấm ăn Kéo, Kéo ăn Lá, Lá ăn Đấm. Cùng loại chặn nhau.</li><li>Xanh tới i9, Đỏ tới a1, hoặc ăn hết một loại quân của đối thủ thì thắng.</li><li>Hòa khi cùng thế và bên đến lượt xuất hiện ba lần, hoặc 80 nửa lượt không ăn quân. Trong Arena, không còn nước hợp lệ hoặc đủ 400 nửa lượt cũng là hòa.</li><li>Mỗi lượt tối đa 3 giây; tổng thời gian suy nghĩ của bot trong một ván tối đa 60 giây; nạp mã (import, khởi tạo toàn cục) tối đa 5 giây. RAM 256 MiB, kết quả JSON 4 KiB, không mạng, không tạo tiến trình con.</li><li>Sai nước, lỗi chạy hoặc quá giới hạn sẽ thua kỹ thuật ván đó (hai bot cùng lỗi thì hòa). Lỗi hạ tầng không tính thua bot; hệ thống tự chạy lại tối đa ba lần rồi chờ ban tổ chức.</li></ul>
-    <h2>04 / Nộp và kiểm tra</h2>
-    <ol><li>Chọn bot mẫu hoặc viết mã, rồi nộp. Mỗi lần nộp tạo một phiên bản và hash riêng; mã cũ không bị ghi đè. Bản nháp trong trình soạn thảo tự lưu trên máy bạn.</li><li>Mỗi đội có tối đa 3 bài đang chờ kiểm tra cùng lúc; danh sách hiện vị trí trong hàng chờ. Gần hạn chót hàng chờ dài hơn, hãy nộp sớm.</li><li>Runner chạy 12 nửa lượt mẫu với bot ở cả hai phe. “Hợp lệ” chỉ xác nhận các lượt mẫu, không chứng minh bot đúng ở mọi thế cờ.</li><li>Có thể đấu tập hai phiên bản hợp lệ của đội mà không tính điểm.</li><li>Trên khán đài, mỗi replay có nút chia sẻ link, phóng to, tua 1×/2×/4× và dùng phím ← → Space.</li></ol>
-    <h2>04b / Chiến dịch boss</h2>
-    <ol><li>Năm boss do ban tổ chức viết, mạnh dần: <b>Tân binh</b> (luôn đi nước đầu tiên), <b>Thợ săn</b> (lao về đích, thấy là ăn), <b>Người gác</b> (né ô bị khắc chế, giữ loại quân cuối), <b>Kỵ sĩ</b> (tính trước nước đáp trả của bạn) và trùm cuối <b>Đại kiện tướng</b> (tìm kiếm alpha-beta).</li><li>Mỗi lượt thách đấu gồm hai ván đổi màu với boss. Được từ 1,5/2 điểm thì qua ải và mở ải kế tiếp: 1,5 điểm được ★★, thắng trắng 2–0 được ★★★. Đấu lại bao nhiêu lần cũng được (mỗi đội một lượt chạy cùng lúc); hệ thống giữ kết quả tốt nhất.</li><li>Bảng vàng xếp đội theo số ải đã qua, rồi tổng sao, rồi ai đạt trước. Chiến dịch không ảnh hưởng Elo hay điểm giải.</li><li>Boss cũng tuân theo giới hạn thời gian như bot của bạn. Gợi ý: đọc mã ba bot mẫu, rồi tìm cách thắng từng boss bằng chiến thuật riêng.</li></ol>
-    <h2>05 / Ghép trận xếp hạng</h2>
-    <ol><li>Chọn một bot hợp lệ và bấm “Tìm đối thủ”. Có thể hủy trước khi được ghép.</li><li>Hệ thống không ghép hai bot cùng đội, ưu tiên đội chưa gặp trong 24 giờ rồi đến Elo gần nhất; nếu chưa có ai, bot ở hàng chờ.</li><li>Mỗi cặp đấu hai ván đổi màu; tổng điểm ván từ 0 đến 2 quyết định kết quả cặp.</li><li>Mỗi đội bắt đầu 1000 Elo. <code>Δ = round(K × (điểm ván / 2 − kỳ vọng Elo))</code>; K là 32, giảm khi gặp lại cùng đối thủ trong 24 giờ, tối thiểu 8. Bậc: Đồng &lt; 1000 ≤ Bạc &lt; 1075 ≤ Vàng &lt; 1150 ≤ Kim cương.</li></ol>
-    <p>Ban tổ chức có thể tạm đóng đấu xếp hạng khi một vòng giải đang chạy để máy chấm ưu tiên giải. Elo không cộng vào điểm giải.</p>
-    <p><b>Giao hữu</b>: bấm tên một đội bất kỳ để mở hồ sơ (Elo, đồ thị Elo, huy hiệu, tiến độ chiến dịch) và mời đội đó đấu hai ván đổi màu với bot hợp lệ mới nhất của họ. Giao hữu không tính Elo; mỗi đội có một lượt giao hữu đang chạy cùng lúc.</p>
-    <p><b>Huy hiệu</b> (17 loại): Khai bút, Nhà phát minh, Đủ đội hình, Trận thắng đầu, Về đích, Càn quét, Chớp nhoáng (thắng trong 40 nửa lượt), Toàn vẹn (thắng không mất quân), Chuỗi 3, Lật kèo (thắng đội hơn 100 Elo), Bậc Vàng, Kim cương, Vượt ải, Hạ trùm cuối, Hoàn hảo (3 sao mọi ải), Bục vinh quang và Xuất sắc. Thắng kỹ thuật và ván đấu tập không tính.</p>
-    <h2>06 / Giải đấu, vòng chơi và xếp loại</h2>
-    <p>Trước hạn, chọn một phiên bản để đăng ký (bot đang chờ kiểm tra cũng được chọn). Khi khóa danh sách, chỉ bot <b>hợp lệ</b> mới được thi; bot lỗi bị loại khỏi giải nhưng không ảnh hưởng các đội khác. Mỗi cặp thi hai ván đổi màu.</p>
-    <ul><li><b>Swiss</b>: ghép các đội gần điểm, tránh gặp lại khi có thể. Thắng cặp 1 điểm, hòa 0,5. Số đội lẻ thì một đội nhận BYE (1 điểm, ưu tiên đội ít BYE và ít điểm). Đồng điểm xét Buchholz rồi điểm ván.</li><li><b>Vòng tròn</b>: mỗi cặp gặp nhau một lần (tối đa 32 đội).</li><li><b>Loại trực tiếp</b>: nhánh đấu theo hạt giống; các hạt giống đầu nhận BYE nếu số đội không phải lũy thừa của 2. Hòa cặp thì đội còn nhiều quân hơn sau hai ván đi tiếp, sau đó đến hạt giống cao hơn. Ban tổ chức có thể lấy top N của vòng Swiss làm hạt giống cho vòng loại trực tiếp.</li><li><b>Xếp loại</b> theo hạng: 10% đầu Xuất sắc, 20% kế Giỏi, 30% kế Khá, còn lại Đạt; đội không ghi điểm nào là Chưa đạt.</li><li>Đội vi phạm có thể bị truất quyền; các ván chưa đấu của đội đó được xử thắng cho đối thủ.</li></ul>
-    <h2>07 / Dữ liệu và replay</h2>
-    <p>Mã nguồn bot chỉ thành viên đội (và ban tổ chức khi kiểm tra gian lận) xem được; tên đội, bot, trận đấu và replay được công khai. Nếu máy chấm tắt, bài và ván vẫn lưu trong hàng chờ. Quên mật khẩu: liên hệ ban tổ chức để được cấp mật khẩu tạm, rồi đổi lại trong mục tài khoản.</p>
-  </article></main>
-  <footer><span>OTT<span class="red">v2</span> / ARENA</span><a href="/">Trở lại đấu trường ↗</a></footer>
+        <h3>4.1. Giá trị trả về</h3>
+        <p>Trả về một <code>dict</code> có đúng hai khóa: <code>'from'</code> và <code>'to'</code>, mỗi khóa là danh sách (hoặc tuple) hai <b>số nguyên</b> <code>[hàng, cột]</code>:</p>
+<pre>return {'from': [6, 1], 'to': [5, 2]}</pre>
+        <p>Nước đi phải nằm trong <code>observation['legalMoves']</code>. Cách an toàn nhất là chọn một phần tử của danh sách đó rồi trả lại <code>from</code>/<code>to</code> của nó. Số thực (<code>5.0</code>), chuỗi, <code>None</code>, kiểu của thư viện ngoài (như numpy) đều bị coi là lỗi.</p>
+        <h3>4.2. Bot được nạp mấy lần?</h3>
+        <p>Trong <b>mỗi ván</b>, file của bạn được chạy <b>một lần</b> khi ván bắt đầu (mọi câu lệnh ở ngoài hàm chạy đúng lúc đó), rồi <code>choose_move</code> được gọi cho từng nước đi của bạn. Vì vậy <b>biến toàn cục giữ giá trị giữa các lượt trong cùng một ván</b> (dùng để nhớ lịch sử, bảng đã tính…), nhưng <b>không</b> sang ván khác: mỗi ván là một tiến trình mới.</p>
+<pre>moves_made = 0                      # chạy một lần mỗi ván
+
+def choose_move(observation):
+    global moves_made
+    moves_made += 1                 # tăng qua từng lượt của ván này
+    ...</pre>
+        <p>Module <code>random</code> được khởi tạo (<code>random.seed</code>) một lần mỗi ván, nên bot dùng <code>random</code> vẫn cho kết quả khác nhau giữa các ván.</p>
+        <h3>4.3. In ra màn hình</h3>
+        <p><code>print()</code> được phép: nội dung đi vào nhật ký lỗi (tối đa 1 MiB mỗi ván) và <b>không</b> ảnh hưởng nước đi. Đừng gọi <code>input()</code> hay đọc <code>sys.stdin</code>: đó là kênh giao tiếp của máy chấm.</p>
+      </section>
+
+      <section id="observation">
+        <h2>5. Dữ liệu bot nhận được</h2>
+        <p><code>observation</code> là một <code>dict</code> mới cho mỗi lượt (sửa nó không ảnh hưởng gì tới ván đấu). Mọi giá trị dưới đây có thể dùng trực tiếp.</p>
+        <table><thead><tr><th>Khóa</th><th>Kiểu</th><th>Ý nghĩa</th></tr></thead><tbody>
+          <tr><td><code>board</code></td><td>list 9×9</td><td>Thế cờ. <code>board[hàng][cột]</code> là <code>None</code> (ô trống) hoặc <code>{'owner': 'p1'|'p2', 'type': 'rock'|'paper'|'scissors'}</code>.</td></tr>
+          <tr><td><code>mySide</code></td><td>str</td><td>Phe của bạn: <code>'p1'</code> (Xanh) hoặc <code>'p2'</code> (Đỏ).</td></tr>
+          <tr><td><code>turn</code></td><td>str</td><td>Phe đang đến lượt. Khi hàm được gọi, luôn bằng <code>mySide</code>.</td></tr>
+          <tr><td><code>legalMoves</code></td><td>list</td><td>Mọi nước hợp lệ của bạn. Mỗi phần tử: <code>{'from': [r, c], 'to': [r, c], 'capture': True|False}</code>. Không bao giờ rỗng khi hàm được gọi.</td></tr>
+          <tr><td><code>ply</code></td><td>int</td><td>Số nửa lượt đã đi (0 ở nước đầu của Xanh).</td></tr>
+          <tr><td><code>quietPly</code></td><td>int</td><td>Số nửa lượt liên tiếp không ai ăn quân. Chạm 80 là hòa.</td></tr>
+          <tr><td><code>repetitions</code></td><td>dict</td><td>Số lần mỗi thế cờ đã xuất hiện kể từ lần ăn quân gần nhất. Khóa có dạng <code>'p1:' + 9 hàng nối bằng '/'</code> (xem bên dưới). Đủ 3 lần là hòa.</td></tr>
+          <tr><td><code>timeLeft</code></td><td>float</td><td>Số giây suy nghĩ còn lại của bot trong cả ván (bắt đầu 60).</td></tr>
+          <tr><td><code>turnLimit</code></td><td>float</td><td>Giới hạn mỗi nước: 3 giây.</td></tr>
+          <tr><td><code>maxPly</code></td><td>int</td><td>Số nửa lượt tối đa của ván trong Arena: 400.</td></tr>
+          <tr><td><code>seed</code></td><td>int</td><td>Số ngẫu nhiên xác định theo ván và lượt, nếu bạn muốn tự tạo <code>random.Random(seed)</code>.</td></tr>
+          <tr><td><code>protocol_version</code>, <code>ruleset_hash</code></td><td>int, str</td><td>Phiên bản giao thức (2) và dấu vân tay của luật. Thường không cần dùng.</td></tr>
+        </tbody></table>
+        <h3>5.1. Ví dụ rút gọn</h3>
+<pre>{
+  'mySide': 'p1', 'turn': 'p1', 'ply': 0, 'quietPly': 0,
+  'timeLeft': 60.0, 'turnLimit': 3, 'maxPly': 400,
+  'board': [ [None, None, ..., {'owner': 'p2', 'type': 'paper'}, None],   # hàng 0 (trên cùng)
+             ...
+             [{'owner': 'p1', 'type': 'scissors'}, {'owner': 'p1', 'type': 'rock'}, ...] ],
+  'legalMoves': [ {'from': [6, 0], 'to': [5, 0], 'capture': False},
+                  {'from': [6, 0], 'to': [5, 1], 'capture': False}, ... ],
+  'repetitions': {'p1:......p2rp2p./.....p2pp2p...': 1}
+}</pre>
+        <h3>5.2. Khóa của <code>repetitions</code></h3>
+        <p>Khóa là <code>bên_đến_lượt + ':' + 9 hàng nối bằng '/'</code>; mỗi ô là <code>.</code> (trống) hoặc chủ sở hữu + chữ cái đầu của loại quân (<code>p1r</code>, <code>p2s</code>…). Hàm tạo khóa của một thế cờ bất kỳ:</p>
+<pre>def position_key(board, turn):
+    rows = []
+    for line in board:
+        rows.append(''.join(p['owner'] + p['type'][0] if p else '.' for p in line))
+    return turn + ':' + '/'.join(rows)</pre>
+        <p>Dùng để tránh nước đưa thế cờ tới lần lặp thứ 3 khi bạn đang dẫn trước (hoặc cố tình lặp khi đang bị thua):</p>
+<pre>after_board = after(board, move)                 # hàm của bạn, xem mục 6
+seen = observation['repetitions'].get(position_key(after_board, other(side)), 0)
+if seen &gt;= 2:    # đi nước này là hòa
+    ...</pre>
+      </section>
+
+      <section id="ham">
+        <h2>6. Hàm trợ giúp thường dùng</h2>
+        <p>Để nhìn trước nước đi, bạn cần tự mô phỏng. Các hàm dưới đây (đều có sẵn trong <a href="../sdk/examples/template.py">template.py</a>) là nền tảng cho gần như mọi chiến thuật.</p>
+<pre>BEATS = {'rock': 'scissors', 'paper': 'rock', 'scissors': 'paper'}   # loại quân → loại bị nó ăn
+GOALS = {'p1': (0, 8), 'p2': (8, 0)}
+STEPS = [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]
+
+def other(side):
+    return 'p2' if side == 'p1' else 'p1'
+
+def moves_of(board, side):
+    """Mọi nước hợp lệ của `side` trên `board`: (hàng, cột, hàng_mới, cột_mới)."""
+    result = []
+    for r in range(9):
+        for c in range(9):
+            piece = board[r][c]
+            if not piece or piece['owner'] != side:
+                continue
+            for dr, dc in STEPS:
+                nr, nc = r + dr, c + dc
+                if 0 &lt;= nr &lt; 9 and 0 &lt;= nc &lt; 9:
+                    target = board[nr][nc]
+                    if target is None or (target['owner'] != side and BEATS[piece['type']] == target['type']):
+                        result.append((r, c, nr, nc))
+    return result
+
+def after(board, move):
+    """Bản sao bàn cờ sau nước `move`; không làm hỏng bàn cờ gốc."""
+    r, c, nr, nc = move
+    copy = [row[:] for row in board]
+    copy[nr][nc], copy[r][c] = copy[r][c], None
+    return copy
+
+def counts(board, side):
+    total = {'rock': 0, 'paper': 0, 'scissors': 0}
+    for row in board:
+        for piece in row:
+            if piece and piece['owner'] == side:
+                total[piece['type']] += 1
+    return total</pre>
+        <p><b>Lưu ý quan trọng:</b> <code>copy = [row[:] for row in board]</code> sao chép từng hàng. Nếu bạn viết <code>copy = board</code> hoặc <code>board[:]</code>, hai bản cờ dùng chung các hàng và việc mô phỏng sẽ làm hỏng bàn cờ gốc. Các ô là <code>dict</code> nhưng bạn không sửa chúng, chỉ di chuyển tham chiếu, nên không cần sao chép sâu (<code>deepcopy</code> quá chậm).</p>
+        <h3>6.1. Nước này có thắng ngay không?</h3>
+<pre>def wins_now(board, side, move):
+    if (move[2], move[3]) == GOALS[side]:                    # chạm ô đích
+        return True
+    after_board = after(board, move)
+    return any(n == 0 for n in counts(after_board, other(side)).values())   # ăn nốt một loại</pre>
+        <h3>6.2. Quân của mình có đang bị đe dọa không?</h3>
+<pre>PREDATOR = {'scissors': 'rock', 'paper': 'scissors', 'rock': 'paper'}   # loại ăn được quân này
+
+def threatened(board, r, c):
+    me = board[r][c]
+    for dr, dc in STEPS:
+        nr, nc = r + dr, c + dc
+        if 0 &lt;= nr &lt; 9 and 0 &lt;= nc &lt; 9:
+            enemy = board[nr][nc]
+            if enemy and enemy['owner'] != me['owner'] and enemy['type'] == PREDATOR[me['type']]:
+                return True
+    return False</pre>
+      </section>
+
+      <section id="chienthuat">
+        <h2>7. Gợi ý chiến thuật</h2>
+        <p>Thứ tự ưu tiên mà hầu hết bot mạnh đều tuân theo mỗi lượt:</p>
+        <ol class="steps">
+          <li><b>Thắng ngay nếu có thể:</b> có nước chạm ô đích hoặc ăn nốt một loại quân thì đi nước đó.</li>
+          <li><b>Đừng thua ngay:</b> bỏ các nước sau đó đối thủ có nước thắng ngay (chạm đích hoặc ăn con cuối của một loại của bạn). Kiểm tra bằng mô phỏng một nửa lượt như template.</li>
+          <li><b>Bảo vệ loại quân cuối:</b> khi chỉ còn 1 quân của một loại, đặt nó ở nơi không có quân khắc chế đối phương đứng cạnh.</li>
+          <li><b>Ăn quân khi an toàn:</b> ăn mà không để quân vừa ăn bị ăn lại, hoặc đổi quân có lợi.</li>
+          <li><b>Tiến về ô đích:</b> quân gần ô đích tạo áp lực: đối thủ buộc phải chặn bằng quân khắc chế.</li>
+          <li><b>Biết khi nào hòa:</b> đang dẫn trước thì tránh lặp thế và tránh 80 nửa lượt im lặng; đang thua thì cố hòa.</li>
+        </ol>
+        <h3>7.1. Từ đơn giản đến mạnh</h3>
+        <table><thead><tr><th>Cấp độ</th><th>Ý tưởng</th><th>Gợi ý</th></tr></thead><tbody>
+          <tr><td>1 · Luật cứng</td><td>Thắng ngay, tránh thua ngay, còn lại chọn ngẫu nhiên.</td><td>Vượt được Boss 1–2.</td></tr>
+          <tr><td>2 · Chấm điểm nước đi</td><td>Mỗi nước một điểm: ăn quân +, gần đích +, bị đe dọa −. Chọn nước cao nhất, cộng chút <code>random</code> để khỏi lặp.</td><td>Giống bot Thợ săn và Người gác.</td></tr>
+          <tr><td>3 · Nhìn trước 2 nửa lượt</td><td>Với mỗi nước của bạn, giả sử đối thủ đáp trả tốt nhất cho họ, chọn nước cho kết quả tốt nhất.</td><td>Đây chính là <code>template.py</code>.</td></tr>
+          <tr><td>4 · Minimax / alpha-beta</td><td>Đào sâu 3–4 nửa lượt, cắt các nhánh chắc chắn tệ. Sắp xếp nước (ăn quân trước) để cắt được nhiều hơn.</td><td>Cần kiểm soát thời gian.</td></tr>
+          <tr><td>5 · Đào sâu dần</td><td>Thử độ sâu 1, rồi 2, 3… cho tới khi hết thời gian, luôn giữ nước tốt nhất của độ sâu hoàn tất gần nhất.</td><td>Dùng <code>timeLeft</code> để chia thời gian.</td></tr>
+        </tbody></table>
+        <h3>7.2. Quản lý thời gian</h3>
+<pre>import time
+
+def choose_move(observation):
+    started = time.perf_counter()
+    # Mỗi nước tối đa vài phần trăm quỹ còn lại, và không bao giờ quá ~1 giây.
+    budget = min(1.0, observation['timeLeft'] / 80)
+    best = observation['legalMoves'][0]            # luôn có sẵn một đáp án dự phòng
+    for move in observation['legalMoves']:
+        if time.perf_counter() - started &gt; budget:
+            break                                   # hết giờ: dùng nước tốt nhất tìm được
+        ...                                         # đánh giá, cập nhật best
+    return {'from': best['from'], 'to': best['to']}</pre>
+        <p>Quy tắc vàng: <b>luôn giữ sẵn một nước hợp lệ để trả về</b>, và kiểm tra đồng hồ trong vòng lặp tìm kiếm. Bot nghĩ quá 3 giây ở một nước, hoặc dùng quá 60 giây trong cả ván, sẽ <b>thua kỹ thuật</b>.</p>
+        <h3>7.3. Dùng trí nhớ giữa các lượt</h3>
+        <p>Nhờ biến toàn cục giữ giá trị trong ván, bot có thể nhớ nước đã đi hoặc thế cờ đã tính:</p>
+<pre>cache = {}                                   # lưu giữa các lượt của cùng một ván
+
+def choose_move(observation):
+    key = position_key(observation['board'], observation['mySide'])
+    if key not in cache:
+        cache[key] = tinh_diem(observation)  # hàm nặng, chỉ tính một lần cho mỗi thế
+    ...</pre>
+        <p class="callout">Muốn xem bot mạnh của ban tổ chức chơi thế nào? Nó nằm trong chiến dịch boss: Kỵ sĩ nhìn trước 2 nửa lượt, Đại kiện tướng dùng alpha-beta. Hãy xem lại replay các ván thua để học điểm yếu của mình.</p>
+      </section>
+
+      <section id="gioihan">
+        <h2>8. Giới hạn và môi trường chạy</h2>
+        <table class="small-table"><thead><tr><th>Mục</th><th>Giá trị</th></tr></thead><tbody>
+          <tr><td>Ngôn ngữ</td><td>Python 3.12, <b>chỉ thư viện chuẩn</b> (random, math, time, itertools, heapq, collections, functools…). Không có numpy, pandas hay pip.</td></tr>
+          <tr><td>Kích thước file</td><td>Tối đa 64 KiB, một file duy nhất (gộp mã vào một file nếu bạn có nhiều).</td></tr>
+          <tr><td>Thời gian mỗi nước</td><td>3 giây (tính cả thời gian giao tiếp).</td></tr>
+          <tr><td>Quỹ thời gian cả ván</td><td>60 giây suy nghĩ cho mỗi bên, trừ dần theo từng nước.</td></tr>
+          <tr><td>Thời gian nạp mã</td><td>5 giây cho phần chạy khi file được nạp (import, khởi tạo biến toàn cục, bảng tính sẵn).</td></tr>
+          <tr><td>Bộ nhớ</td><td>256 MiB. CPU: một lõi.</td></tr>
+          <tr><td>Mạng, ổ đĩa, tiến trình con</td><td>Không có mạng; hệ thống file chỉ đọc; không tạo được tiến trình con.</td></tr>
+          <tr><td>Kết quả trả về</td><td>JSON tối đa 4 KiB (đủ cho <code>{'from':…,'to':…}</code>).</td></tr>
+          <tr><td>Số nửa lượt tối đa</td><td>400, đủ thì hòa.</td></tr>
+        </tbody></table>
+        <h3>8.1. Khi vi phạm: thua kỹ thuật</h3>
+        <p>Những lỗi sau khiến bot <b>thua ván đó</b> ("thua kỹ thuật"): ném ngoại lệ, trả sai định dạng, trả nước không hợp lệ, nghĩ quá 3 giây ở một nước, dùng hết 60 giây, không nạp được file, thoát giữa chừng. Nếu cả hai bot cùng lỗi ngay từ đầu thì ván hòa. Lỗi của <b>máy chấm</b> thì không bao giờ tính là bot thua: ván được chạy lại.</p>
+        <p>Lỗi xảy ra vẫn ghi rõ lý do trong replay (ví dụ <i>Đối thủ lỗi thực thi/nước đi</i>) và traceback nằm trong nhật ký của ván.</p>
+      </section>
+
+      <section id="thu">
+        <h2>9. Thử bot tại máy</h2>
+        <p>Đừng nộp rồi mới biết bot lỗi. <a href="../sdk/local_arena.py">local_arena.py</a> là một file Python <b>độc lập</b> (chỉ cần Python 3.10 trở lên), dùng đúng luật, đúng dữ liệu <code>observation</code> và đúng giới hạn thời gian như Arena. Đặt nó cạnh file bot của bạn:</p>
+<pre>python local_arena.py bot.py                       # 4 ván với bot Thợ săn
+python local_arena.py bot.py --vs random --games 10
+python local_arena.py bot.py --vs first            # đối thủ luôn đi nước hợp lệ đầu tiên
+python local_arena.py bot.py --vs template.py      # đấu với một file bot khác
+python local_arena.py bot.py --trace --games 1     # in từng nước và bàn cờ để gỡ lỗi</pre>
+        <p>Công cụ in kết quả từng ván (thắng/hòa/thua, lý do, số nửa lượt, <b>nước chậm nhất</b> của bạn). Lỗi trong bot hiện ngay với tên lỗi, ví dụ <code>technical: Bot lỗi thực thi: KeyError: 'owner'</code>. Ván đổi màu luân phiên để bạn thấy bot chơi tốt ở cả hai phe.</p>
+        <p class="callout">Máy chấm chạy trong sandbox, có thể <b>chậm hơn máy bạn</b> khoảng 2–3 lần. Nếu nước chậm nhất ở máy bạn đã gần 1 giây, hãy giảm độ sâu tìm kiếm.</p>
+        <h3>9.1. "Hợp lệ" nghĩa là gì?</h3>
+        <p>Sau khi nộp, máy chấm chạy bot của bạn đấu với chính nó <b>12 nửa lượt</b> ở cả hai phe. Qua được bước này nghĩa là: file nạp được, hàm tồn tại, trả đúng định dạng và nước hợp lệ ở các thế cờ đầu. Nó <b>không</b> chứng minh bot đúng ở mọi thế cờ; hãy tự thử nhiều ván bằng <code>local_arena.py</code>.</p>
+      </section>
+
+      <section id="loi">
+        <h2>10. Lỗi thường gặp</h2>
+        <table><thead><tr><th>Thông báo / triệu chứng</th><th>Nguyên nhân hay gặp</th><th>Cách sửa</th></tr></thead><tbody>
+          <tr><td>"Không thấy hàm choose_move"</td><td>Đặt sai tên hàm, hoặc thụt lề khiến hàm nằm trong khối khác.</td><td>Hàm phải nằm ở mức ngoài cùng, tên đúng <code>choose_move</code>.</td></tr>
+          <tr><td>"Không nạp được bot: SyntaxError"</td><td>Lỗi cú pháp; thường do dán mã từ web bị đổi dấu nháy hoặc mất thụt lề.</td><td>Chạy <code>python bot.py</code> hoặc <code>local_arena.py</code> để xem dòng lỗi.</td></tr>
+          <tr><td>"ModuleNotFoundError"</td><td>Import thư viện ngoài (numpy…).</td><td>Chỉ dùng thư viện chuẩn.</td></tr>
+          <tr><td>"Nước đi không hợp lệ"</td><td>Tự tính nước đi mà không kiểm tra, hoặc trả nước của phe đối phương; quên rằng cùng loại chặn nhau.</td><td>Chọn từ <code>observation['legalMoves']</code>, hoặc tự tính bằng <code>moves_of</code> rồi kiểm tra.</td></tr>
+          <tr><td>"Kết quả không phải JSON" / sai định dạng</td><td>Trả tuple lồng, <code>numpy.int64</code>, hoặc quên khóa <code>'from'</code>/<code>'to'</code>.</td><td>Trả đúng <code>{'from': [r, c], 'to': [r, c]}</code> với số nguyên thường.</td></tr>
+          <tr><td>"TypeError: 'NoneType' object is not subscriptable"</td><td>Truy cập <code>board[r][c]['owner']</code> khi ô trống (<code>None</code>).</td><td>Kiểm tra <code>if piece:</code> trước khi đọc <code>owner</code>/<code>type</code>.</td></tr>
+          <tr><td>Hết giờ / "quá 3 giây"</td><td>Tìm kiếm quá sâu hoặc vòng lặp vô hạn.</td><td>Kiểm tra đồng hồ trong vòng lặp; luôn giữ nước dự phòng (mục 7.2).</td></tr>
+          <tr><td>Bot thắng ở máy nhưng thua trên Arena vì chậm</td><td>Máy chấm chậm hơn và chạy nhiều ván song song.</td><td>Để dư thời gian: mục tiêu dưới 1 giây mỗi nước.</td></tr>
+          <tr><td>Bot lặp một nước và hòa</td><td>Luôn chọn nước điểm cao nhất giống nhau.</td><td>Cộng <code>random.random()</code> nhỏ để phá hòa, và dùng <code>repetitions</code>.</td></tr>
+          <tr><td>Bot đi sai phe</td><td>Mã giả định mình là Xanh (<code>p1</code>).</td><td>Luôn dùng <code>observation['mySide']</code> để lấy ô đích và hướng tiến.</td></tr>
+          <tr><td>"Mã Python phải có nội dung và không vượt quá 64 KiB"</td><td>File rỗng hoặc quá lớn (thường do nhúng dữ liệu).</td><td>Rút gọn; tính bảng lúc chạy thay vì dán vào file.</td></tr>
+        </tbody></table>
+      </section>
+
+      <section id="diem">
+        <h2>11. Cách tính điểm và giải đấu</h2>
+        <h3>11.1. Mỗi cặp là hai ván</h3>
+        <p>Mọi cuộc đối đầu (xếp hạng, boss, giải đấu) là <b>hai ván đổi màu</b>: mỗi bot được chơi cả Xanh lẫn Đỏ. Thắng ván được 1 điểm, hòa 0,5, thua 0: tổng từ 0 đến 2.</p>
+        <h3>11.2. Chiến dịch boss</h3>
+        <p>Năm boss mạnh dần. Được từ <b>1,5/2</b> điểm là qua ải và mở ải kế tiếp (★★); thắng trắng <b>2–0</b> được ★★★. Bạn đánh lại thoải mái; hệ thống giữ kết quả tốt nhất. Bảng vàng xếp theo số ải, rồi tổng sao, rồi ai đạt trước. Chiến dịch <b>không</b> ảnh hưởng Elo hay điểm giải.</p>
+        <h3>11.3. Đấu xếp hạng (Elo)</h3>
+        <p>Chọn một bot hợp lệ và <i>Tìm đối thủ</i>. Hệ thống ghép với đội chưa gặp trong 24 giờ có Elo gần nhất, không bao giờ ghép hai bot cùng đội. Mỗi đội bắt đầu <b>1000 Elo</b>; thay đổi = <code>round(K × (điểm/2 − kỳ vọng))</code>, K = 32, giảm dần khi gặp lại cùng đối thủ trong 24 giờ (tối thiểu 8). Bậc: Đồng &lt; 1000 ≤ Bạc &lt; 1075 ≤ Vàng &lt; 1150 ≤ Kim cương.</p>
+        <h3>11.4. Giao hữu và đấu tập</h3>
+        <p>Bấm tên một đội bất kỳ để xem hồ sơ và mời <b>giao hữu</b> (hai ván với bot hợp lệ mới nhất của họ, không tính Elo). <b>Đấu tập</b> là hai phiên bản của chính đội bạn đấu với nhau, không tính điểm.</p>
+        <h3>11.5. Giải đấu và xếp loại</h3>
+        <p>Trước hạn, chọn một phiên bản để đăng ký (bot đang chờ kiểm tra cũng được chọn). Khi ban tổ chức khóa danh sách, bản chọn được <b>đóng băng</b> và chỉ bot <b>hợp lệ</b> mới được thi; bot lỗi bị loại nhưng không ảnh hưởng đội khác.</p>
+        <ul>
+          <li><b>Swiss:</b> mỗi vòng ghép các đội gần điểm nhau, tránh gặp lại. Thắng cặp 1 điểm, hòa 0,5, thua 0. Số đội lẻ thì một đội nhận BYE (1 điểm). Đồng điểm xét Buchholz (tổng điểm đối thủ đã gặp) rồi điểm ván.</li>
+          <li><b>Vòng tròn:</b> mỗi cặp gặp nhau đúng một lần.</li>
+          <li><b>Loại trực tiếp:</b> thua là bị loại; hòa cặp thì đội còn nhiều quân hơn sau hai ván đi tiếp, rồi đến hạt giống cao hơn.</li>
+          <li><b>Xếp loại</b> theo hạng cuối: 10% đầu <i>Xuất sắc</i>, 20% kế <i>Giỏi</i>, 30% kế <i>Khá</i>, còn lại <i>Đạt</i>; đội không ghi điểm nào là <i>Chưa đạt</i>.</li>
+          <li>Đội vi phạm có thể bị truất quyền: các ván chưa đấu được xử thắng cho đối thủ.</li>
+        </ul>
+        <h3>11.6. Huy hiệu</h3>
+        <p>Có 17 huy hiệu cho cả đội, ví dụ <i>Khai bút</i> (bot hợp lệ đầu tiên), <i>Về đích</i>, <i>Càn quét</i> (ăn hết một loại), <i>Chớp nhoáng</i> (thắng trong 40 nửa lượt), <i>Toàn vẹn</i> (thắng không mất quân), <i>Lật kèo</i> (thắng đội hơn 100 Elo), <i>Hạ trùm cuối</i>… Thắng kỹ thuật và ván đấu tập không được tính.</p>
+      </section>
+
+      <section id="faq">
+        <h2>12. Câu hỏi hay gặp</h2>
+        <details><summary>Người khác có xem được mã bot của đội mình không?</summary><p>Không. Chỉ thành viên đội (và ban tổ chức khi kiểm tra gian lận) xem được mã. Tên đội, tên bot, kết quả và replay thì công khai với những người đã đăng nhập.</p></details>
+        <details><summary>Nộp bot nhiều lần có bị trừ gì không?</summary><p>Không. Mỗi lần nộp là một phiên bản. Giới hạn duy nhất: tối đa 3 bài đang chờ kiểm tra cùng lúc, và 20 lượt nộp mỗi giờ cho cả đội.</p></details>
+        <details><summary>Bot của mình đăng ký giải rồi, sửa bot thì sao?</summary><p>Đến hết hạn đăng ký, bạn được đổi sang phiên bản khác. Khi ban tổ chức khóa danh sách, bản đã chọn được đóng băng và không đổi được nữa.</p></details>
+        <details><summary>Quên mật khẩu thì làm sao?</summary><p>Liên hệ ban tổ chức để được cấp mật khẩu tạm, rồi đổi lại trong mục tài khoản.</p></details>
+        <details><summary>Có được dùng AI hoặc mã tham khảo trên mạng không?</summary><p>Theo thể lệ của ban tổ chức. Hệ thống đánh dấu các bài nộp trùng mã giữa nhiều đội để ban tổ chức kiểm tra; bot mẫu nguyên bản trùng nhau là bình thường.</p></details>
+        <details><summary>Có thể dùng bảng tính sẵn (opening book) không?</summary><p>Có, miễn tổng kích thước file không quá 64 KiB và thời gian nạp mã dưới 5 giây. Biến toàn cục được tạo một lần khi nạp.</p></details>
+        <details><summary>Replay có chạy lại đúng không?</summary><p>Có. Mỗi ván lưu toàn bộ nước đi, phiên bản luật, mã băm hai bot và thời gian mỗi bên đã dùng, nên có thể xem lại và kiểm chứng.</p></details>
+      </section>
+    </article></main>
+  </div>
 </body>
 </html>

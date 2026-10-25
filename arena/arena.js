@@ -68,6 +68,7 @@ function setMode(asRegister) {
 }
 
 function openAuth(asRegister) {
+  if (me) return;
   setMode(asRegister);
   $('#gate').hidden = false;
 }
@@ -86,8 +87,6 @@ function renderAccount() {
   $('#account-button').textContent = me ? `${me.name}${team ? ` · ${team.name}` : ''}` : 'Đăng nhập';
   $('#admin-link').hidden = me?.role !== 'admin';
   $('#password-banner').hidden = !me?.must_change;
-  $('#hero').hidden = Boolean(me);
-  $('#hero-actions').hidden = Boolean(me);
 }
 
 const skew = () => health ? health.server_time - Date.now()/1000 : 0;
@@ -99,7 +98,7 @@ function renderHealth() {
   $('#announcement').hidden = !health.announcement;
   $('#announcement').textContent = health.announcement;
   $('#invite-field').hidden = !health.registration_invite;
-  $('#team-caption').textContent = `Mỗi đội tối đa ${health.team_size} thành viên. Bot, điểm Elo, huy hiệu và đăng ký giải thuộc về đội.`;
+  $('#team-caption').textContent = `Tối đa ${health.team_size} thành viên. Bot, Elo, huy hiệu và đăng ký giải thuộc về đội.`;
 }
 
 // ---- notifications ------------------------------------------------------
@@ -152,46 +151,36 @@ function openTournaments() {
 function renderDashboard(recent) {
   const valid = submissions.filter(s => s.status === 'valid');
   const latest = submissions[0];
-  const entered = new Set((team?.entries || []).map(e => e.tournament_id));
+  const entered = (team?.entries || []).length > 0;
   const cleared = campaign?.mine?.cleared || 0, levels = campaign?.bosses?.length || 5;
   const steps = [
-    ['Tạo tài khoản', Boolean(me), () => openAuth(true)],
-    ['Lập hoặc vào đội', Boolean(team), () => setTab('team')],
-    ['Có bot hợp lệ', valid.length > 0, () => setTab('lab')],
-    ['Hạ boss đầu tiên', cleared > 0, () => setTab('campaign')],
-    ['Đăng ký giải', entered.size > 0, () => setTab('competition')],
-    ['Xem ván đầu tiên', recent.some(m => m.status === 'done'), () => setTab('watch')],
+    {label: 'Lập đội', done: Boolean(team), title: 'Lập đội hoặc vào đội của bạn', text: 'Tạo đội mới rồi gửi mã đội cho bạn cùng nhóm, hoặc nhập mã bạn bè đã gửi.', cta: 'Lập đội', tab: 'team'},
+    {label: 'Nộp bot', done: valid.length > 0, title: 'Nộp bot đầu tiên', text: 'Chọn một bot mẫu, bấm nộp và chờ máy kiểm tra (vài chục giây).', cta: 'Mở xưởng bot', tab: 'lab'},
+    {label: 'Hạ Boss 1', done: cleared > 0, title: 'Hạ boss đầu tiên', text: 'Boss 1 rất dễ: chỉ cần bot chạy đúng là thắng.', cta: 'Vào chiến dịch', tab: 'campaign'},
+    ...(openTournaments().length || entered ? [{label: 'Đăng ký giải', done: entered, title: 'Đăng ký giải đang mở', text: 'Chọn bot trước hạn để giữ suất cho đội.', cta: 'Xem giải', tab: 'competition'}] : []),
+    {label: 'Xem replay', done: recent.some(m => m.status === 'done'), title: 'Xem một ván đấu', text: 'Mở khán đài để xem lại cách bot của bạn chơi.', cta: 'Mở khán đài', tab: 'watch'},
   ];
-  const next = steps.findIndex(step => !step[1]);
-  $('#checklist').hidden = false;
-  $('#checklist').innerHTML = `<p class="eyebrow">LỘ TRÌNH CỦA BẠN · ${steps.filter(s => s[1]).length}/${steps.length}</p><ol>${steps.map(([label, done], index) =>
-    `<li class="${done ? 'done' : index === next ? 'next' : ''}"><span>${done ? '✓' : String(index+1).padStart(2,'0')}</span><button class="text-link" data-step="${index}">${escape(label)}</button></li>`).join('')}</ol>`;
-  $('#checklist').onclick = event => { const b = event.target.closest('[data-step]'); if (b) steps[Number(b.dataset.step)][2](); };
-  const open = openTournaments()[0];
-  const cards = [];
-  cards.push(team ? `<article class="dash-card"><span class="eyebrow">ĐỘI</span><h3>${escape(team.name)}</h3><p>${team.members.length} thành viên · mã <strong>${escape(team.code)}</strong></p><button class="button" data-tab="team">Quản lý đội ↗</button></article>`
-    : `<article class="dash-card highlight"><span class="eyebrow">ĐỘI</span><h3>Chưa có đội</h3><p>Tạo đội mới hoặc nhập mã đội bạn bè gửi.</p><button class="button primary" data-tab="team">Lập đội ↗</button></article>`);
-  cards.push(latest ? `<article class="dash-card"><span class="eyebrow">BOT MỚI NHẤT</span><h3>${escape(latest.name)}</h3><p>${badge(latest.status)} ${latest.position ? `vị trí #${latest.position} trong hàng chờ` : escape((latest.log || '').length > 90 ? `${latest.log.slice(0, 88)}…` : latest.log || '')}</p><button class="button" data-tab="lab">Mở xưởng bot ↗</button></article>`
-    : `<article class="dash-card ${team ? 'highlight' : ''}"><span class="eyebrow">BOT</span><h3>Chưa nộp bot</h3><p>Bắt đầu từ bot mẫu, nộp và chờ kết quả kiểm tra.</p><button class="button ${team ? 'primary' : ''}" data-tab="lab">Viết bot ↗</button></article>`);
-  const nextBoss = campaign?.bosses?.[Math.min(cleared, levels - 1)];
-  cards.push(`<article class="dash-card ${valid.length && cleared < levels ? 'highlight' : ''}"><span class="eyebrow">CHIẾN DỊCH BOSS</span><h3>Ải ${cleared}/${levels} · ${campaign?.mine?.stars || 0} ★</h3><p>${cleared >= levels ? 'Đội đã hạ trùm cuối. Thử lấy đủ 3 sao mọi ải!' : nextBoss ? `Tiếp theo: Boss ${nextBoss.level} · ${escape(nextBoss.name)}` : 'Đánh bại 5 boss mạnh dần.'}</p><button class="button ${valid.length && cleared < levels ? 'primary' : ''}" data-tab="campaign">${cleared ? 'Leo tiếp ↗' : 'Vào ải đầu ↗'}</button></article>`);
+  const current = steps.find(step => !step.done);
+  $('#next-step').innerHTML = `<div class="next-main"><p class="eyebrow">${current ? `VIỆC TIẾP THEO · ${steps.filter(s => s.done).length}/${steps.length}` : 'XONG LỘ TRÌNH'}</p><h2>${escape(current?.title || 'Bạn đã sẵn sàng thi đấu')}</h2><p>${escape(current?.text || 'Tiếp tục leo bảng Elo, hoặc luyện thêm bằng các boss cao hơn.')}</p><button class="button primary" data-tab="${current?.tab || 'ranked'}">${escape(current?.cta || 'Đấu xếp hạng')} ↗</button></div><ol class="progress-dots" aria-label="Tiến độ">${steps.map(step => `<li class="${step.done ? 'done' : step === current ? 'now' : ''}"><span aria-hidden="true">${step.done ? '✓' : ''}</span>${escape(step.label)}</li>`).join('')}</ol>`;
   const mine = ranked?.mine;
-  cards.push(`<article class="dash-card"><span class="eyebrow">ELO XẾP HẠNG</span><h3>${mine ? `${mine.rating} · ${escape(mine.tier)}` : '1000 · Bạc'}</h3><p>${mine?.position ? `Hạng #${mine.position} · ${mine.played} cặp` : 'Chưa có cặp trận xếp hạng.'}</p><button class="button" data-tab="ranked">Tìm đối thủ ↗</button></article>`);
-  cards.push(open ? `<article class="dash-card ${entered.has(open.id) ? '' : 'highlight'}"><span class="eyebrow">GIẢI ĐANG MỞ · ${escape(countdown(open.deadline).toUpperCase())}</span><h3>${escape(open.name)}</h3><p>${entered.has(open.id) ? 'Đội đã đăng ký. Có thể đổi bot trước hạn.' : `Hạn chọn bot: ${formatTime(open.deadline)}`}</p><button class="button ${entered.has(open.id) ? '' : 'primary'}" data-tournament="${open.id}">${entered.has(open.id) ? 'Xem giải ↗' : 'Đăng ký ngay ↗'}</button></article>`
-    : `<article class="dash-card"><span class="eyebrow">GIẢI ĐẤU</span><h3>Chưa có giải mở đăng ký</h3><p>Leo tháp boss và đấu xếp hạng trong lúc chờ ban tổ chức.</p><button class="button" data-tab="competition">Xem các giải ↗</button></article>`);
-  $('#dashboard-cards').innerHTML = cards.join('');
-  $('#recent-matches').innerHTML = recent.length ? recent.slice(0, 8).map(matchRow).join('')
-    : `<div class="empty">${me ? 'Đội chưa có ván nào. Vào ải boss đầu tiên hoặc tìm đối thủ xếp hạng để bắt đầu.' : 'Đăng nhập để xem các ván của đội.'}</div>`;
-  renderBadgeSummary();
+  const tiles = [
+    ['team', 'ĐỘI', team ? team.name : 'Chưa có đội', team ? `${team.members.length} thành viên` : 'Lập đội để bắt đầu'],
+    ['lab', 'BOT', latest ? latest.name : 'Chưa có bot', latest ? (labels[latest.status] || latest.status) : 'Nộp bot đầu tiên'],
+    ['campaign', 'CHIẾN DỊCH', `Ải ${cleared}/${levels}`, `${campaign?.mine?.stars || 0} sao`],
+    ['ranked', 'ELO', mine ? `${mine.rating} · ${mine.tier}` : '1000 · Bạc', mine?.position ? `Hạng #${mine.position}` : 'Chưa xếp hạng'],
+  ];
+  $('#dashboard-cards').innerHTML = tiles.map(([tabName, label, value, hint]) => `<button class="tile" data-tab="${tabName}"><span class="eyebrow">${label}</span><strong>${escape(value)}</strong><small>${escape(hint)}</small></button>`).join('');
+  const open = openTournaments()[0];
+  const registered = open && (team?.entries || []).some(e => e.tournament_id === open.id);
+  $('#open-tournament').innerHTML = open ? `<div class="banner"><div><p class="eyebrow">GIẢI ĐANG MỞ · ${escape(countdown(open.deadline).toUpperCase())}</p><h3>${escape(open.name)}</h3><p class="caption">${registered ? 'Đội đã đăng ký. Có thể đổi bot trước hạn.' : `Hạn chọn bot: ${formatTime(open.deadline)}`}</p></div><button class="button ${registered ? '' : 'primary'}" data-tournament="${open.id}">${registered ? 'Xem giải' : 'Đăng ký ngay'} ↗</button></div>` : '';
 }
 
 const TAGS = {upset:['hot','LẬT KÈO'], sweep:['','THẮNG TRẮNG'], final:['hot','TRÙM CUỐI'], champion:['gold','VÔ ĐỊCH']};
 
 function renderFeed(data) {
   const s = data.stats;
-  $('#arena-stats').innerHTML = [['Đội đã có bot', s.teams_ready], ['Ván trong 24 giờ', s.games_today], ['Đang đấu trực tiếp', s.live], ['Lượt hạ boss', s.boss_clears]]
-    .map(([label, value]) => `<div class="arena-stat"><strong>${Number(value).toLocaleString('vi-VN')}</strong><span>${label}</span></div>`).join('');
-  $('#feed').innerHTML = data.events.length ? data.events.slice(0, 12).map(e => {
+  $('#arena-stats-line').textContent = `${Number(s.teams_ready).toLocaleString('vi-VN')} đội đã có bot · ${Number(s.games_today).toLocaleString('vi-VN')} ván trong 24 giờ · ${s.live} đang đấu`;
+  $('#feed').innerHTML = data.events.length ? data.events.slice(0, 6).map(e => {
     const tags = e.tags.map(tag => `<span class="tag ${TAGS[tag]?.[0] || ''}">${TAGS[tag]?.[1] || tag}</span>`).join('');
     const text = e.kind === 'ranked' ? `${teamLink(e.winner, e.winner_name)} thắng ${teamLink(e.loser, e.loser_name)} <strong>${e.points === 2 ? '2–0' : '1,5–0,5'}</strong> · +${e.change} Elo`
       : e.kind === 'boss' ? `${teamLink(e.winner, e.winner_name)} hạ <strong>Boss ${e.level} · ${escape(e.boss || '')}</strong> <span class="stars">${starText(e.stars)}</span>`
@@ -205,20 +194,7 @@ function badgeTiles(items) {
   return items.map(b => `<div class="achievement ${b.earned ? 'earned' : 'locked'}"><span class="achievement-icon" aria-hidden="true">${b.icon}</span><div><strong>${escape(b.title)}</strong><small>${b.earned ? '' : 'Chưa mở · '}${escape(b.detail)}</small></div></div>`).join('');
 }
 
-function renderBadgeSummary() {
-  if (!team || !badges) {
-    $('#badge-summary').innerHTML = `<p class="caption">${me ? 'Lập đội để bắt đầu sưu tập huy hiệu.' : 'Đăng nhập và lập đội để bắt đầu sưu tập huy hiệu.'}</p>`;
-    return;
-  }
-  const earned = badges.filter(b => b.earned), goal = badges.find(b => !b.earned);
-  $('#badge-summary').innerHTML = `<p class="badge-score"><strong>${earned.length}</strong> / ${badges.length} huy hiệu</p><div class="badge-row">${earned.map(b => `<span title="${escape(b.title)}">${b.icon}</span>`).join('') || '<span class="caption">Chưa có. Nộp bot đầu tiên để mở 🐣</span>'}</div>${goal ? `<p class="caption">Mục tiêu kế tiếp: <strong>${goal.icon} ${escape(goal.title)}</strong> — ${escape(goal.detail)}.</p>` : '<p class="caption">Đội đã sưu tập đủ bộ. Huyền thoại!</p>'}`;
-}
-
 function tournamentCards() {
-  $('#tournament-count').textContent = `${tournaments.length} GIẢI ĐẤU`;
-  const entered = new Set((team?.entries || []).map(e => e.tournament_id));
-  $('#tournament-list').innerHTML = tournaments.length ? tournaments.map(t => `<article class="tournament-card"><div class="card-top"><span class="eyebrow">${escape(formats[t.format] || t.format).toUpperCase()}</span>${badge(t.status)}</div><h3>${escape(t.name)}</h3><p class="caption">${t.entrants} đội · Vòng ${t.round}/${t.rounds}${t.status === 'open' ? `<br>Hạn chọn bot: ${formatTime(t.deadline)} (${countdown(t.deadline)})` : ''}${entered.has(t.id) ? '<br><strong>Đội bạn đã đăng ký</strong>' : ''}</p><button class="button" data-tournament="${t.id}">Xem giải ↗</button></article>`).join('')
-    : '<div class="empty">Giải khai màn đang được chuẩn bị.<br>Bạn có thể lập đội, viết bot, leo tháp boss và đấu xếp hạng trước.</div>';
   options('#competition-select', tournaments, 'Chưa có giải đấu');
   if (!tournaments.some(t => t.id === selectedTournament)) selectedTournament = (openTournaments()[0] || tournaments[0])?.id || '';
   $('#competition-select').value = selectedTournament;
@@ -535,7 +511,7 @@ document.addEventListener('click', event => {
   if (button.dataset.sample) action(button, async () => {
     const response = await fetch(`../sdk/examples/${button.dataset.sample}.py`);
     if (!response.ok) throw new Error('Không tải được bot mẫu.');
-    $('#source').value = await response.text(); $('#bot-name').value = {first:'Nước đầu tiên',hunter:'Thợ săn',guardian:'Người gác'}[button.dataset.sample]; updateSize();
+    $('#source').value = await response.text(); $('#bot-name').value = {first:'Nước đầu tiên',hunter:'Thợ săn',guardian:'Người gác',template:'Khung chiến thuật'}[button.dataset.sample]; updateSize();
   });
   if (button.dataset.source) action(button, async () => { const result = await api(`/submissions/${button.dataset.source}/source`); $('#source').value = result.source; updateSize(); $('#source').focus(); });
   if (button.dataset.rankBot) { setTab('ranked'); $('#ranked-submission').value = button.dataset.rankBot; }
@@ -556,6 +532,7 @@ document.addEventListener('keydown', event => {
 $('#competition-select').addEventListener('change', event => { selectedTournament = event.target.value; standingsLimit = 100; action(null, renderCompetition); });
 $('#round-select').addEventListener('change', () => action(null, renderRound));
 $('#standings-search').addEventListener('input', renderStandings);
+$('#show-detail').addEventListener('change', event => $('#standings-table').classList.toggle('compact', !event.target.checked));
 $('#standings-more').addEventListener('click', () => { standingsLimit += 200; renderStandings(); });
 $('#match-filter').addEventListener('change', () => action(null, matchDirectory));
 document.addEventListener('input', event => {

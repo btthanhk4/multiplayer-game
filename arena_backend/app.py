@@ -21,7 +21,8 @@ from .store import Store, Problem, ROOT, RULES_HASH, LIMITS, TEAM_SIZE, SYSTEM_T
 
 PUBLIC_FILES = {'rules.js', 'arena/arena.js', 'arena/admin.js', 'arena/common.js', 'arena/arena.css',
                 'arena/guide.html'}
-SAMPLES = {'sdk/examples/first.py', 'sdk/examples/hunter.py', 'sdk/examples/guardian.py'}
+SAMPLES = {'sdk/examples/first.py', 'sdk/examples/hunter.py', 'sdk/examples/guardian.py',
+           'sdk/examples/template.py', 'sdk/local_arena.py'}
 SESSION_SECONDS = int(os.getenv('ARENA_SESSION_DAYS', '7')) * 86400
 IMPORT_BYTES = 60_000_000
 
