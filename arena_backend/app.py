@@ -9,6 +9,7 @@ import secrets
 import sqlite3
 import threading
 import time
+import unicodedata
 from urllib.parse import urlsplit
 
 from flask import Flask, Response, jsonify, request, send_from_directory, g
@@ -46,8 +47,28 @@ RATES = {
 def text(data, key, minimum=1, maximum=80):
     value = data.get(key)
     if not isinstance(value, str) or not minimum <= len(value.strip()) <= maximum:
-        raise Problem(f'Trường {key} cần từ {minimum} đến {maximum} ký tự.')
+        label = FIELD_LABELS.get(key, key)
+        raise Problem(f'{label} cần từ {minimum} đến {maximum} ký tự.' if minimum != maximum
+                      else f'{label} không hợp lệ.')
     return value.strip()
+
+
+FIELD_LABELS = {'username': 'Tên đăng nhập', 'password': 'Mật khẩu', 'name': 'Họ và tên', 'invite': 'Mã tham gia',
+                'current': 'Mật khẩu hiện tại'}
+RESERVED_NAMES = {'admin', 'administrator', 'root', 'system', 'ottv2', 'btc', 'support', 'boss', 'moderator'}
+INVISIBLE = dict.fromkeys(map(ord, '\u200b\u200c\u200d\u2060\ufeff\u00ad'), None)
+# Hashed once so unknown usernames cost the same time as wrong passwords.
+DUMMY_HASH = generate_password_hash('not-a-real-password', method='scrypt')
+
+
+def clean_name(value, label='Họ và tên'):
+    if not isinstance(value, str):
+        raise Problem(f'{label} không hợp lệ.')
+    value = unicodedata.normalize('NFC', value).translate(INVISIBLE)
+    value = ' '.join(''.join(c for c in value if c.isprintable()).split())
+    if not 2 <= len(value) <= 40:
+        raise Problem(f'{label} cần từ 2 đến 40 ký tự.')
+    return value
 
 
 class TTLCache:
@@ -108,8 +129,11 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         if not request.path.startswith('/api/'):
             return
         if request.method not in ('GET', 'HEAD'):
-            if request.headers.get('Origin') not in (None, public_origin):
-                raise Problem('Origin không được phép.', 403)
+            sent = request.headers.get('Origin')
+            if sent not in (None, 'null', public_origin) and urlsplit(sent).netloc != request.host:
+                raise Problem('Địa chỉ truy cập không khớp với máy chủ. Hãy mở lại bằng đúng đường link được cấp.', 403)
+            if sent == 'null':
+                raise Problem('Trình duyệt không gửi nguồn gốc yêu cầu. Hãy mở trang trực tiếp bằng link được cấp.', 403)
             if request.path != '/api/admin/import' and not request.is_json:
                 raise Problem('API yêu cầu application/json.', 415)
         token = request.cookies.get('ott_session', '')
@@ -231,8 +255,12 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
             db.execute('INSERT INTO sessions VALUES(?,?,?,?)',
                        (hashlib.sha256(token.encode()).hexdigest(), user['id'], csrf, now()+SESSION_SECONDS))
         response = jsonify(user={k: user[k] for k in ('id', 'username', 'name', 'role')}, csrf=csrf)
+        # A Secure cookie is silently dropped over plain http (e.g. the LAN address), so only
+        # set it when the browser actually used https.
+        scheme = urlsplit(request.headers.get('Origin') or '').scheme or request.headers.get('X-Forwarded-Proto') \
+            or request.scheme
         response.set_cookie('ott_session', token, max_age=SESSION_SECONDS, httponly=True,
-                            secure=parsed.scheme == 'https', samesite='Lax', path='/')
+                            secure=scheme == 'https', samesite='Lax', path='/')
         return response
 
     @app.post('/api/register')
@@ -241,23 +269,33 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         if settings().get('registration_open') != '1':
             raise Problem('Ban tổ chức đang tạm đóng đăng ký tài khoản.', 403)
         rate('register_ip', g.client_ip)
-        username, password = text(data, 'username', 3, 32).lower(), text(data, 'password', 12, 128)
+        username = text(data, 'username', 3, 32).lower()
         if not re.fullmatch(r'[a-z0-9_]{3,32}', username):
-            raise Problem('Tên đăng nhập chỉ gồm chữ thường, số và dấu gạch dưới.')
+            raise Problem('Tên đăng nhập chỉ gồm chữ thường không dấu, số và dấu gạch dưới (3–32 ký tự).')
+        if username in RESERVED_NAMES:
+            raise Problem('Tên đăng nhập này được dành riêng. Hãy chọn tên khác.', 409)
+        password = text(data, 'password', 12, 128)
         if password != data['password']:
-            raise Problem('Mật khẩu không được có khoảng trắng ở đầu/cuối.')
-        if code and not secrets.compare_digest(str(data.get('invite', '')).strip(), code):
-            raise Problem('Mã tham gia không đúng.', 403)
-        student_id = str(data.get('student_id') or '').strip()[:20] or None
-        user = {'id': uid(), 'username': username, 'name': text(data, 'name', 2, 40), 'role': 'player'}
+            raise Problem('Mật khẩu không được có khoảng trắng ở đầu hoặc cuối.')
+        if len(set(password)) < 4 or username in password.lower():
+            raise Problem('Mật khẩu quá dễ đoán: cần ít nhất 4 ký tự khác nhau và không chứa tên đăng nhập.')
+        if code and not secrets.compare_digest(str(data.get('invite') or '').strip(), code):
+            raise Problem('Mã tham gia không đúng. Hỏi ban tổ chức để lấy mã.', 403)
+        student_id = str(data.get('student_id') or '').strip().upper()
+        if student_id and not re.fullmatch(r'[A-Z0-9][A-Z0-9._-]{0,19}', student_id):
+            raise Problem('Mã số sinh viên chỉ gồm chữ, số và dấu - _ . (tối đa 20 ký tự).')
+        user = {'id': uid(), 'username': username, 'name': clean_name(data.get('name')), 'role': 'player'}
         with store.connect() as db:
             if db.execute('SELECT 1 FROM users WHERE username=?', (username,)).fetchone():
                 raise Problem('Tên đăng nhập đã có người dùng.', 409)
         password_hash = generate_password_hash(password, method='scrypt')
-        with store.connect(True) as db:
-            db.execute('INSERT INTO users(id,username,name,password,role,created,student_id) VALUES(?,?,?,?,?,?,?)',
-                       (user['id'], username, user['name'], password_hash, 'player', now(), student_id))
-            store.audit(db, user['id'], 'user.registered', {'username': username})
+        try:
+            with store.connect(True) as db:
+                db.execute('INSERT INTO users(id,username,name,password,role,created,student_id) VALUES(?,?,?,?,?,?,?)',
+                           (user['id'], username, user['name'], password_hash, 'player', now(), student_id or None))
+                store.audit(db, user['id'], 'user.registered', {'username': username})
+        except sqlite3.IntegrityError:
+            raise Problem('Tên đăng nhập đã có người dùng.', 409)
         return session_response(user)
 
     @app.post('/api/login')
@@ -269,7 +307,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         text(data, 'password', 1, 128)
         with store.connect() as db:
             user = db.execute('SELECT * FROM users WHERE username=?', (username,)).fetchone()
-        if not user or not check_password_hash(user['password'], data['password']):
+        if not check_password_hash(user['password'] if user else DUMMY_HASH, data['password']) or not user:
             raise Problem('Tên đăng nhập hoặc mật khẩu không đúng.', 401)
         if user['disabled']:
             raise Problem('Tài khoản đã bị khóa. Liên hệ ban tổ chức.', 403)
@@ -289,6 +327,8 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         user, data = auth(), body()
         rate('login_user', g.user['username'])
         new = text(data, 'password', 12, 128)
+        if len(set(new)) < 4 or g.user['username'] in new.lower():
+            raise Problem('Mật khẩu quá dễ đoán: cần ít nhất 4 ký tự khác nhau và không chứa tên đăng nhập.')
         if new != data['password']:
             raise Problem('Mật khẩu không được có khoảng trắng ở đầu/cuối.')
         with store.connect() as db:

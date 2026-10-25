@@ -868,6 +868,164 @@ class Campaign(Base):
         self.assertEqual({m['team2_id'] for m in matches} | {m['team1_id'] for m in matches}, {team, SYSTEM_TEAM})
 
 
+class SignInCornerCases(Base):
+    PASSWORD = 'test-only-password-123'
+
+    def attempt(self, path, data, origin='http://localhost:8080', client=None, **extra):
+        return (client or self.app.test_client()).post('/api' + path, json=data, headers={'Origin': origin, **extra})
+
+    def signup(self, **over):
+        data = {'username': 'newbie', 'name': 'Tân sinh viên', 'password': self.PASSWORD, 'invite': 'test-invite', **over}
+        return self.attempt('/register', data)
+
+    def test_origin_accepts_configured_or_same_host_but_not_foreign_sites(self):
+        self.assertEqual(self.signup(username='cfg').status_code, 200)
+        # Reached through another address (LAN IP, second domain): same host as the request.
+        lan = self.attempt('/register', {'username': 'lan', 'name': 'Qua LAN', 'password': self.PASSWORD,
+                                         'invite': 'test-invite'}, origin='http://192.168.10.185:8091',
+                           client=self.app.test_client(), Host='192.168.10.185:8091')
+        self.assertEqual(lan.status_code, 200, lan.json)
+        evil = self.attempt('/register', {'username': 'evil', 'name': 'Giả mạo', 'password': self.PASSWORD,
+                                          'invite': 'test-invite'}, origin='https://evil.example',
+                            client=self.app.test_client())
+        self.assertEqual(evil.status_code, 403)
+        self.assertIn('Địa chỉ truy cập', evil.json['error'])
+        opaque = self.attempt('/register', {'username': 'nul', 'name': 'Opaque', 'password': self.PASSWORD},
+                              origin='null', client=self.app.test_client())
+        self.assertEqual(opaque.status_code, 403)
+
+    def test_cookie_is_secure_only_when_browser_used_https(self):
+        http = self.attempt('/register', {'username': 'plain', 'name': 'Http', 'password': self.PASSWORD,
+                                          'invite': 'test-invite'}, origin='http://localhost:8080')
+        self.assertNotIn('Secure', http.headers['Set-Cookie'])
+        secure = self.attempt('/login', {'username': 'plain', 'password': self.PASSWORD},
+                              origin='https://arena.test', client=self.app.test_client(), Host='arena.test')
+        self.assertIn('Secure', secure.headers['Set-Cookie'])
+        self.assertIn('HttpOnly', secure.headers['Set-Cookie'])
+
+    def test_username_rules_case_reserved_and_duplicates(self):
+        self.assertEqual(self.signup(username='  MixedCase_01 ').status_code, 200)
+        self.assertEqual(self.signup(username='mixedcase_01').status_code, 409)
+        self.assertEqual(self.signup(username='MIXEDCASE_01').status_code, 409)
+        for bad in ('ab', 'a' * 33, 'có dấu', 'space in', 'semi;colon', '../etc', '<b>x</b>', 'user-name', ''):
+            self.assertEqual(self.signup(username=bad).status_code, 400, bad)
+        for reserved in ('admin', 'Root', 'SYSTEM'):
+            self.assertEqual(self.signup(username=reserved).status_code, 409, reserved)
+
+    def test_password_rules(self):
+        for bad, expect in (('short-1', 400), (' leading-space-pass', 400), ('trailing-space-pass ', 400),
+                            ('a' * 129, 400), ('aaaaaaaaaaaaaaaa', 400), ('xx-newbie-xx-yy', 400), ('', 400)):
+            self.assertEqual(self.signup(password=bad).status_code, expect, repr(bad))
+        ok = self.signup(password='đây là mật khẩu dài có dấu')
+        self.assertEqual(ok.status_code, 200, ok.json)
+        self.assertEqual(self.attempt('/login', {'username': 'newbie', 'password': 'đây là mật khẩu dài có dấu'},
+                                      client=self.app.test_client()).status_code, 200)
+
+    def test_name_student_id_and_wrong_types(self):
+        browser = self.app.test_client()
+        messy = '  Nguyễn ​Văn   A\n '
+        r = self.attempt('/register', {'username': 'clean', 'name': messy, 'password': self.PASSWORD,
+                                       'invite': 'test-invite'}, client=browser)
+        self.assertEqual(r.status_code, 200, r.json)
+        self.assertEqual(browser.get('/api/me').json['user']['name'], 'Nguyễn Văn A')
+        for bad in ('x', ' ', '\u200b\u200b', 'a' * 41, 123, None, ['a'], {'a': 1}):
+            self.assertEqual(self.signup(username=f'u{abs(hash(str(bad))) % 10**8}', name=bad).status_code, 400, repr(bad))
+        for bad in ('has space', 'ab<script>', 'x' * 21, '!!'):
+            self.assertEqual(self.signup(username='mssv_bad', student_id=bad).status_code, 400, bad)
+        good = self.signup(username='mssv_ok', student_id='b21dcat001')
+        self.assertEqual(good.status_code, 200, good.json)
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT student_id FROM users WHERE username='mssv_ok'").fetchone()[0], 'B21DCAT001')
+        for field, value in (('username', 5), ('password', 5), ('username', None), ('password', ['x'])):
+            body = {'username': 'typed', 'name': 'Kiểu dữ liệu', 'password': self.PASSWORD, 'invite': 'test-invite'}
+            body[field] = value
+            self.assertEqual(self.attempt('/register', body).status_code, 400, (field, value))
+        self.assertEqual(self.attempt('/register', {'username': 'x'}).status_code, 400)
+        self.assertEqual(self.client.post('/api/register', data='not json', headers={'Origin': 'http://localhost:8080'}).status_code, 415)
+        self.assertEqual(self.client.post('/api/register', json=['list'], headers={'Origin': 'http://localhost:8080'}).status_code, 400)
+
+    def test_invite_code_required_trimmed_and_checked_in_constant_time_form(self):
+        self.assertEqual(self.signup(username='noinvite', invite='').status_code, 403)
+        self.assertEqual(self.signup(username='wrong', invite='nope').status_code, 403)
+        self.assertEqual(self.signup(username='missing', invite=None).status_code, 403)
+        self.assertEqual(self.signup(username='spaced', invite='  test-invite ').status_code, 200)
+
+    def test_login_messages_do_not_reveal_which_part_was_wrong(self):
+        self.signup(username='member')
+        wrong_password = self.attempt('/login', {'username': 'member', 'password': 'wrong-password-1'})
+        unknown = self.attempt('/login', {'username': 'ghost_user', 'password': 'wrong-password-1'})
+        self.assertEqual((wrong_password.status_code, unknown.status_code), (401, 401))
+        self.assertEqual(wrong_password.json, unknown.json)
+        self.assertEqual(self.attempt('/login', {'username': '  MEMBER ', 'password': self.PASSWORD}).status_code, 200)
+        for body in ({}, {'username': 'member'}, {'password': 'x'}, {'username': 7, 'password': 'x'},
+                     {'username': 'member', 'password': ['x']}, {'username': '', 'password': ''}):
+            self.assertEqual(self.attempt('/login', body).status_code, 400, body)
+        with self.store.connect(True) as db:
+            db.execute("UPDATE users SET disabled=1 WHERE username='member'")
+        locked = self.attempt('/login', {'username': 'member', 'password': self.PASSWORD})
+        self.assertEqual(locked.status_code, 403)
+        self.assertIn('khóa', locked.json['error'])
+        # A disabled account must not keep working through an old session.
+        self.assertIsNone(self.client.get('/api/me').json['user'])
+
+    def test_login_is_rate_limited_per_username_but_other_accounts_still_work(self):
+        self.signup(username='target')
+        self.signup(username='bystander')
+        codes = [self.attempt('/login', {'username': 'target', 'password': 'wrong-password-1'}).status_code
+                 for _ in range(22)]
+        self.assertEqual(codes[:20], [401] * 20)
+        self.assertEqual(codes[20:], [429, 429])
+        self.assertEqual(self.attempt('/login', {'username': 'bystander', 'password': self.PASSWORD}).status_code, 200)
+
+    def test_registration_closed_logout_and_stale_cookie(self):
+        self.store.set_settings('admin', {'registration_open': False})
+        self.app.extensions['cache'].clear()
+        closed = self.signup(username='toolate')
+        self.assertEqual(closed.status_code, 403)
+        self.assertIn('đóng đăng ký', closed.json['error'])
+        self.store.set_settings('admin', {'registration_open': True})
+        self.app.extensions['cache'].clear()
+        browser = self.app.test_client()
+        opened = self.attempt('/register', {'username': 'open_again', 'name': 'Mở lại', 'password': self.PASSWORD,
+                                            'invite': 'test-invite'}, client=browser)
+        self.assertEqual(opened.status_code, 200)
+        csrf = browser.get('/api/me').json['csrf']
+        self.assertEqual(self.post('/logout', {}, client=browser, csrf=csrf).status_code, 200)
+        self.assertIsNone(browser.get('/api/me').json['user'])
+        browser.set_cookie('ott_session', 'forged-or-expired-token')
+        self.assertEqual(browser.get('/api/me').json['user'], None)
+        self.assertEqual(browser.get('/api/tournaments').status_code, 401)
+
+    def test_password_change_rules_and_other_sessions_end(self):
+        browser, other = self.app.test_client(), self.app.test_client()
+        self.attempt('/register', {'username': 'changer', 'name': 'Đổi mật khẩu', 'password': self.PASSWORD,
+                                   'invite': 'test-invite'}, client=browser)
+        csrf = browser.get('/api/me').json['csrf']
+        self.attempt('/login', {'username': 'changer', 'password': self.PASSWORD}, client=other)
+        weak = self.post('/me/password', {'current': self.PASSWORD, 'password': 'aaaaaaaaaaaaaaaa'}, client=browser, csrf=csrf)
+        self.assertEqual(weak.status_code, 400)
+        wrong = self.post('/me/password', {'current': 'not-my-password', 'password': 'brand-new-password-9'}, client=browser, csrf=csrf)
+        self.assertEqual(wrong.status_code, 403)
+        ok = self.post('/me/password', {'current': self.PASSWORD, 'password': 'brand-new-password-9'}, client=browser, csrf=csrf)
+        self.assertEqual(ok.status_code, 200)
+        self.assertIsNone(other.get('/api/me').json['user'])
+        self.assertEqual(browser.get('/api/me').json['user']['username'], 'changer')
+        self.assertEqual(self.attempt('/login', {'username': 'changer', 'password': 'brand-new-password-9'},
+                                      client=self.app.test_client()).status_code, 200)
+
+    def test_concurrent_registration_of_one_username_creates_exactly_one_account(self):
+        def go(i):
+            client = self.app.test_client()
+            return client.post('/api/register', json={'username': 'race', 'name': f'Người {i}', 'password': self.PASSWORD,
+                                                      'invite': 'test-invite'},
+                               headers={'Origin': 'http://localhost:8080'}).status_code
+        with concurrent.futures.ThreadPoolExecutor(8) as pool:
+            codes = list(pool.map(go, range(8)))
+        self.assertEqual(sorted(codes), [200] + [409] * 7, codes)
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM users WHERE username='race'").fetchone()[0], 1)
+
+
 class AdminMatches(Base):
     def admin_client(self):
         self.register('boss_admin')

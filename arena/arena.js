@@ -55,6 +55,8 @@ function setMode(asRegister) {
   register = asRegister;
   const form = $('#auth-form');
   $('#register-fields').hidden = $('#register-more').hidden = !register;
+  $('#username-hint').hidden = $('#password-hint').hidden = !register;
+  form.elements.invite.required = register && Boolean(health?.registration_invite);
   form.elements.name.required = register; form.elements.password.minLength = register ? 12 : 1;
   form.elements.password.autocomplete = register ? 'new-password' : 'current-password';
   $('#tab-login').setAttribute('aria-selected', String(!register)); $('#tab-register').setAttribute('aria-selected', String(register));
@@ -613,6 +615,17 @@ $('#password-form').addEventListener('submit', async event => { event.preventDef
   try { await api('/me/password', Object.fromEntries(new FormData(event.target))); event.target.reset(); $('#password-dialog').close(); await loadMe(); notice('Đã đổi mật khẩu.'); }
   catch (error) { $('#password-error').textContent = error.message; } });
 $('#toggle-auth').addEventListener('click', () => setMode(!register));
+const slug = text => text.normalize('NFD').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 24);
+let usernameTouched = false;
+$('#auth-form').elements.username.addEventListener('input', event => { usernameTouched = true; event.target.value = event.target.value.replace(/\s+/g, '').toLowerCase(); });
+$('#auth-form').elements.name.addEventListener('input', event => {
+  const field = $('#auth-form').elements.username;
+  if (register && (!usernameTouched || !field.value)) { field.value = slug(event.target.value); usernameTouched = false; }
+});
+$('#show-password').addEventListener('click', event => {
+  const field = $('#auth-form').elements.password, show = field.type === 'password';
+  field.type = show ? 'text' : 'password'; event.target.textContent = show ? 'Ẩn' : 'Hiện'; event.target.setAttribute('aria-pressed', String(show));
+});
 $('#tab-login').addEventListener('click', () => setMode(false));
 $('#tab-register').addEventListener('click', () => setMode(true));
 $('#auth-form').addEventListener('submit', async event => {
@@ -620,6 +633,9 @@ $('#auth-form').addEventListener('submit', async event => {
   if (!event.target.reportValidity()) return;
   event.submitter.disabled = true;
   const data = Object.fromEntries(new FormData(event.target)); data.username = data.username.trim().toLowerCase();
+  if (!register) { delete data.name; delete data.student_id; delete data.invite; }
+  if (register && /^\s|\s$/.test(data.password)) { $('#auth-error').textContent = 'Mật khẩu không được bắt đầu hoặc kết thúc bằng khoảng trắng.'; event.submitter.disabled = false; return; }
+  if (!/^[a-z0-9_]{3,32}$/.test(data.username)) { $('#auth-error').textContent = 'Tên đăng nhập chỉ gồm chữ thường không dấu, số và dấu gạch dưới (3–32 ký tự).'; event.submitter.disabled = false; return; }
   try {
     await api(register ? '/register' : '/login', data);
     event.target.elements.password.value = ''; await loadMe(); forget();

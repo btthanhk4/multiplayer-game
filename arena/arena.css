@@ -215,3 +215,10 @@ body.guest main,body.guest footer,body.guest .masthead,body.guest #announcement{
 .gate-foot{text-align:center;margin-top:22px}
 .error-text:empty{display:none}
 @media(max-width:820px){.gate{grid-template-columns:1fr}.gate-art{border-radius:0 0 48px 48px;padding:84px 8% 36px;gap:14px}.gate-art h2{font-size:24px}.gate-art ul,.gate-board{display:none}.gate-form{padding:30px 6% 48px}}
+
+.field-hint{display:block;margin-top:5px;font-size:10px;font-weight:400;color:var(--muted);line-height:1.5}
+.password-row{display:flex;align-items:center;gap:10px}
+.password-row input{flex:1}
+.gate-form .password-row input{margin-top:6px}
+.password-row .text-link{margin-top:6px;flex:none}
+.error-text{color:#9b3e29;font-size:12px;line-height:1.6;margin:0 0 10px}
