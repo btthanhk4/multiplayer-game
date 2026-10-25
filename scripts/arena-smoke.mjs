@@ -173,6 +173,8 @@ try {
   await page.locator('#join-form button[type=submit]').click();
   await page.locator('#competition-info summary').filter({hasText:'Luật chơi của giải này'}).click();
   await page.locator('#competition-info .round-rules').getByText('Vòng 1').first().waitFor();
+  await page.locator('#competition-info .round-rules').getByText('Thông tin bản đồ để viết bot').waitFor();
+  assert.ok(await page.locator('#competition-info .map-card .small-table').first().innerText().then(x=>/Ô đích/.test(x)&&/Quân Xanh/.test(x)));
   await page.locator('#entry-status').filter({hasText:'Đội đã chọn'}).waitFor();
   await page.locator('[role=tab][data-tab=overview]').click();
   await page.locator('#next-step .progress-dots li.done').nth(3).waitFor();
@@ -393,6 +395,14 @@ try {
   await admin.locator('#cleanup-teams').click();
   await admin.locator('#notice').filter({hasText:/Đã dọn|Không có đội nào trống/}).waitFor();
   admin.removeAllListeners('dialog');
+  const guide=await newPage(320);
+  for(const width of [320,360,412]){
+    await guide.setViewportSize({width,height:800});
+    await guide.goto(base+'/arena/guide.html');
+    await guide.locator('#map-river').waitFor();
+    await noOverflow(guide);
+  }
+  await guide.close();
   await auditLayout(admin,['dashboard','events','people','bots','matches','queue','log'],'admin');
   assert.deepEqual(errors,[]);
   console.log('PASS: registration, team create/join, bot validation, boss campaign clear + unlock, ranked queue/cancel, tournament entry, dashboard checklist/feed/badges, team profile, four replays with speed/expand, admin dashboard, tournament create, mobile layout.');

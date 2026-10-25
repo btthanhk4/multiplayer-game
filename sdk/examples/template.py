@@ -5,11 +5,13 @@ nước tốt nhất đối với họ, rồi chọn nước cho điểm cao nh�
 """
 import random
 import time
+from collections import deque
 
 BEATS = {'rock': 'scissors', 'paper': 'rock', 'scissors': 'paper'}   # Đấm > Kéo > Lá > Đấm
 WALL = {'owner': None, 'type': 'wall'}                                # vật cản: không đi vào, không ăn được
 STEPS = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 WIN = 10_000
+DIST = {}          # DIST[phe] = bản đồ khoảng cách tới ô đích của phe đó; choose_move điền vào mỗi lượt
 
 
 def other(side):
@@ -20,6 +22,22 @@ def goal_of(board, side):
     """Ô đích của `side`. Bàn 9×9 hay 8×8 đều theo công thức này."""
     size = len(board)
     return (0, size - 1) if side == 'p1' else (size - 1, 0)
+
+
+def distance_map(size, obstacles, goal):
+    """dist[r][c] = số nước ít nhất từ ô (r, c) tới ô đích `goal`, đi 8 hướng, không qua vật cản (bỏ qua các quân)."""
+    blocked = {tuple(o) for o in obstacles}
+    dist = [[None] * size for _ in range(size)]
+    dist[goal[0]][goal[1]] = 0
+    queue = deque([tuple(goal)])
+    while queue:
+        r, c = queue.popleft()
+        for dr, dc in STEPS:
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < size and 0 <= nc < size and (nr, nc) not in blocked and dist[nr][nc] is None:
+                dist[nr][nc] = dist[r][c] + 1
+                queue.append((nr, nc))
+    return dist
 
 
 def with_walls(observation):
@@ -79,9 +97,9 @@ def evaluate(board, side):
         mine = counts(board, who)
         score += sign * 100 * sum(mine.values())                 # nhiều quân là tốt
         score -= sign * 150 * sum(1 for n in mine.values() if n == 1)   # chỉ còn 1 quân của một loại là nguy hiểm
-        goal_r, goal_c = goal_of(board, who)
         size = len(board)
-        nearest = min((max(abs(r - goal_r), abs(c - goal_c)) for r in range(size) for c in range(size)
+        dist = DIST[who]                                          # số nước THẬT tới ô đích (đi vòng vật cản)
+        nearest = min((dist[r][c] for r in range(size) for c in range(size)
                        if board[r][c] and board[r][c]['owner'] == who), default=size)
         score -= sign * 10 * nearest                              # quân càng gần ô đích càng tốt
     return score
@@ -90,6 +108,9 @@ def evaluate(board, side):
 def choose_move(observation):
     side = observation['mySide']
     board = with_walls(observation)      # bàn 8×8 hay 9×9, có thể có vật cản
+    size, walls = observation['size'], observation['obstacles']
+    DIST[side] = distance_map(size, walls, observation['goal'])
+    DIST[other(side)] = distance_map(size, walls, observation['opponentGoal'])
     started = time.perf_counter()
     best, best_score = None, -10 ** 9
     candidates = moves_of(board, side)

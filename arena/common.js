@@ -1,4 +1,4 @@
-import {newGame, applyMove, squareName, pieceCounts, makeBoard} from '../rules.js';
+import {newGame, applyMove, squareName, pieceCounts, makeBoard, goalOf, nearestToGoal} from '../rules.js';
 
 export const $ = selector => document.querySelector(selector);
 export const $$ = selector => [...document.querySelectorAll(selector)];
@@ -241,10 +241,31 @@ export function roundRules(t) {
     seeded: t.seed_from ? 'Đây là vòng trong: chỉ các đội đứng đầu giải trước được vào, hạt giống theo thứ hạng giải đó.' : ''};
 }
 
+// The facts a bot author needs about one map: size, goals, obstacle squares, where Xanh starts, and how far the goal is.
+export function mapCardHtml(map) {
+  const seeded = map === 'random' || map === 'chaos';
+  const board_ = makeBoard(seeded ? (map === 'random' ? 'random:1a2b3c4d' : 'chaos:7') : map), n = board_.length;
+  const spot = (r, c) => `${squareName(r, c, n)} [${r}, ${c}]`;
+  const walls = [], mine = {rock: [], paper: [], scissors: []};
+  board_.forEach((line, r) => line.forEach((cell, c) => {
+    if (cell?.type === 'wall') walls.push(spot(r, c)); else if (cell?.owner === 'p1') mine[cell.type].push(spot(r, c));
+  }));
+  const names = {rock: 'Đấm', paper: 'Lá', scissors: 'Kéo'};
+  const rows = [
+    ['Bàn cờ', map === 'chaos' ? '8×8 hoặc 9×9, đổi mỗi cặp' : `${n}×${n}`],
+    ['Ô đích', map === 'chaos' ? 'Xanh [0, size−1], Đỏ [size−1, 0] — đọc observation["goal"]' : `Xanh ${spot(...goalOf('p1', n))} · Đỏ ${spot(...goalOf('p2', n))}`],
+    ['Vật cản', map === 'chaos' ? '2–4 cặp đối xứng, đổi mỗi cặp — đọc observation["obstacles"]' : walls.length ? `${walls.length} ô: ${walls.join(', ')}` : 'Không có'],
+    ['Quân Xanh lúc đầu', seeded ? 'Ngẫu nhiên mỗi cặp (xem bàn mẫu)' : Object.entries(mine).map(([type, cells]) => `${names[type]}: ${cells.join(', ')}`).join(' · ')],
+  ];
+  if (!seeded) rows.push(['Quân Xanh gần đích nhất', `${nearestToGoal(board_, 'p1')} nước (đường đi thật)`]);
+  return `<div class="map-card"><div class="map-previews">${mapPreview(map)}</div><table class="small-table"><tbody>${rows.map(([a, b]) => `<tr><td><b>${escape(a)}</b></td><td>${escape(b)}</td></tr>`).join('')}</tbody></table><p class="caption"><a href="./guide.html#map-${escape(map)}">Lưu ý chiến thuật và cách viết bot cho bản đồ này (Sổ tay) ↗</a></p></div>`;
+}
+
 export function roundRulesHtml(t) {
   const r = roundRules(t);
   return `<div class="round-rules"><h4>Luật áp dụng cho mọi vòng</h4><ul>${r.everyGame.map(x => `<li>${x}</li>`).join('')}</ul>
     <h4>${escape(formats[t.format])}</h4><ul>${r.byFormat.map(x => `<li>${x}</li>`).join('')}${r.seeded ? `<li>${escape(r.seeded)}</li>` : ''}</ul>
     <h4>Từng vòng</h4>${r.pending ? '<p class="caption">Số vòng được tính theo số đội khi ban tổ chức khóa danh sách (ví dụ 16 đội: 4 vòng, vòng cuối là chung kết).</p>' : ''}
-    <ul>${r.rounds.map(x => `<li><strong>${escape(x.title)}</strong>: bản đồ ${escape(mapLabel(x.map))}${x.note ? ` — ${escape(x.note)}` : ''}</li>`).join('')}</ul></div>`;
+    <ul>${r.rounds.map(x => `<li><strong>${escape(x.title)}</strong>: bản đồ ${escape(mapLabel(x.map))}${x.note ? ` — ${escape(x.note)}` : ''}</li>`).join('')}</ul>
+    <h4>Thông tin bản đồ để viết bot</h4>${[...new Set([t.map, t.final_map].filter(Boolean))].map(m => `<p><strong>${escape(mapLabel(m))}</strong></p>${mapCardHtml(m)}`).join('')}</div>`;
 }

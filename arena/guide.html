@@ -95,7 +95,7 @@
           <li>Vẫn bằng cả hai: ván hòa.</li>
         </ol>
         <p>Lý do hiện trên replay, ví dụ <i>80 nửa lượt không ăn quân · xử thắng vì nhiều quân hơn</i>. Hệ quả cho chiến thuật: <b>ăn hơn một quân rồi giữ vững là cách thắng</b>, còn bên đang thua phải tấn công thay vì chờ hòa. Bot đang bằng quân nên đưa quân tiến gần ô đích hơn đối thủ. Công cụ <code>local_arena.py</code> dùng đúng luật xử ván này.</p>
-        <h3>2.6. Bản đồ</h3>
+        <h3 id="ban-do">2.6. Bản đồ</h3>
         <p>"Bản đồ" quyết định <b>cách xếp quân lúc đầu</b> và, với vài bản đồ, cả <b>kích thước bàn cờ</b> (8 × 8) lẫn <b>vật cản</b>. <b>Luật đi quân không đổi.</b> Mỗi phe vẫn có 9 quân (ba mỗi loại), mỗi bản đồ <b>đối xứng quay 180°</b> (quân và vật cản) nên hai bên luôn công bằng, hai ô đích lúc đầu để trống, và không thể ăn quân ngay nước đầu.</p>
         <p><b>Vật cản</b> là ô đặc: không quân nào đi vào được, không ăn được và không bị ăn; nó đứng yên cả ván. Trong <code>observation['board']</code> ô vật cản hiện là <code>None</code> (giống ô trống) nhưng <b>không bao giờ nằm trong <code>legalMoves</code></b>, và được liệt kê riêng ở <code>observation['obstacles']</code>. Ô đích luôn nằm ngoài vật cản và mọi ô còn lại của bàn cờ đều nối liền nhau, nên luôn có đường tới đích.</p>
         <table class="small-table"><thead><tr><th><code>observation['map']</code></th><th>Tên</th><th>Bàn</th><th>Mô tả</th></tr></thead><tbody>
@@ -110,8 +110,79 @@
           <tr><td><code>random:xxxxxxxx</code></td><td>Ngẫu nhiên</td><td>9×9</td><td>Mỗi cặp đấu một cách xếp khác nhau (xác định theo mã sau dấu hai chấm); cả hai ván của cặp dùng chung.</td></tr>
           <tr><td><code>chaos:xxxxxxxx</code></td><td>Hỗn loạn</td><td>8×8 hoặc 9×9</td><td>Mỗi cặp đấu một bàn khác nhau: kích thước, cách xếp quân và 2–4 cặp vật cản đều ngẫu nhiên (đối xứng); cả hai ván của cặp dùng chung.</td></tr>
         </table>
-        <p>Bốn bản đồ cố định mới (chữ thường = Xanh, chữ hoa = Đỏ, <code>#</code> = vật cản):</p>
-<pre class="board">    a b c d e f g h
+        <p class="callout warn"><b>Viết bot chạy được mọi bản đồ.</b> Bàn 8 × 8 và vật cản làm hỏng các bot viết cứng bàn 9 × 9. Đừng viết <code>range(9)</code>, đừng viết cứng ô đích <code>[0, 8]</code> / <code>[8, 0]</code>. Hãy dùng <code>observation['size']</code> (cạnh bàn), <code>observation['goal']</code> (ô đích của bạn), <code>observation['obstacles']</code> (danh sách vật cản) và ưu tiên <code>legalMoves</code>. Bot đi vào ô vật cản, ra ngoài bàn hoặc gây lỗi chỉ số sẽ <b>thua kỹ thuật</b>. Ban tổ chức luôn công bố bản đồ trước; hãy thử bot ở ô <i>Bản đồ</i> của mục Đấu tập.</p>
+        <p>Ban tổ chức chọn bản đồ cho từng giải và có thể đổi giữa các vòng (ví dụ vòng trong dùng bản đồ khác vòng loại). Bản đồ luôn được công bố trước và hiện trong thông tin giải. Bạn thử bot trên bản đồ khác ở ô <i>Bản đồ</i> của mục Đấu tập hoặc bằng <code>python local_arena.py bot.py --map river</code> (hoặc <code>arena8</code>, <code>pillars</code>, <code>maze8</code>, <code>chaos</code>…). <b>Đừng viết cứng vị trí quân ban đầu</b>: hãy đọc <code>observation['board']</code> mỗi lượt.</p>
+        <h3 id="the-ban-do">2.7. Thẻ thông tin từng bản đồ</h3>
+        <p>Mỗi thẻ ghi đủ những gì bạn cần để viết bot cho bản đồ đó: kích thước, ô đích, vị trí vật cản và quân, hình bàn cờ lúc bắt đầu và vài lưu ý chiến thuật. Tọa độ luôn là <code>[hàng, cột]</code> (mục 3); chữ thường = Xanh, chữ hoa = Đỏ, <code>#</code> = vật cản. Trong giải, mục <i>Luật chơi của giải này</i> cũng có thẻ rút gọn của các bản đồ giải dùng.</p>
+        <p class="callout"><b>Bot mẫu cho mọi bản đồ:</b> <a href="../sdk/examples/pathfinder.py">pathfinder.py</a> (<i>Người dẫn đường</i>) đọc <code>size</code>, <code>goal</code>, <code>obstacles</code>, tính đường đi thật bằng tìm đường (mục 6.3) và tránh các ô bị quân khắc chế. Nạp nó ở <i>Viết &amp; kiểm tra → Chọn một bot mẫu</i>, rồi thử trên từng bản đồ ở mục Đấu tập hoặc bằng <code>python local_arena.py pathfinder.py --map river</code>.</p>
+        <p><b>Danh sách việc cần kiểm tra khi viết bot cho bản đồ có vật cản hoặc bàn 8 × 8:</b></p>
+        <ol>
+          <li>Lấy <code>size = observation['size']</code>; mọi vòng lặp và kiểm tra biên dùng <code>size</code> (không dùng số 9).</li>
+          <li>Lấy ô đích từ <code>observation['goal']</code> (đừng viết <code>[0, 8]</code> / <code>[8, 0]</code>).</li>
+          <li>Khi tự mô phỏng nước đi, gọi <code>with_walls(observation)</code> (mục 6) để vật cản không bị coi là ô trống.</li>
+          <li>Tính "còn bao xa tới đích" bằng <code>distance_map</code> (mục 6.3) thay vì khoảng cách thẳng.</li>
+          <li>Không bao giờ trả về nước ngoài <code>legalMoves</code>: nếu mô phỏng của bạn lỗi, quay về <code>legalMoves[0]</code>.</li>
+          <li>Thử bot trên cả <code>standard</code>, <code>arena8</code>, <code>river</code> và <code>chaos</code> bằng <code>local_arena.py --map ...</code> trước khi nộp.</li>
+        </ol>
+        <h4 id="map-standard">Chuẩn · <code>standard</code></h4>
+        <table class="small-table"><tbody><tr><td><b>Bàn cờ</b></td><td>9 × 9</td></tr><tr><td><b>Ô đích</b></td><td>Xanh: i9 <code>[0, 8]</code> · Đỏ: a1 <code>[8, 0]</code></td></tr><tr><td><b>Vật cản</b></td><td>Không có.</td></tr><tr><td><b>Quân Xanh lúc đầu</b></td><td><b>Kéo</b>: a3 <code>[6, 0]</code>, c3 <code>[6, 2]</code>, b2 <code>[7, 1]</code>; <b>Đấm</b>: b3 <code>[6, 1]</code>, a2 <code>[7, 0]</code>, c1 <code>[8, 2]</code>; <b>Lá</b>: c2 <code>[7, 2]</code>, d2 <code>[7, 3]</code>, b1 <code>[8, 1]</code>. Đỏ là bản quay 180° của Xanh.</td></tr><tr><td><b>Quân Xanh gần đích nhất</b></td><td>6 nước theo đường thẳng.</td></tr></tbody></table>
+        <pre class="board">    a b c d e f g h i
+ 9  · · · · · · Đ L ·  9
+ 8  · · · · · L L K Đ  8
+ 7  · · · · · · K Đ K  7
+ 6  · · · · · · · · ·  6
+ 5  · · · · · · · · ·  5
+ 4  · · · · · · · · ·  4
+ 3  k đ k · · · · · ·  3
+ 2  đ k l l · · · · ·  2
+ 1  · l đ · · · · · ·  1
+    a b c d e f g h i      chữ thường = Xanh (p1), chữ hoa = Đỏ (p2), # = vật cản</pre>
+        <ul><li>Bàn mở, không vật cản: mọi thứ về đường đi đều như mục 3. Đây là bản đồ của đấu xếp hạng và chiến dịch boss.</li><li>Quân Xanh nằm sát ô đích của Đỏ (góc a1) và ngược lại, nên quân ở rìa góc có thể bị đe dọa từ rất sớm.</li><li>Hai bên cách nhau 4 hàng: có thời gian dàn đội hình trước lần chạm trán đầu tiên.</li></ul>
+        <h4 id="map-wall">Bức tường · <code>wall</code></h4>
+        <table class="small-table"><tbody><tr><td><b>Bàn cờ</b></td><td>9 × 9</td></tr><tr><td><b>Ô đích</b></td><td>Xanh: i9 <code>[0, 8]</code> · Đỏ: a1 <code>[8, 0]</code></td></tr><tr><td><b>Vật cản</b></td><td>Không có.</td></tr><tr><td><b>Quân Xanh lúc đầu</b></td><td><b>Kéo</b>: a2 <code>[7, 0]</code>, d2 <code>[7, 3]</code>, d1 <code>[8, 3]</code>; <b>Lá</b>: b2 <code>[7, 1]</code>, b1 <code>[8, 1]</code>, e1 <code>[8, 4]</code>; <b>Đấm</b>: c2 <code>[7, 2]</code>, e2 <code>[7, 4]</code>, c1 <code>[8, 2]</code>. Đỏ là bản quay 180° của Xanh.</td></tr><tr><td><b>Quân Xanh gần đích nhất</b></td><td>7 nước theo đường thẳng.</td></tr></tbody></table>
+        <pre class="board">    a b c d e f g h i
+ 9  · · · · L K Đ L ·  9
+ 8  · · · · Đ K Đ L K  8
+ 7  · · · · · · · · ·  7
+ 6  · · · · · · · · ·  6
+ 5  · · · · · · · · ·  5
+ 4  · · · · · · · · ·  4
+ 3  · · · · · · · · ·  3
+ 2  k l đ k đ · · · ·  2
+ 1  · l đ k l · · · ·  1
+    a b c d e f g h i      chữ thường = Xanh (p1), chữ hoa = Đỏ (p2), # = vật cản</pre>
+        <ul><li>Hai hàng liền nhau dọc đáy bàn: quân yểm trợ cho nhau (quân khắc chế đứng cạnh quân yếu). Các quân ở cột e (cột 4) nằm xa nhất về phía giữa bàn.</li><li>Tiến theo cụm: một quân đi lẻ sẽ bị quân khắc chế của đối thủ chặn.</li></ul>
+        <h4 id="map-flank">Hai cánh · <code>flank</code></h4>
+        <table class="small-table"><tbody><tr><td><b>Bàn cờ</b></td><td>9 × 9</td></tr><tr><td><b>Ô đích</b></td><td>Xanh: i9 <code>[0, 8]</code> · Đỏ: a1 <code>[8, 0]</code></td></tr><tr><td><b>Vật cản</b></td><td>Không có.</td></tr><tr><td><b>Quân Xanh lúc đầu</b></td><td><b>Đấm</b>: a3 <code>[6, 0]</code>, b2 <code>[7, 1]</code>, c1 <code>[8, 2]</code>; <b>Kéo</b>: b3 <code>[6, 1]</code>, d2 <code>[7, 3]</code>, d1 <code>[8, 3]</code>; <b>Lá</b>: a2 <code>[7, 0]</code>, e2 <code>[7, 4]</code>, e1 <code>[8, 4]</code>. Đỏ là bản quay 180° của Xanh.</td></tr><tr><td><b>Quân Xanh gần đích nhất</b></td><td>7 nước theo đường thẳng.</td></tr></tbody></table>
+        <pre class="board">    a b c d e f g h i
+ 9  · · · · L K Đ · ·  9
+ 8  · · · · L K · Đ L  8
+ 7  · · · · · · · K Đ  7
+ 6  · · · · · · · · ·  6
+ 5  · · · · · · · · ·  5
+ 4  · · · · · · · · ·  4
+ 3  đ k · · · · · · ·  3
+ 2  l đ · k l · · · ·  2
+ 1  · · đ k l · · · ·  1
+    a b c d e f g h i      chữ thường = Xanh (p1), chữ hoa = Đỏ (p2), # = vật cản</pre>
+        <ul><li>Quân chia hai cụm ở hai bên, giữa là khoảng trống: dễ đánh vu hồi nhưng mỗi cụm cũng dễ bị cô lập.</li><li>Cân nhắc dồn cụm gần ô đích của đối thủ hơn thay vì dàn đều hai bên.</li></ul>
+        <h4 id="map-block">Khối vuông · <code>block</code></h4>
+        <table class="small-table"><tbody><tr><td><b>Bàn cờ</b></td><td>9 × 9</td></tr><tr><td><b>Ô đích</b></td><td>Xanh: i9 <code>[0, 8]</code> · Đỏ: a1 <code>[8, 0]</code></td></tr><tr><td><b>Vật cản</b></td><td>Không có.</td></tr><tr><td><b>Quân Xanh lúc đầu</b></td><td><b>Lá</b>: c3 <code>[6, 2]</code>, d2 <code>[7, 3]</code>, c1 <code>[8, 2]</code>; <b>Kéo</b>: d3 <code>[6, 3]</code>, b2 <code>[7, 1]</code>, d1 <code>[8, 3]</code>; <b>Đấm</b>: e3 <code>[6, 4]</code>, c2 <code>[7, 2]</code>, b1 <code>[8, 1]</code>. Đỏ là bản quay 180° của Xanh.</td></tr><tr><td><b>Quân Xanh gần đích nhất</b></td><td>6 nước theo đường thẳng.</td></tr></tbody></table>
+        <pre class="board">    a b c d e f g h i
+ 9  · · · · · K L Đ ·  9
+ 8  · · · · · L Đ K ·  8
+ 7  · · · · Đ K L · ·  7
+ 6  · · · · · · · · ·  6
+ 5  · · · · · · · · ·  5
+ 4  · · · · · · · · ·  4
+ 3  · · l k đ · · · ·  3
+ 2  · k đ l · · · · ·  2
+ 1  · đ l k · · · · ·  1
+    a b c d e f g h i      chữ thường = Xanh (p1), chữ hoa = Đỏ (p2), # = vật cản</pre>
+        <ul><li>Ba hàng ba quân xếp thành một khối chặt: ít khe hở, mỗi quân được che nhiều phía. Nhược điểm: khối khó xoay hướng, mở đầu cần vài nước để tản ra.</li></ul>
+        <h4 id="map-arena8">Đấu trường 8×8 · <code>arena8</code></h4>
+        <table class="small-table"><tbody><tr><td><b>Bàn cờ</b></td><td>8 × 8</td></tr><tr><td><b>Ô đích</b></td><td>Xanh: h8 <code>[0, 7]</code> · Đỏ: a1 <code>[7, 0]</code></td></tr><tr><td><b>Vật cản</b></td><td>Không có.</td></tr><tr><td><b>Quân Xanh lúc đầu</b></td><td><b>Kéo</b>: a3 <code>[5, 0]</code>, c3 <code>[5, 2]</code>, b2 <code>[6, 1]</code>; <b>Đấm</b>: b3 <code>[5, 1]</code>, a2 <code>[6, 0]</code>, c1 <code>[7, 2]</code>; <b>Lá</b>: c2 <code>[6, 2]</code>, d2 <code>[6, 3]</code>, b1 <code>[7, 1]</code>. Đỏ là bản quay 180° của Xanh.</td></tr><tr><td><b>Quân Xanh gần đích nhất</b></td><td>5 nước theo đường thẳng.</td></tr></tbody></table>
+        <pre class="board">    a b c d e f g h
  8  · · · · · Đ L ·  8
  7  · · · · L L K Đ  7
  6  · · · · · K Đ K  6
@@ -121,7 +192,10 @@
  2  đ k l l · · · ·  2
  1  · l đ · · · · ·  1
     a b c d e f g h      chữ thường = Xanh (p1), chữ hoa = Đỏ (p2), # = vật cản</pre>
-<pre class="board">    a b c d e f g h i
+        <ul><li><b>Mọi chỉ số đều ngắn hơn:</b> hai bên chỉ cách nhau 2 hàng trống nên lần chạm trán đầu tiên xảy ra sau 2–3 nước, và ô đích gần hơn bàn 9 × 9. Hãy kiểm tra mỗi lượt xem đối thủ có đường chạm đích ngắn hơn bạn không.</li><li>Cột và hàng hợp lệ chỉ từ 0 đến 7. Công thức tên ô: hàng = 8 − số hàng. Ô đích của Xanh là <code>[0, 7]</code> (h8), của Đỏ là <code>[7, 0]</code> (a1).</li><li>Bot viết cứng <code>range(9)</code> hoặc ô đích <code>[0, 8]</code> sẽ lỗi ngay ở bàn này: luôn dùng <code>observation['size']</code> và <code>observation['goal']</code>.</li></ul>
+        <h4 id="map-pillars">Bốn trụ · <code>pillars</code></h4>
+        <table class="small-table"><tbody><tr><td><b>Bàn cờ</b></td><td>9 × 9</td></tr><tr><td><b>Ô đích</b></td><td>Xanh: i9 <code>[0, 8]</code> · Đỏ: a1 <code>[8, 0]</code></td></tr><tr><td><b>Vật cản</b></td><td>4 ô: d6 <code>[3, 3]</code>, f6 <code>[3, 5]</code>, d4 <code>[5, 3]</code>, f4 <code>[5, 5]</code></td></tr><tr><td><b>Quân Xanh lúc đầu</b></td><td><b>Kéo</b>: a3 <code>[6, 0]</code>, c3 <code>[6, 2]</code>, b2 <code>[7, 1]</code>; <b>Đấm</b>: b3 <code>[6, 1]</code>, a2 <code>[7, 0]</code>, c1 <code>[8, 2]</code>; <b>Lá</b>: c2 <code>[7, 2]</code>, d2 <code>[7, 3]</code>, b1 <code>[8, 1]</code>. Đỏ là bản quay 180° của Xanh.</td></tr><tr><td><b>Quân Xanh gần đích nhất</b></td><td>6 nước theo đường thẳng, <b>7 nước</b> theo đường đi thật (vòng vật cản).</td></tr></tbody></table>
+        <pre class="board">    a b c d e f g h i
  9  · · · · · · Đ L ·  9
  8  · · · · · L L K Đ  8
  7  · · · · · · K Đ K  7
@@ -132,7 +206,10 @@
  2  đ k l l · · · · ·  2
  1  · l đ · · · · · ·  1
     a b c d e f g h i      chữ thường = Xanh (p1), chữ hoa = Đỏ (p2), # = vật cản</pre>
-<pre class="board">    a b c d e f g h i
+        <ul><li>Bốn trụ đá nằm đối xứng quanh tâm e5 <code>[4, 4]</code>: ô tâm vẫn vào được từ bốn ô kề (trên, dưới, trái, phải) nhưng không từ các ô chéo.</li><li>Trụ chắn đường nên <b>khoảng cách thẳng không còn đúng</b> với các quân gần tâm; dùng tìm đường (mục 6.3). Đường chéo qua khe giữa hai trụ vẫn đi được.</li><li>Một quân đứng sát trụ bị tấn công từ ít hướng hơn: dùng trụ làm chỗ nấp, nhưng cũng đừng để quân của mình bị dồn vào góc giữa trụ và quân khắc chế.</li></ul>
+        <h4 id="map-river">Dòng sông · <code>river</code></h4>
+        <table class="small-table"><tbody><tr><td><b>Bàn cờ</b></td><td>9 × 9</td></tr><tr><td><b>Ô đích</b></td><td>Xanh: i9 <code>[0, 8]</code> · Đỏ: a1 <code>[8, 0]</code></td></tr><tr><td><b>Vật cản</b></td><td>7 ô: a5 <code>[4, 0]</code>, b5 <code>[4, 1]</code>, c5 <code>[4, 2]</code>, e5 <code>[4, 4]</code>, g5 <code>[4, 6]</code>, h5 <code>[4, 7]</code>, i5 <code>[4, 8]</code></td></tr><tr><td><b>Quân Xanh lúc đầu</b></td><td><b>Kéo</b>: a3 <code>[6, 0]</code>, c3 <code>[6, 2]</code>, b2 <code>[7, 1]</code>; <b>Đấm</b>: b3 <code>[6, 1]</code>, a2 <code>[7, 0]</code>, c1 <code>[8, 2]</code>; <b>Lá</b>: c2 <code>[7, 2]</code>, d2 <code>[7, 3]</code>, b1 <code>[8, 1]</code>. Đỏ là bản quay 180° của Xanh.</td></tr><tr><td><b>Quân Xanh gần đích nhất</b></td><td>6 nước theo đường thẳng, <b>7 nước</b> theo đường đi thật (vòng vật cản).</td></tr></tbody></table>
+        <pre class="board">    a b c d e f g h i
  9  · · · · · · Đ L ·  9
  8  · · · · · L L K Đ  8
  7  · · · · · · K Đ K  7
@@ -143,7 +220,10 @@
  2  đ k l l · · · · ·  2
  1  · l đ · · · · · ·  1
     a b c d e f g h i      chữ thường = Xanh (p1), chữ hoa = Đỏ (p2), # = vật cản</pre>
-<pre class="board">    a b c d e f g h
+        <ul><li>Hàng 5 là một bức tường chạy ngang bàn, chỉ có hai khe: <b>d5 <code>[4, 3]</code> và f5 <code>[4, 5]</code></b> (hai cây cầu). Muốn sang bên kia buộc phải qua một trong hai ô này.</li><li>Quân đứng kề cầu (ở hàng 4 hoặc hàng 6 theo tên ô) có thể ăn quân đang qua nếu khắc chế nó: <b>đừng dồn nhiều quân qua cùng một cầu</b>, và đừng bước vào cầu khi có quân khắc chế mình đứng kề.</li><li>Khoảng cách thẳng có thể sai: quân sát tường tưởng gần đích nhưng phải vòng qua cầu (ngay lúc đầu, quân Xanh gần đích nhất cách 6 nước theo đường thẳng nhưng 7 nước thật). Dùng tìm đường (mục 6.3); bot mẫu <code>pathfinder.py</code> đã làm sẵn.</li><li>Một quân giữ mỗi cầu có thể chặn cả đội nếu bên kia không có quân khắc chế nó; hãy tính trước loại quân nào của mình qua cầu trước.</li></ul>
+        <h4 id="map-maze8">Mê cung 8×8 · <code>maze8</code></h4>
+        <table class="small-table"><tbody><tr><td><b>Bàn cờ</b></td><td>8 × 8</td></tr><tr><td><b>Ô đích</b></td><td>Xanh: h8 <code>[0, 7]</code> · Đỏ: a1 <code>[7, 0]</code></td></tr><tr><td><b>Vật cản</b></td><td>4 ô: c5 <code>[3, 2]</code>, e5 <code>[3, 4]</code>, d4 <code>[4, 3]</code>, f4 <code>[4, 5]</code></td></tr><tr><td><b>Quân Xanh lúc đầu</b></td><td><b>Kéo</b>: a3 <code>[5, 0]</code>, c3 <code>[5, 2]</code>, b2 <code>[6, 1]</code>; <b>Đấm</b>: b3 <code>[5, 1]</code>, a2 <code>[6, 0]</code>, c1 <code>[7, 2]</code>; <b>Lá</b>: c2 <code>[6, 2]</code>, d2 <code>[6, 3]</code>, b1 <code>[7, 1]</code>. Đỏ là bản quay 180° của Xanh.</td></tr><tr><td><b>Quân Xanh gần đích nhất</b></td><td>5 nước theo đường thẳng, <b>6 nước</b> theo đường đi thật (vòng vật cản).</td></tr></tbody></table>
+        <pre class="board">    a b c d e f g h
  8  · · · · · Đ L ·  8
  7  · · · · L L K Đ  7
  6  · · · · · K Đ K  6
@@ -153,9 +233,46 @@
  2  đ k l l · · · ·  2
  1  · l đ · · · · ·  1
     a b c d e f g h      chữ thường = Xanh (p1), chữ hoa = Đỏ (p2), # = vật cản</pre>
-        <p class="callout warn"><b>Viết bot chạy được mọi bản đồ.</b> Bàn 8 × 8 và vật cản làm hỏng các bot viết cứng bàn 9 × 9. Đừng viết <code>range(9)</code>, đừng viết cứng ô đích <code>[0, 8]</code> / <code>[8, 0]</code>. Hãy dùng <code>observation['size']</code> (cạnh bàn), <code>observation['goal']</code> (ô đích của bạn), <code>observation['obstacles']</code> (danh sách vật cản) và ưu tiên <code>legalMoves</code>. Bot đi vào ô vật cản, ra ngoài bàn hoặc gây lỗi chỉ số sẽ <b>thua kỹ thuật</b>. Ban tổ chức luôn công bố bản đồ trước; hãy thử bot ở ô <i>Bản đồ</i> của mục Đấu tập.</p>
-        <p>Ban tổ chức chọn bản đồ cho từng giải và có thể đổi giữa các vòng (ví dụ vòng trong dùng bản đồ khác vòng loại). Bản đồ luôn được công bố trước và hiện trong thông tin giải. Bạn thử bot trên bản đồ khác ở ô <i>Bản đồ</i> của mục Đấu tập hoặc bằng <code>python local_arena.py bot.py --map river</code> (hoặc <code>arena8</code>, <code>pillars</code>, <code>maze8</code>, <code>chaos</code>…). <b>Đừng viết cứng vị trí quân ban đầu</b>: hãy đọc <code>observation['board']</code> mỗi lượt.</p>
-        <h3>2.7. Ví dụ</h3>
+        <ul><li>Bốn vật cản xếp chéo ở giữa bàn 8 × 8 tạo các lối đi hẹp. Ô đích gần như bàn Đấu trường 8×8, nhưng đường thẳng bị chặn nên đường thật dài hơn.</li><li>Bốn vật cản tạo hai đoạn chéo ngắn: c5 <code>[3, 2]</code> với d4 <code>[4, 3]</code>, và e5 <code>[3, 4]</code> với f4 <code>[4, 5]</code>. Quân vẫn đi được giữa hai đoạn này; luôn dùng <code>legalMoves</code> hoặc tìm đường để chắc chắn một nước đi là hợp lệ.</li><li>Công thức tên ô: hàng = 8 − số hàng (bàn 8 × 8).</li></ul>
+        <h4 id="map-random">Ngẫu nhiên · <code>random</code></h4>
+        <table class="small-table"><tbody><tr><td><b>Bàn cờ</b></td><td>9 × 9</td></tr><tr><td><b>Ô đích</b></td><td>Xanh: i9 <code>[0, 8]</code> · Đỏ: a1 <code>[8, 0]</code></td></tr><tr><td><b>Vật cản</b></td><td>Không có.</td></tr><tr><td><b>Quân lúc đầu</b></td><td>Ngẫu nhiên theo mã bản đồ: chín quân của mỗi phe nằm trong ba hàng cuối, cột a–e. Ví dụ ở hình dưới.</td></tr><tr><td><b>Quân Xanh gần đích nhất</b></td><td>6 nước theo đường thẳng.</td></tr></tbody></table>
+        <pre class="board">    a b c d e f g h i
+ 9  · · · · K · · K ·  9
+ 8  · · · · K · · L L  8
+ 7  · · · · L Đ · Đ Đ  7
+ 6  · · · · · · · · ·  6
+ 5  · · · · · · · · ·  5
+ 4  · · · · · · · · ·  4
+ 3  đ đ · đ l · · · ·  3
+ 2  l l · · k · · · ·  2
+ 1  · k · · k · · · ·  1
+    a b c d e f g h i      chữ thường = Xanh (p1), chữ hoa = Đỏ (p2), # = vật cản</pre>
+        <ul><li>Mỗi cặp đấu một cách xếp quân khác, nhưng luôn đối xứng, bàn 9 × 9 và không vật cản. Hai ván của cặp (đổi màu) dùng cùng một cách xếp.</li><li>Đừng học thuộc nước mở đầu; hãy dựa vào <code>board</code> thực tế mỗi lượt.</li></ul>
+        <h4 id="map-chaos">Hỗn loạn · <code>chaos</code></h4>
+        <table class="small-table"><tbody><tr><td><b>Bàn cờ</b></td><td>9 × 9 hoặc 8 × 8 (đổi mỗi cặp)</td></tr><tr><td><b>Ô đích</b></td><td>Xanh: i9 <code>[0, 8]</code> · Đỏ: a1 <code>[8, 0]</code> (với bàn 8 × 8: <code>[0, 7]</code> và <code>[7, 0]</code>)</td></tr><tr><td><b>Vật cản</b></td><td>2–4 cặp đối xứng, đặt ngẫu nhiên ở dải giữa bàn cờ (không bao giờ ở ô đích hay ô xuất phát). Luôn đọc <code>observation['obstacles']</code>.</td></tr><tr><td><b>Quân lúc đầu</b></td><td>Ngẫu nhiên: chín quân của mỗi phe nằm trong ba hàng cuối, cột a–e (trừ ô góc đích). Không thể học thuộc.</td></tr></tbody></table>
+        <pre class="board">    a b c d e f g h i
+ 9  · · · · · · · · ·  9
+ 8  · · · · K K K · L  8
+ 7  · · · · Đ L L Đ Đ  7
+ 6  · · · # · · · # ·  6
+ 5  # · · · · · · · #  5
+ 4  · # · · · # · · ·  4
+ 3  đ đ l l đ · · · ·  3
+ 2  l · k k k · · · ·  2
+ 1  · · · · · · · · ·  1
+    a b c d e f g h i      chữ thường = Xanh (p1), chữ hoa = Đỏ (p2), # = vật cản</pre>
+        <p>Ví dụ một bàn 8 × 8:</p><pre class="board">    a b c d e f g h
+ 8  · · · · · · · ·  8
+ 7  · · · Đ Đ L L L  7
+ 6  · · · K Đ · K K  6
+ 5  · # # · · # · ·  5
+ 4  · · # · · # # ·  4
+ 3  k k · đ k · · ·  3
+ 2  l l l đ đ · · ·  2
+ 1  · · · · · · · ·  1
+    a b c d e f g h      chữ thường = Xanh (p1), chữ hoa = Đỏ (p2), # = vật cản</pre>
+        <ul><li><b>Mọi thứ đổi mỗi cặp:</b> kích thước (8 hoặc 9), cách xếp quân và vị trí vật cản. Bot phải đọc <code>size</code>, <code>goal</code> và <code>obstacles</code> ở <b>mỗi lượt</b> và không được giả định gì.</li><li>Bàn luôn liền một khối nên luôn có đường tới đích; vật cản nằm ở dải giữa bàn nên không chặn ô xuất phát hay ô đích.</li><li>Hai ván của cặp (đổi màu) dùng cùng một bàn; ván quyết định của giải loại trực tiếp dùng một bàn mới.</li></ul>
+        <h3>2.8. Ví dụ</h3>
         <p>Xanh có quân Đấm ở <code>[3,3]</code> và Đỏ có quân Kéo ở <code>[2,4]</code> (hai ô chéo nhau). Đấm ăn Kéo nên Xanh được đi <code>[3,3] → [2,4]</code> và ăn quân Kéo; trong <code>legalMoves</code> nước này có <code>"capture": true</code>. Ngược lại, nếu quân Đỏ là Lá thì Đấm <i>không</i> ăn được Lá, và nước đi vào ô đó <b>không</b> nằm trong <code>legalMoves</code>.</p>
       </section>
 
@@ -318,6 +435,29 @@ def threatened(board, r, c):
             if enemy and enemy['owner'] != me['owner'] and enemy['type'] == PREDATOR[me['type']]:
                 return True
     return False</pre>
+      <h3 id="tim-duong">6.3. Khoảng cách tới đích khi có vật cản (tìm đường)</h3>
+        <p>Với bản đồ có vật cản, khoảng cách thẳng <code>max(|hàng|, |cột|)</code> có thể sai. Tìm đường theo chiều rộng cho ra số nước thật, đi vòng vật cản. Chạy một lần mỗi lượt từ ô đích của bạn:</p>
+<pre>from collections import deque
+
+def distance_map(size, obstacles, goal):
+    """dist[r][c] = số nước ít nhất từ ô (r, c) tới ô đích `goal`, đi 8 hướng, không qua vật cản."""
+    blocked = {tuple(o) for o in obstacles}
+    dist = [[None] * size for _ in range(size)]
+    dist[goal[0]][goal[1]] = 0
+    queue = deque([tuple(goal)])
+    while queue:
+        r, c = queue.popleft()
+        for dr, dc in STEPS:
+            nr, nc = r + dr, c + dc
+            if 0 &lt;= nr &lt; size and 0 &lt;= nc &lt; size and (nr, nc) not in blocked and dist[nr][nc] is None:
+                dist[nr][nc] = dist[r][c] + 1
+                queue.append((nr, nc))
+    return dist
+
+# Dùng: chọn nước đưa quân tới ô gần đích nhất theo đường thật.
+dist = distance_map(observation['size'], observation['obstacles'], observation['goal'])
+best = min(observation['legalMoves'], key=lambda m: dist[m['to'][0]][m['to'][1]])</pre>
+        <p>Ô <code>None</code> trong <code>dist</code> là ô không tới được (không xảy ra ở các bản đồ của Arena vì bàn luôn liền một khối). Đây cũng chính là cách Arena xử ván hết thế (mục 2.5): "quân gần đích nhất" là quân có <code>dist</code> nhỏ nhất. Xem đầy đủ trong <a href="../sdk/examples/pathfinder.py">pathfinder.py</a> và <a href="../sdk/examples/template.py">template.py</a>.</p>
       </section>
 
       <section id="chienthuat">

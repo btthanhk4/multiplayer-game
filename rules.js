@@ -224,7 +224,7 @@ export function legalMoves(board, row, col) {
 
 // Số nước (8 hướng, đi vòng vật cản, bỏ qua quân) từ quân gần ô đích nhất của `side` tới ô đích của chính nó.
 // Bàn không vật cản thì bằng khoảng cách Chebyshev quen thuộc.
-function nearestToGoal(board, side) {
+export function nearestToGoal(board, side) {
   const size = board.length;
   const [goalRow, goalCol] = goalOf(side, size);
   const distance = Array.from({ length: size }, () => Array(size).fill(Infinity));

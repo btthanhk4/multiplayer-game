@@ -415,3 +415,12 @@ label small{font-weight:400;color:var(--muted)}
 .map-preview .stone{font-size:8px;border-width:0}
 .map-preview .square small{display:none}
 .map-preview figcaption{font-size:11px;color:var(--muted);margin-top:4px;text-align:center}
+
+.map-card{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin:6px 0 14px}
+.map-card .small-table{flex:1;min-width:220px;font-size:12px}
+.map-card .small-table td{white-space:normal;padding:6px 8px;vertical-align:top}
+@media(max-width:700px){
+.map-card .small-table td,.guide h4+.small-table td{display:block;width:100%;padding:3px 8px}
+.map-card .small-table tr,.guide h4+.small-table tr{display:block;border-bottom:1px solid var(--line);padding:6px 0}
+.map-card .small-table td:first-child,.guide h4+.small-table td:first-child{font-size:11px;color:var(--muted)}
+}

@@ -35,7 +35,7 @@ NO_SCRIPT_PAGE = (
     '<p><a class="button primary" href="/">Quay lại trang chính</a></p></main></body></html>')
 
 SAMPLES = {'sdk/examples/first.py', 'sdk/examples/hunter.py', 'sdk/examples/guardian.py',
-           'sdk/examples/template.py', 'sdk/local_arena.py'}
+           'sdk/examples/pathfinder.py', 'sdk/examples/template.py', 'sdk/local_arena.py'}
 SESSION_SECONDS = int(os.getenv('ARENA_SESSION_DAYS', '7')) * 86400
 
 

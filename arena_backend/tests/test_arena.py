@@ -2201,7 +2201,7 @@ class Geometry(Base):
     def test_the_example_bots_play_every_new_map_without_a_technical_loss(self):
         local = self.local()
         for name in ('arena8', 'pillars', 'river', 'maze8', 'chaos:3', 'chaos:4', 'chaos:11'):
-            for example in ('hunter', 'guardian', 'template'):
+            for example in ('hunter', 'guardian', 'template', 'pathfinder'):
                 bot = local.Player(*local.load_bot(str(ROOT / f'sdk/examples/{example}.py')))
                 for first, second in ((bot, local.Player('random', local.bot_random, None)),
                                       (local.Player('random', local.bot_random, None), bot)):
@@ -2252,6 +2252,45 @@ class Geometry(Base):
         with self.store.connect() as db:
             maps = [r['map'] for r in db.execute('SELECT map FROM matches ORDER BY created,rowid')]
         self.assertEqual(maps, ['river'] * 3)
+
+    def test_every_map_card_in_the_guide_matches_the_real_board(self):
+        import re
+        local = self.local()
+        guide = (ROOT / 'arena/guide.html').read_text(encoding='utf-8')
+        for name in (*local.MAP_NAMES, 'random', 'chaos'):
+            match = re.search(rf'<h4 id="map-{name}">.*?(?=<h4 id="map-|<h3 )', guide, re.S)
+            self.assertIsNotNone(match, f'card for {name}')
+            card = match.group(0)
+            if name in ('random', 'chaos'):
+                continue
+            size, pieces, walls = local.LAYOUTS[name]
+            for r, c in walls:
+                self.assertIn(f'<code>[{r}, {c}]</code>', card, f'{name}: obstacle {r},{c}')
+            for r, c, _ in pieces:
+                self.assertIn(f'<code>[{r}, {c}]</code>', card, f'{name}: piece {r},{c}')
+            self.assertIn(f'{size} × {size}', card)
+            self.assertEqual(card.count('#') >= len(walls), True)
+
+    def test_the_pathfinder_example_handles_walls_and_beats_the_straight_line_hunter(self):
+        local = self.local()
+        pathfinder = local.Player(*local.load_bot(str(ROOT / 'sdk/examples/pathfinder.py')))
+        hunter = local.Player(*local.load_bot(str(ROOT / 'sdk/examples/hunter.py')))
+        score = {}
+        for name in ('river', 'pillars', 'maze8', 'arena8'):
+            wins = 0
+            for game in range(12):
+                first, second = (pathfinder, hunter) if game % 2 == 0 else (hunter, pathfinder)
+                winner, reason, *_ = local.play(first, second, 11 + game * 101, False, name)
+                self.assertFalse(reason.startswith('technical'), (name, reason))
+                wins += winner == ('p1' if game % 2 == 0 else 'p2')
+            score[name] = wins
+        self.assertTrue(all(w >= 8 for w in score.values()), score)
+
+    def test_the_ui_shows_a_map_card_with_the_facts_a_bot_author_needs(self):
+        common = (ROOT / 'arena/common.js').read_text(encoding='utf-8')
+        for fact in ('Bàn cờ', 'Ô đích', 'Vật cản', 'Quân Xanh lúc đầu', 'guide.html#map-'):
+            self.assertIn(fact, common, fact)
+        self.assertIn('data-sample="pathfinder"', (ROOT / 'arena/index.html').read_text(encoding='utf-8'))
 
     def test_guide_describes_every_map_and_the_new_observation_fields(self):
         from arena_backend.store import MAPS
