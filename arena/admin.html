@@ -20,12 +20,11 @@
       <div class="section-nav" role="tablist" aria-label="Khu vực điều hành">
         <button role="tab" aria-selected="true" data-tab="dashboard">01 <span>Tổng quan</span></button>
         <button role="tab" aria-selected="false" data-tab="events">02 <span>Giải đấu</span></button>
-        <button role="tab" aria-selected="false" data-tab="import">03 <span>Nhập Google Form</span></button>
-        <button role="tab" aria-selected="false" data-tab="people">04 <span>Đội & tài khoản</span></button>
-        <button role="tab" aria-selected="false" data-tab="bots">05 <span>Bài nộp</span></button>
-        <button role="tab" aria-selected="false" data-tab="matches">06 <span>Trận đấu</span></button>
-        <button role="tab" aria-selected="false" data-tab="queue">07 <span>Hàng đợi</span></button>
-        <button role="tab" aria-selected="false" data-tab="log">08 <span>Nhật ký</span></button>
+        <button role="tab" aria-selected="false" data-tab="people">03 <span>Đội & tài khoản</span></button>
+        <button role="tab" aria-selected="false" data-tab="bots">04 <span>Bài nộp</span></button>
+        <button role="tab" aria-selected="false" data-tab="matches">05 <span>Trận đấu</span></button>
+        <button role="tab" aria-selected="false" data-tab="queue">06 <span>Hàng đợi</span></button>
+        <button role="tab" aria-selected="false" data-tab="log">07 <span>Nhật ký</span></button>
       </div>
       <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 
@@ -81,26 +80,6 @@
         </div>
       </section>
 
-      <section id="import" class="view" role="tabpanel" hidden>
-        <div class="admin-layout">
-          <form method="post" action="/arena/enable-javascript" id="import-form" class="paper-card"><p class="eyebrow">GOOGLE FORMS → ĐẤU TRƯỜNG</p><h3>Nhập bài nộp</h3>
-            <label>File CSV (Google Forms → Phản hồi → Tải xuống .csv)<input type="file" name="csv" accept=".csv,text/csv"></label>
-            <label>ZIP các file tải lên (tùy chọn, tải thư mục từ Drive)<input type="file" name="files" accept=".zip,application/zip"></label>
-            <label>Đăng ký luôn vào giải đang mở<select name="tournament" id="import-tournament"></select></label>
-            <label class="switch"><input type="checkbox" name="create_teams" value="1"> Tạo đội mới nếu chưa có trên hệ thống</label>
-            <label class="switch"><input type="checkbox" name="create_accounts" value="1"> Tạo một tài khoản đăng nhập cho mỗi đội mới</label>
-            <details><summary>Chỉ định cột thủ công (khi tự nhận diện sai)</summary>
-              <label>Cột tên đội<input name="col_team"></label><label>Cột mã đội<input name="col_team_code"></label>
-              <label>Cột mã nguồn dán<input name="col_source"></label><label>Cột file tải lên<input name="col_file"></label>
-              <label>Cột tên bot<input name="col_bot_name"></label><label>Cột thành viên<input name="col_members"></label><label>Cột email<input name="col_email"></label></details>
-            <div class="action-row"><button class="button" name="mode" value="dry">Chạy thử (không ghi)</button><button class="button primary" name="mode" value="apply">Nhập thật</button></div>
-            <p class="caption">Mỗi đội chỉ lấy câu trả lời <strong>mới nhất</strong>. File cần UTF-8, ≤ 64 KiB, có hàm <code>choose_move</code>. Với form tải file, yêu cầu thí sinh đặt tên file là mã đội hoặc tên đội (ví dụ <code>K7QF2M9A.py</code>).</p>
-          </form>
-          <div><div class="paper-card"><p class="eyebrow">KẾT QUẢ</p><div id="import-summary" class="caption">Chưa chạy.</div><label>Lọc<select id="import-filter"><option value="">Tất cả</option><option value="error">Lỗi</option><option value="ready">Sẵn sàng</option><option value="imported">Đã nhập</option><option value="superseded">Bị thay bản mới</option><option value="unchanged">Không đổi</option></select></label><div class="table-scroll"><table><thead><tr><th>DÒNG</th><th>ĐỘI</th><th>TRẠNG THÁI</th><th>GHI CHÚ</th></tr></thead><tbody id="import-rows"></tbody></table></div></div>
-            <div class="paper-card"><p class="eyebrow">LỊCH SỬ NHẬP</p><div id="import-history"></div></div></div>
-        </div>
-      </section>
-
       <section id="people" class="view" role="tabpanel" hidden>
         <div class="admin-layout even">
           <div class="paper-card"><p class="eyebrow">ĐỘI</p><label>Tìm (tên đội, mã, thành viên, MSSV)<input id="team-search" type="search"></label><div id="team-list"></div></div>
@@ -138,7 +117,7 @@
       <a class="brand" href="/">ott<span>v2</span><sup>điều hành</sup></a>
       <h2>Khu vực dành cho ban tổ chức.</h2>
       <p>Điều hành giải đấu, hàng đợi chấm bài và tài khoản của cả sự kiện.</p>
-      <ul><li>Mở vòng, khóa danh sách, xem bảng điểm</li><li>Quản lý đội, tài khoản và bài nộp</li><li>Nhập bài từ Google Form, theo dõi máy chấm</li></ul>
+      <ul><li>Mở vòng, khóa danh sách, xem bảng điểm</li><li>Quản lý đội, tài khoản và bài nộp</li><li>Theo dõi máy chấm và hàng chờ chấm bài</li></ul>
     </aside>
     <div class="gate-form">
       <form method="post" action="/arena/enable-javascript" id="admin-login" novalidate>

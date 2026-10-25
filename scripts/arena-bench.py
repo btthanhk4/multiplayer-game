@@ -87,7 +87,7 @@ def main():
         with store.connect() as db:
             ok = db.execute("SELECT COUNT(*) FROM submissions WHERE status='valid'").fetchone()[0]
         print(f'validation: {ok}/{args.teams} valid; queued {args.teams} in {submitted:.2f}s; all graded in {took:.0f}s '
-              f'= {args.teams / took:.2f}/s  (job p50 {percentile(valid, .5):.1f}s p95 {percentile(valid, .95):.1f}s)')
+              f'= {args.teams / max(took, 0.001):.2f}/s  (job p50 {percentile(valid, .5):.1f}s p95 {percentile(valid, .95):.1f}s)')
 
         # 2. Everyone asks for a ranked match at once.
         started = time.monotonic()
@@ -99,7 +99,7 @@ def main():
         took = wait_for(store, "SELECT COUNT(*) FROM matches WHERE status IN ('queued','running')", 'playing', args.timeout)
         games = durations(store, 'game')
         print(f'ranked: {series} pairs formed in {matched:.2f}s; {len(games)} games played in {took:.0f}s '
-              f'= {len(games) / took:.2f} games/s  (job p50 {percentile(games, .5):.1f}s p95 {percentile(games, .95):.1f}s)')
+              f'= {len(games) / max(took, 0.001):.2f} games/s  (job p50 {percentile(games, .5):.1f}s p95 {percentile(games, .95):.1f}s)')
     finally:
         worker.stop.set()
         thread.join(timeout=60)

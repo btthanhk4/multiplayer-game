@@ -134,9 +134,6 @@ SCHEMA = [
         status TEXT NOT NULL DEFAULT 'running', a_points REAL, rating_change INTEGER,
         created REAL NOT NULL, finished REAL, a_rating INTEGER, b_rating INTEGER)''',
     'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
-    '''CREATE TABLE IF NOT EXISTS imports (
-        id TEXT PRIMARY KEY, actor TEXT, status TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '{}',
-        report TEXT NOT NULL DEFAULT '[]', created REAL NOT NULL, finished REAL)''',
     '''CREATE TABLE IF NOT EXISTS bosses (
         level INTEGER PRIMARY KEY, name TEXT NOT NULL, blurb TEXT NOT NULL,
         submission_id TEXT NOT NULL REFERENCES submissions(id))''',
@@ -156,6 +153,7 @@ SCHEMA = [
     'CREATE INDEX IF NOT EXISTS v2_sub_status ON submissions(status)',
     'CREATE INDEX IF NOT EXISTS v2_users_team ON users(team_id)',
     'CREATE INDEX IF NOT EXISTS v2_matches_status ON matches(status,created)',
+    'CREATE INDEX IF NOT EXISTS v3_matches_created ON matches(created)',
     'CREATE INDEX IF NOT EXISTS v2_matches_pairing ON matches(pairing_id)',
     'CREATE INDEX IF NOT EXISTS v2_matches_p1 ON matches(p1)',
     'CREATE INDEX IF NOT EXISTS v2_matches_p2 ON matches(p2)',
@@ -556,19 +554,43 @@ class Store:
 
     def leave_team(self, user, actor=None):
         with self.connect(True) as db:
-            team = self.team_of(db, user)
-            if not team:
-                return False
-            db.execute('UPDATE users SET team_id=NULL WHERE id=?', (user,))
-            rest = db.execute('SELECT id FROM users WHERE team_id=? ORDER BY created,id', (team['id'],)).fetchall()
-            if team['owner'] == user:
-                db.execute('UPDATE teams SET owner=? WHERE id=?', (rest[0]['id'] if rest else None, team['id']))
-            used = db.execute('SELECT 1 FROM submissions WHERE team_id=? UNION SELECT 1 FROM entries WHERE team_id=? '
-                              'UNION SELECT 1 FROM ratings WHERE team_id=?', (team['id'],)*3).fetchone()
-            if not rest and not used:
+            return self._leave(db, user, actor or user)
+
+    def _leave(self, db, user, actor):
+        team = self.team_of(db, user)
+        if not team:
+            return False
+        db.execute('UPDATE users SET team_id=NULL WHERE id=?', (user,))
+        rest = db.execute('SELECT id FROM users WHERE team_id=? ORDER BY created,id', (team['id'],)).fetchall()
+        if team['owner'] == user:
+            db.execute('UPDATE teams SET owner=? WHERE id=?', (rest[0]['id'] if rest else None, team['id']))
+        used = db.execute('SELECT 1 FROM submissions WHERE team_id=? UNION SELECT 1 FROM entries WHERE team_id=? '
+                          'UNION SELECT 1 FROM ratings WHERE team_id=?', (team['id'],)*3).fetchone()
+        if not rest:
+            db.execute('DELETE FROM ranked_queue WHERE team_id=?', (team['id'],))   # nobody left to answer a match
+            if not used:
                 db.execute('DELETE FROM teams WHERE id=?', (team['id'],))
-            self.audit(db, actor or user, 'team.left', {'team': team['id'], 'user': user})
-            return True
+        self.audit(db, actor, 'team.left', {'team': team['id'], 'user': user})
+        return True
+
+    def delete_user(self, user, actor):
+        """Remove an account for good. Bots, results and Elo stay with the team; the team keeps going without them."""
+        with self.connect(True) as db:
+            row = db.execute('SELECT * FROM users WHERE id=?', (user,)).fetchone()
+            if not row:
+                raise Problem('Không tìm thấy tài khoản.', 404)
+            if user == actor:
+                raise Problem('Không tự xóa tài khoản của chính mình.', 409)
+            if row['role'] == 'admin' and not db.execute(
+                    "SELECT 1 FROM users WHERE role='admin' AND disabled=0 AND id!=?", (user,)).fetchone():
+                raise Problem('Không xóa được quản trị viên cuối cùng.', 409)
+            team = self.team_of(db, user)
+            self._leave(db, user, actor)
+            db.execute('DELETE FROM sessions WHERE user_id=?', (user,))
+            db.execute('DELETE FROM users WHERE id=?', (user,))
+            self.audit(db, actor, 'user.deleted', {'user': user, 'username': row['username'], 'name': row['name'],
+                                                   'role': row['role'], 'team': team['id'] if team else None})
+            return {'ok': True, 'team_kept': bool(team and db.execute('SELECT 1 FROM teams WHERE id=?', (team['id'],)).fetchone())}
 
     def kick(self, owner, member):
         with self.connect() as db:

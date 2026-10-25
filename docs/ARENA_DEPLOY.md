@@ -4,7 +4,7 @@
 
 - **Tài khoản và đội**: sinh viên tự đăng ký bằng mã tham gia; tạo đội hoặc vào đội bằng mã 8 ký tự (mặc định tối đa 4 người, `ARENA_TEAM_SIZE`). Bot, Elo và đăng ký giải thuộc về đội.
 - **Dashboard sinh viên** (`/`): lộ trình 5 bước, thẻ đội/bot/Elo/giải đang mở, vị trí trong hàng chờ, bảng điểm có tìm kiếm, xem từng vòng, khán đài 4 bàn kèm replay.
-- **Dashboard ban tổ chức** (`/arena/admin`): số liệu hệ thống và ước tính thời gian chấm, công tắc sự kiện (đăng ký, nộp bài, xếp hạng, đấu tập, chế độ chỉ xem), thông báo toàn trang, quản lý giải, nhập Google Form, tìm và xử lý đội/tài khoản, xem mã nghi sao chép, hàng đợi, nhật ký.
+- **Dashboard ban tổ chức** (`/arena/admin`): số liệu hệ thống và ước tính thời gian chấm, công tắc sự kiện (đăng ký, nộp bài, xếp hạng, đấu tập, chế độ chỉ xem), thông báo toàn trang, quản lý giải, tìm và xử lý đội/tài khoản (cấp lại mật khẩu, khóa, xóa), xem mã nghi sao chép, hàng đợi, nhật ký.
 - **Thể thức**: Swiss (≤ 2.000 đội), vòng tròn (≤ 32), loại trực tiếp (≤ 1.024, có thể lấy top N của giải trước). Có tự mở vòng, truất quyền giữa giải (xử thua các ván chưa đấu) và xếp loại Xuất sắc/Giỏi/Khá/Đạt. Bảng điểm xuất ra CSV.
 - **Máy chấm**: mỗi bot một sandbox cho cả ván (giao thức 2). Có nhiều luồng chấm song song (`--slots`), hàng đợi ưu tiên (kiểm tra bot → giải → xếp hạng → đấu tập), tự chạy lại lỗi hạ tầng tối đa 3 lần, và trả job về hàng đợi khi runner dừng.
 - **Tạo động lực (V3)**: chiến dịch 5 boss mạnh dần (bot trong `sdk/examples` và `sdk/bosses`, tự đăng ký và được kiểm tra khi API khởi động), bảng vàng chiến dịch, 17 huy hiệu, bảng tin trực tiếp (lật kèo, thắng trắng, hạ boss, vô địch), hồ sơ công khai của đội kèm đồ thị Elo, giao hữu với đội bất kỳ, bục trao giải, replay có link chia sẻ (`/#watch=<id>`), tua nhanh và phóng to, cùng pháo hoa khi đội thắng.
@@ -94,25 +94,15 @@ Docker Compose: xem [deploy/README.md](../deploy/README.md).
 
 Trỏ hostname về `http://127.0.0.1:8080`. Đặt `ARENA_ORIGIN=https://…` đúng với URL trình duyệt dùng, và bật `ARENA_TRUST_CLOUDFLARE=1` khi API chỉ bind loopback, để giới hạn tần suất dùng IP thật. Mã mời (`ARENA_REGISTRATION_CODE`) là bắt buộc khi public. Đây là lớp chặn chính, vì giới hạn theo IP được đặt rộng (mặc định 3.000 lượt đăng ký/giờ/IP) cho cả trường chung NAT. Giới hạn theo tài khoản/đội vẫn chặt: 20 lần đăng nhập sai/15 phút/tài khoản, 20 bài nộp/giờ/đội, tối đa 3 bài chờ kiểm tra/đội. Tất cả đều chỉnh được bằng biến `ARENA_RATE_*`.
 
-## 6. Thu bài bằng Google Forms
+## 6. Nộp bài
 
-Thiết kế form:
+Chỉ có một đường nộp: **sinh viên nộp trên web** (tab *Viết & kiểm tra*). Đường này đã được thiết kế và đo cho 1.000 người nộp cùng lúc (xem mục 2): nhận bài chỉ ghi database, việc kiểm tra xếp hàng ở máy chấm, bot trùng mã chỉ kiểm tra một lần.
 
-1. **Mã đội** (câu trả lời ngắn, bắt buộc). Hướng dẫn thí sinh lấy mã ở mục *Đội của tôi*. Nếu đội chưa có trên hệ thống, dùng **Tên đội** và bật "Tạo đội mới" khi nhập.
-2. **Thành viên / MSSV** (tùy chọn, được lưu vào ghi chú đội).
-3. **Mã nguồn**: nên dùng câu hỏi **đoạn văn** để dán mã (chỉ cần CSV). Nếu dùng **tải file**, yêu cầu đặt tên file là `MÃĐỘI.py`. Sau đó vào Drive → thư mục câu hỏi → *Tải xuống* để lấy ZIP.
+Cách hỗ trợ sát hạn:
 
-Nhập trong `/arena/admin` → *Nhập Google Form*: chọn CSV (và ZIP nếu có), bấm **Chạy thử**, đọc các dòng lỗi, rồi bấm **Nhập thật**. Hệ thống xử lý các trường hợp sau:
-
-- Một đội nộp nhiều lần thì lấy dòng cuối; các dòng cũ được đánh dấu "bị thay".
-- Mã trùng với bản nộp gần nhất của đội thì bỏ qua.
-- Tự bỏ khối ```python, ký tự NBSP và zero-width do copy từ web/Word.
-- File không UTF-8, file > 64 KiB, file HTML (tải sai từ Drive), thiếu `choose_move` đều được báo lỗi theo từng dòng; các dòng khác vẫn nhập bình thường.
-- ZIP chỉ được đọc trong bộ nhớ, bỏ qua đường dẫn, giới hạn kích thước từng file và tổng dung lượng.
-- Có nhiều file cùng khớp một đội thì lấy file mới nhất và kèm cảnh báo.
-- "Tạo tài khoản cho đội mới" sinh mật khẩu tạm, và tài khoản bị buộc đổi mật khẩu. File tài khoản **chỉ tải được một lần trong 1 giờ**: hãy lưu riêng và gửi riêng cho từng đội.
-
-CLI tương đương (có thêm `--dry-run`): `python -m arena_backend import-form responses.csv --files drive.zip --tournament ID --create-teams --credentials /root/tai-khoan.csv`.
+- Đội lỡ hạn đăng ký giải: admin dùng *Thêm đội thủ công* ở tab *Giải đấu* (dùng bot hợp lệ mới nhất của đội).
+- Đội không vào được: admin cấp lại mật khẩu ở tab *Đội & tài khoản*, hoặc tạo lại tài khoản (xóa tài khoản sai, để sinh viên đăng ký lại).
+- Muốn dừng nộp bài tạm thời: tắt công tắc *Cho nộp bot trên web* ở tab *Tổng quan*.
 
 ## 7. Kịch bản ngày thi
 
@@ -123,7 +113,7 @@ CLI tương đương (có thêm `--dry-run`): `python -m arena_backend import-fo
 | T-1 ngày | Chốt commit, image và engine. Tạo giải Swiss với hạn chọn bot, bật *Tự mở vòng*. Đăng thông báo. |
 | Mở cổng | Bật đăng ký. Theo dõi chỉ số "SV chưa có đội" và nhắc lập đội. |
 | Trước hạn 30 phút | Thông báo hạn chót. Hàng chờ kiểm tra sẽ dài hơn; số "Ước tính xong" cho biết còn bao lâu. |
-| Cần đổi giải | Tab *Giải đấu*: sửa tên/mô tả/hạn/số vòng Swiss, **Đóng đăng ký ngay**, thêm đội thủ công bằng mã đội hoặc tên đội (đội lỡ hạn, nộp qua Google Form), xóa đội khỏi danh sách trước khi khóa, xem từng cặp đấu theo vòng, hoặc **Hủy giải** (hủy mọi ván chưa xong). |
+| Cần đổi giải | Tab *Giải đấu*: sửa tên/mô tả/hạn/số vòng Swiss, **Đóng đăng ký ngay**, thêm đội thủ công bằng mã đội hoặc tên đội (đội lỡ hạn), xóa đội khỏi danh sách trước khi khóa, xem từng cặp đấu theo vòng, hoặc **Hủy giải** (hủy mọi ván chưa xong). |
 | Sau hạn | Chờ "Bài nộp đang chờ" về 0, rồi bấm **Khóa danh sách** (hoặc **Khóa bắt buộc** để loại các bot chưa được kiểm tra). Tắt đấu xếp hạng, đấu tập/giao hữu và chiến dịch boss; backup; rồi **Mở vòng**. |
 | Mỗi vòng | Xem "Job lỗi". Nếu có, bấm *Thử lại mọi job lỗi*. Vòng tiếp theo tự mở. |
 | Chung kết | Tạo giải *Loại trực tiếp* với nguồn đội "Top N của" vòng Swiss: danh sách được khóa ngay với hạt giống theo hạng. |
@@ -133,7 +123,7 @@ Xử lý sự cố:
 
 - **Runner chết/khởi động lại**: job đang chạy tự về hàng đợi (dừng êm) hoặc được thu hồi sau 90 giây. Container mồ côi bị dọn sau 30 giây.
 - **Máy chủ quá tải hoặc DB bận**: API trả 503, và trình duyệt tự giãn chu kỳ refresh rồi thử lại. Có thể bật *Chế độ chỉ xem* để chặn mọi thao tác ghi trong lúc xử lý.
-- **Gia hạn nộp bài**: tạo giải mới với hạn mới hoặc nhập thêm qua Google Form. Admin vẫn thêm được đăng ký sau hạn cho tới lúc khóa danh sách.
+- **Gia hạn nộp bài**: kéo dài hạn ở tab *Giải đấu* (sửa hạn đăng ký), hoặc thêm đội thủ công. Admin vẫn thêm được đăng ký sau hạn cho tới lúc khóa danh sách.
 - **Gian lận/sao chép**: tab *Bài nộp* có ghi chú "trùng mã với N đội". Lưu ý bot mẫu nguyên bản trùng nhiều là chuyện bình thường. Dùng *Truất quyền* trên bảng điểm giải hoặc với cả đội.
 - **Quên mật khẩu**: tab *Đội & tài khoản* → *Cấp lại mật khẩu* (hiện một lần, buộc đổi khi đăng nhập).
 

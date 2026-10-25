@@ -1,13 +1,12 @@
 import argparse
 import getpass
-import json
 import os
 import re
 import signal
 from pathlib import Path
 
 from werkzeug.security import generate_password_hash
-from .store import Store, Problem, ROOT, uid, now
+from .store import Store, ROOT, uid, now
 
 
 def main():
@@ -29,23 +28,14 @@ def main():
                         help='Games graded in parallel; about one per free CPU core.')
     backup = commands.add_parser('backup')
     backup.add_argument('destination')
-    form = commands.add_parser('import-form', help='Import Google Forms responses (CSV + optional ZIP/folder)')
-    form.add_argument('csv')
-    form.add_argument('--files', help='ZIP or folder downloaded from the Drive upload folder')
-    form.add_argument('--tournament', help='Register every imported bot in this open tournament')
-    form.add_argument('--create-teams', action='store_true', help='Create teams that do not exist yet')
-    form.add_argument('--credentials', help='Create one login per new team and write them to this new CSV file')
-    form.add_argument('--dry-run', action='store_true')
-    for role in ('team', 'team_code', 'source', 'file', 'bot_name', 'members', 'email'):
-        form.add_argument(f'--col-{role.replace("_", "-")}', dest=f'col_{role}', help=f'CSV header for {role}')
     args = parser.parse_args()
     store = Store(args.data)
     if args.command == 'serve':
         from waitress import serve as run
-        from .app import create_app, IMPORT_BYTES
+        from .app import create_app
         print(f'OTTv2: http://{args.host}:{args.port}/', flush=True)
         run(create_app(args.data), host=args.host, port=args.port, threads=args.threads,
-            max_request_body_size=IMPORT_BYTES, channel_timeout=60, connection_limit=args.connections,
+            max_request_body_size=1_000_000, channel_timeout=60, connection_limit=args.connections,
             # poll() lifts select()'s 1,024 socket ceiling on Linux.
             backlog=2048, asyncore_use_poll=os.name != 'nt')
     elif args.command == 'admin':
@@ -72,24 +62,6 @@ def main():
             parser.error('Choose a new backup filename; existing files are not overwritten.')
         store.backup(target)
         print('Backup written:', target)
-    elif args.command == 'import-form':
-        from .importer import run_cli
-        overrides = {role: getattr(args, f'col_{role}') for role in
-                     ('team', 'team_code', 'source', 'file', 'bot_name', 'members', 'email')}
-        try:
-            planned, credentials = run_cli(store, args.csv, args.files, args.tournament, args.create_teams,
-                                           args.credentials, args.dry_run, overrides)
-        except Problem as exc:
-            parser.error(str(exc))
-        print('Columns:', json.dumps(planned['mapping'], ensure_ascii=False))
-        for row in planned['rows']:
-            if row['status'] not in ('ready', 'imported'):
-                print(f"  row {row['row']}: {row['status']} · {row['team'] or row['code']} · {row['message']}")
-        summary = {s: sum(r['status'] == s for r in planned['rows'])
-                   for s in ('ready', 'imported', 'unchanged', 'superseded', 'error')}
-        print('Summary:', json.dumps(summary), '(dry run)' if args.dry_run else '')
-        if credentials:
-            print(f'{len(credentials)} team logins written to {args.credentials}. Keep this file private.')
     else:
         from .runner import Executor, Worker
         origin = os.getenv('ARENA_ORIGIN', 'http://localhost:8080')

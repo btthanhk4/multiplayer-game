@@ -1,15 +1,12 @@
 import concurrent.futures
 import hashlib
-import io
 import json
 import sqlite3
 import tempfile
 import time
 import unittest
-import zipfile
 from pathlib import Path
 
-from arena_backend import importer
 from arena_backend.app import create_app
 from arena_backend.store import (Store, ROOT, RULES_HASH, LIMITS, SCHEMA_VERSION, SYSTEM_TEAM, Problem, uid, now,
                                  swiss_pairs, bracket_order)
@@ -664,95 +661,6 @@ class Ranked(Base):
             self.store.join_ranked(team, self.valid(team))
 
 
-class GoogleFormImport(Base):
-    def csv(self, rows, headers=('Dấu thời gian', 'Tên đội', 'Thành viên', 'Dán mã Python')):
-        out = io.StringIO()
-        import csv
-        writer = csv.writer(out)
-        writer.writerow(headers)
-        writer.writerows(rows)
-        return out.getvalue().encode('utf-8-sig')
-
-    def test_pasted_code_dedupes_latest_and_cleans_copy_paste(self):
-        existing, _ = self.team('Đội Có Sẵn')
-        data = self.csv([
-            ['1', 'Đội Mới', 'An, Bình', FIRST],
-            ['2', 'Đội Có Sẵn', 'Chi', 'print("old")'],
-            ['3', 'đội có sẵn', 'Chi', '```python\n' + FIRST.replace('    ', '\xa0   ') + '\n```'],
-            ['4', 'Không mã', 'Dũng', 'xin chào'],
-            ['5', '', '', FIRST],
-        ])
-        planned = importer.plan(self.store, data, create_teams=True)
-        status = [row['status'] for row in planned['rows']]
-        self.assertEqual(status, ['ready', 'superseded', 'ready', 'error', 'error'])
-        self.assertEqual(planned['mapping']['source'], 'Dán mã Python')
-        self.assertNotIn('\xa0', planned['rows'][2]['source'])
-        credentials = importer.apply(self.store, planned, 'admin', create_accounts=True)
-        self.assertEqual(len(credentials), 1)
-        self.assertEqual(credentials[0]['team'], 'Đội Mới')
-        with self.store.connect() as db:
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM submissions WHERE origin='form'").fetchone()[0], 2)
-            self.assertEqual(db.execute('SELECT COUNT(*) FROM submissions WHERE team_id=?', (existing,)).fetchone()[0], 1)
-            user = db.execute('SELECT * FROM users WHERE username=?', (credentials[0]['username'],)).fetchone()
-            self.assertEqual(user['must_change'], 1)
-        again = importer.plan(self.store, data, create_teams=True)
-        self.assertEqual([row['status'] for row in again['rows']][:3], ['unchanged', 'superseded', 'unchanged'])
-
-    def test_zip_upload_matches_team_code_and_rejects_bad_files(self):
-        (a, _), (b, _), (c, _) = self.team('Alpha'), self.team('Beta'), self.team('Gamma')
-        with self.store.connect() as db:
-            codes = {t: db.execute('SELECT code FROM teams WHERE id=?', (t,)).fetchone()[0] for t in (a, b, c)}
-        bundle = io.BytesIO()
-        with zipfile.ZipFile(bundle, 'w') as archive:
-            archive.writestr(f'Nộp bài/{codes[a]} - Nguyễn Văn A.py', FIRST.encode())
-            archive.writestr('../../etc/' + codes[b] + '.py', '<!DOCTYPE html><html>Drive</html>')
-            archive.writestr(f'{codes[c]}.py', ('# ' + 'x'*70000 + '\n' + FIRST).encode())
-            archive.writestr('README.md', 'ignored')
-        data = self.csv([['1', codes[t], 'https://drive.google.com/open?id=x'] for t in (a, b, c)],
-                        headers=('Timestamp', 'Mã đội', 'Tải file bot lên'))
-        files, _ = importer.Files.from_zip(bundle.getvalue())
-        planned = importer.plan(self.store, data, files)
-        rows = {row['code']: row for row in planned['rows']}
-        self.assertEqual(rows[codes[a]]['status'], 'ready')
-        self.assertIn('HTML', rows[codes[b]]['message'])
-        self.assertIn('64 KiB', rows[codes[c]]['message'])
-        with self.assertRaises(Problem):
-            importer.plan(self.store, data)
-
-    def test_http_import_dry_run_apply_and_one_time_credentials(self):
-        admin = self.register('organiser')
-        with self.store.connect(True) as db:
-            db.execute("UPDATE users SET role='admin' WHERE id=?", (admin,))
-        tid = self.post('/admin/tournaments', {'name': 'Giải Form', 'format': 'swiss', 'rounds': 3,
-                                               'deadline': now()+600}).json['id']
-        data = self.csv([[str(i), f'Đội Form {i}', 'SV', FIRST] for i in range(30)])
-        headers = {'Origin': 'http://localhost:8080', 'X-CSRF-Token': self.csrf}
-        form = lambda extra: {'csv': (io.BytesIO(data), 'responses.csv'), 'create_teams': '1',
-                              'create_accounts': '1', 'tournament': tid, **extra}
-        dry = self.client.post('/api/admin/import', data=form({}), headers=headers, content_type='multipart/form-data')
-        self.assertEqual(dry.status_code, 200, dry.json)
-        self.assertEqual(dry.json['summary']['ready'], 30)
-        with self.store.connect() as db:
-            self.assertEqual(db.execute('SELECT COUNT(*) FROM teams').fetchone()[0], 0)
-        applied = self.client.post('/api/admin/import', data=form({'apply': '1'}), headers=headers,
-                                   content_type='multipart/form-data')
-        self.assertEqual(applied.status_code, 202, applied.json)
-        iid = applied.json['id']
-        for _ in range(200):
-            status = self.client.get(f'/api/admin/imports/{iid}').json
-            if status['status'] != 'running':
-                break
-            time.sleep(.1)
-        self.assertEqual(status['status'], 'done', status)
-        self.assertEqual(status['summary']['imported'], 30)
-        first = self.client.get(f'/api/admin/imports/{iid}/credentials')
-        self.assertEqual(first.status_code, 200)
-        self.assertEqual(first.get_data(as_text=True).count('\n'), 31)
-        self.assertEqual(self.client.get(f'/api/admin/imports/{iid}/credentials').status_code, 410)
-        with self.store.connect() as db:
-            self.assertEqual(db.execute('SELECT COUNT(*) FROM entries WHERE tournament_id=?', (tid,)).fetchone()[0], 30)
-
-
 class Campaign(Base):
     bosses = True
 
@@ -1343,6 +1251,34 @@ class ScaleAndFairness(Base):
         self.register('liveflag')
         self.assertTrue(self.client.get('/api/health').json['open']['live_open'])
 
+    def test_match_list_orders_running_then_waiting_then_newest_and_searches_by_team(self):
+        (_, ua, sa), (_, _, sb), (_, _, sc) = (self.team_with_bot('Sói Bạc'), self.team_with_bot('Cáo Lửa'),
+                                               self.team_with_bot('Gấu Nâu'))
+        ids = {}
+        with self.store.connect(True) as db:
+            for label, (p1, p2), status, age in (('old_done', (sa, sb), 'done', 900), ('new_done', (sb, sc), 'done', 100),
+                                                 ('cancelled', (sa, sc), 'cancelled', 500), ('queued', (sb, sa), 'queued', 800),
+                                                 ('running', (sc, sb), 'running', 700), ('failed', (sc, sa), 'failed', 300)):
+                ids[label] = self.store.create_match(db, p1, p2, ua)
+                db.execute('UPDATE matches SET status=?,created=? WHERE id=?', (status, now() - age, ids[label]))
+        self.register('lister2')
+        order = [m['id'] for m in self.client.get('/api/matches').json['items']]
+        self.assertEqual(order, [ids[k] for k in ('running', 'queued', 'new_done', 'failed', 'cancelled', 'old_done')])
+        self.assertEqual([m['id'] for m in self.client.get('/api/matches?status=done').json['items']],
+                         [ids['new_done'], ids['old_done']])
+        by_team = {m['id'] for m in self.client.get('/api/matches?q=Gấu').json['items']}
+        self.assertEqual(by_team, {ids['new_done'], ids['cancelled'], ids['running'], ids['failed']})
+        self.assertEqual({m['id'] for m in self.client.get('/api/matches?q=Sói&status=queued').json['items']}, {ids['queued']})
+        self.assertEqual(self.client.get("/api/matches?q=%27%20OR%201%3D1%20--").json['items'], [])
+        with self.store.connect(True) as db:
+            db.execute("UPDATE users SET role='admin' WHERE username='lister2'")
+        listing = self.client.get('/api/admin/matches').json['items']
+        self.assertEqual([m['id'] for m in listing][:2], [ids['new_done'], ids['failed']], 'admin list is newest first')
+        found = self.client.get(f"/api/admin/matches?q={ids['queued'][:10]}").json['items']
+        self.assertEqual([m['id'] for m in found], [ids['queued']])
+        self.assertEqual({m['id'] for m in self.client.get('/api/admin/matches?q=Cáo').json['items']},
+                         {ids['old_done'], ids['new_done'], ids['queued'], ids['running']})
+
     def test_health_reports_average_job_times_for_wait_estimates(self):
         team, user, sid = self.team_with_bot('Ước tính')
         with self.store.connect(True) as db:
@@ -1518,6 +1454,116 @@ class VersionedAssets(Base):
         self.assertIn('chưa được gửi đi', text)
         self.assertNotIn('secret-never-echoed', text)
         self.assertEqual(self.client.get('/arena/enable-javascript').status_code, 404)   # only a POST target
+
+
+class DeleteUser(Base):
+    def make_admin(self, name):
+        user = self.user(name)
+        with self.store.connect(True) as db:
+            db.execute("UPDATE users SET role='admin' WHERE id=?", (user,))
+        return user
+
+    def join(self, team_id, name):
+        user = self.user(name)
+        with self.store.connect() as db:
+            code = db.execute('SELECT code FROM teams WHERE id=?', (team_id,)).fetchone()[0]
+        self.store.join_team(user, code)
+        return user
+
+    def exists(self, table, column, value):
+        with self.store.connect() as db:
+            return db.execute(f'SELECT 1 FROM {table} WHERE {column}=?', (value,)).fetchone() is not None
+
+    def test_member_leaves_team_keeps_bots_and_loses_sessions(self):
+        admin = self.make_admin('boss')
+        team, owner = self.team('Đội còn lại')
+        member = self.join(team, 'thanh_vien')
+        sid = self.valid(team)
+        with self.store.connect(True) as db:
+            db.execute('INSERT INTO sessions VALUES(?,?,?,?)', ('h' * 64, member, 'csrf', now() + 600))
+        result = self.store.delete_user(member, admin)
+        self.assertEqual(result, {'ok': True, 'team_kept': True})
+        self.assertFalse(self.exists('users', 'id', member))
+        self.assertFalse(self.exists('sessions', 'user_id', member))
+        self.assertTrue(self.exists('teams', 'id', team))
+        self.assertTrue(self.exists('submissions', 'id', sid))
+        self.assertEqual(len(self.store.team_members(self.store.open(), team)), 1)
+        with self.store.connect() as db:
+            audit = db.execute("SELECT actor,detail FROM audit WHERE action='user.deleted'").fetchone()
+        self.assertEqual(audit['actor'], admin)
+        self.assertIn('thanh_vien', audit['detail'])
+        del owner
+
+    def test_owner_deleted_hands_the_team_to_the_next_member(self):
+        admin = self.make_admin('boss')
+        team, owner = self.team('Đổi trưởng nhóm')
+        member = self.join(team, 'ke_nhiem')
+        self.store.delete_user(owner, admin)
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT owner FROM teams WHERE id=?', (team,)).fetchone()[0], member)
+
+    def test_last_member_with_a_bot_leaves_a_team_that_can_still_play_but_not_queue(self):
+        admin = self.make_admin('boss')
+        team, owner = self.team('Chỉ một người')
+        sid = self.valid(team)
+        self.store.join_ranked(team, sid)
+        result = self.store.delete_user(owner, admin)
+        self.assertTrue(result['team_kept'])
+        self.assertTrue(self.exists('teams', 'id', team), 'results and Elo history stay')
+        self.assertFalse(self.exists('ranked_queue', 'team_id', team), 'nobody is left to answer a ranked match')
+        with self.store.connect() as db:
+            self.assertIsNone(db.execute('SELECT owner FROM teams WHERE id=?', (team,)).fetchone()[0])
+
+    def test_team_without_any_history_disappears_with_its_only_member(self):
+        admin = self.make_admin('boss')
+        team, owner = self.team('Chưa làm gì')
+        self.assertEqual(self.store.delete_user(owner, admin), {'ok': True, 'team_kept': False})
+        self.assertFalse(self.exists('teams', 'id', team))
+
+    def test_refuses_self_unknown_and_the_last_admin(self):
+        first = self.make_admin('quan_tri_1')
+        for target, status in ((first, 409), ('nope', 404)):
+            with self.assertRaises(Problem) as caught:
+                self.store.delete_user(target, first)
+            self.assertEqual(caught.exception.status, status)
+        player, _ = self.team('Người chơi')
+        del player
+        lone = self.make_admin('quan_tri_2')
+        with self.store.connect(True) as db:
+            db.execute("UPDATE users SET disabled=1 WHERE id=?", (lone,))   # a disabled admin cannot be relied on
+        outsider = self.user('nguoi_ngoai')
+        with self.assertRaises(Problem) as caught:
+            self.store.delete_user(first, outsider)
+        self.assertEqual(caught.exception.status, 409, 'the only usable admin stays')
+        with self.store.connect(True) as db:
+            db.execute("UPDATE users SET disabled=0 WHERE id=?", (lone,))
+        self.store.delete_user(first, lone)                                    # now another admin exists
+        self.assertFalse(self.exists('users', 'id', first))
+
+    def test_http_needs_an_admin_and_signs_the_deleted_user_out(self):
+        victim_client = self.app.test_client()
+        origin = {'Origin': 'http://localhost:8080'}
+        registered = victim_client.post('/api/register', json={'username': 'se_bi_xoa', 'name': 'Bị xóa',
+                                                               'password': 'test-only-password-123', 'invite': 'test-invite'}, headers=origin)
+        victim = registered.json['user']['id']
+        self.assertEqual(victim_client.get('/api/me').json['user']['username'], 'se_bi_xoa')
+        self.register('quan_tri_web')
+        self.assertEqual(self.post(f'/admin/users/{victim}', {'action': 'delete'}).status_code, 403)
+        with self.store.connect(True) as db:
+            db.execute("UPDATE users SET role='admin' WHERE username='quan_tri_web'")
+        self.assertEqual(self.post(f'/admin/users/{victim}', {'action': 'delete'}).status_code, 200)
+        self.assertIsNone(victim_client.get('/api/me').json['user'])
+        login = victim_client.post('/api/login', json={'username': 'se_bi_xoa', 'password': 'test-only-password-123'}, headers=origin)
+        self.assertEqual(login.status_code, 401)
+        users = self.client.get('/api/admin/users?q=se_bi_xoa').json['items']
+        self.assertEqual(users, [])
+        mine = self.client.get('/api/me').json['user']['id']
+        self.assertEqual(self.post(f'/admin/users/{mine}', {'action': 'delete'}).status_code, 409)
+        self.assertEqual(self.post('/admin/users/missing', {'action': 'delete'}).status_code, 404)
+        # The name can be registered again by a new person.
+        again = victim_client.post('/api/register', json={'username': 'se_bi_xoa', 'name': 'Người mới', 'password': 'test-only-password-123',
+                                                           'invite': 'test-invite'}, headers=origin)
+        self.assertEqual(again.status_code, 200, again.json)
 
 
 class AdminMatches(Base):

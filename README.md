@@ -6,7 +6,7 @@ Trang chủ `/` là **Đấu trường bot Python**. Sinh viên lập đội, vi
 
 1. Đăng ký bằng mã tham gia do ban tổ chức cấp. **Tạo đội** hoặc **vào đội** bằng mã 8 ký tự (tối đa 4 người).
 2. Viết một file Python UTF-8 tối đa 64 KiB, định nghĩa `choose_move(observation)` và trả `{'from': [row, col], 'to': [row, col]}`. Xem [giao thức bot](arena/guide.html).
-3. Nộp mã trên web, hoặc qua Google Form để BTC nhập. Runner kiểm tra 12 nửa lượt mẫu. Bản hợp lệ dùng được để đấu tập, xếp hạng hoặc đăng ký giải.
+3. Nộp mã trên web. Runner kiểm tra 12 nửa lượt mẫu. Bản hợp lệ dùng được để đấu tập, xếp hạng hoặc đăng ký giải.
 4. Ở **Chiến dịch boss**, leo tháp 5 boss mạnh dần (cần ≥ 1,5/2 điểm mỗi ải; 2/2 được ★★★) để lên bảng vàng và mở huy hiệu. Bấm tên đội bất kỳ để xem hồ sơ và mời giao hữu.
 5. Ở **Đấu xếp hạng**, chọn bot và tìm đối thủ. Hệ thống ưu tiên đội chưa gặp trong 24 giờ, sau đó Elo gần nhất. Mỗi cặp có hai ván đổi màu; Elo cập nhật sau khi cả hai kết thúc.
 6. Ở **Giải đấu**, chọn bot trước hạn. BTC khóa danh sách (bot không hợp lệ tự bị loại) rồi mở các vòng Swiss, vòng tròn hoặc loại trực tiếp. Bảng điểm có xếp loại Xuất sắc/Giỏi/Khá/Đạt.

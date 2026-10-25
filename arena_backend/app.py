@@ -16,7 +16,6 @@ from flask import Flask, Response, jsonify, request, send_from_directory, g
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from . import importer
 from .store import Store, Problem, ROOT, RULES_HASH, LIMITS, TEAM_SIZE, SYSTEM_TEAM, uid, now
 
 PUBLIC_FILES = {'rules.js', 'arena/arena.js', 'arena/admin.js', 'arena/common.js', 'arena/watch.js', 'arena/arena.css',
@@ -38,7 +37,6 @@ NO_SCRIPT_PAGE = (
 SAMPLES = {'sdk/examples/first.py', 'sdk/examples/hunter.py', 'sdk/examples/guardian.py',
            'sdk/examples/template.py', 'sdk/local_arena.py'}
 SESSION_SECONDS = int(os.getenv('ARENA_SESSION_DAYS', '7')) * 86400
-IMPORT_BYTES = 60_000_000
 
 
 def env_rate(name, default):
@@ -57,6 +55,11 @@ RATES = {
     'campaign_team': (env_rate('CAMPAIGN_TEAM', 30), 3600),
     'team_user': (env_rate('TEAM_USER', 20), 3600),
 }
+
+
+def temp_password():
+    """12 characters without look-alikes (0/o, 1/l/i), for admin-issued temporary passwords."""
+    return ''.join(secrets.choice('abcdefghjkmnpqrstuvwxyz23456789') for _ in range(12))
 
 
 def text(data, key, minimum=1, maximum=80):
@@ -127,7 +130,6 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         store.ensure_bosses()
     cache = TTLCache()
     app.extensions['cache'] = cache
-    credentials = {}
 
     def settings():
         return cache.get('settings', 2, store.settings)
@@ -149,7 +151,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
                 raise Problem('Địa chỉ truy cập không khớp với máy chủ. Hãy mở lại bằng đúng đường link được cấp.', 403)
             if sent == 'null':
                 raise Problem('Trình duyệt không gửi nguồn gốc yêu cầu. Hãy mở trang trực tiếp bằng link được cấp.', 403)
-            if request.path != '/api/admin/import' and not request.is_json:
+            if not request.is_json:
                 raise Problem('API yêu cầu application/json.', 415)
         token = request.cookies.get('ott_session', '')
         if token:
@@ -563,11 +565,15 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
     ORDER = ("ORDER BY CASE m.status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END,"
              "m.created DESC,m.id LIMIT 100")
 
+    STATUSES = ('running', 'queued', 'done', 'failed', 'cancelled')
+
+    def team_match_filter(query):
+        """Games of teams whose name contains `query`, found through the p1/p2 indexes (no table scan)."""
+        teams = 'SELECT s.id FROM submissions s JOIN teams t ON t.id=s.team_id WHERE t.name LIKE ?'
+        return f'(m.p1 IN ({teams}) OR m.p2 IN ({teams}))', [f'%{query}%'] * 2
+
     def match_list(status, tid, kind='', query=''):
         where, args = [], []
-        if status in ('queued', 'running', 'done', 'failed', 'cancelled'):
-            where.append('m.status=?')
-            args.append(status)
         if tid:
             where.append('p.tournament_id=?')
             args.append(tid)
@@ -575,12 +581,19 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
             where.append('m.kind=?')
             args.append(kind)
         if query:
-            where.append('(t1.name LIKE ? OR t2.name LIKE ?)')
-            args += [f'%{query}%'] * 2
+            clause, found = team_match_filter(query)
+            where.append(clause)
+            args += found
+        # Running games first, then waiting, then the newest of the rest. One index-backed query per status
+        # (newest 100 each) instead of sorting every stored game with a CASE expression.
+        statuses = [status] if status in STATUSES else STATUSES
+        rows = []
         with store.connect() as db:
-            rows = db.execute(MATCH_SELECT + ('WHERE ' + ' AND '.join(where) + ' ' if where else '') + ORDER,
-                              args).fetchall()
-        return [dict(r) for r in rows]
+            for state in statuses:
+                rows += db.execute(MATCH_SELECT + 'WHERE ' + ' AND '.join(['m.status=?', *where]) +
+                                   ' ORDER BY m.created DESC LIMIT 100', (state, *args)).fetchall()
+        rows.sort(key=lambda r: ({'running': 0, 'queued': 1}.get(r['status'], 2), -r['created'], r['id']))
+        return [dict(r) for r in rows[:100]]
 
     @app.get('/api/matches')
     def matches():
@@ -802,8 +815,10 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
     def admin_user(user):
         actor, data = auth(True), body()
         action = data.get('action')
+        if action == 'delete':
+            return jsonify(store.delete_user(user, actor))
         if action == 'reset_password':
-            secret = importer.password()
+            secret = temp_password()
             digest = generate_password_hash(secret, method='scrypt')
         with store.connect(True) as db:
             target = db.execute('SELECT * FROM users WHERE id=?', (user,)).fetchone()
@@ -837,10 +852,11 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
             if request.args.get(key):
                 where.append(f'{column}=?')
                 args.append(request.args[key])
-        q = request.args.get('q', '').strip()
+        q = request.args.get('q', '').strip()[:60]
         if q:
-            where.append('(t1.name LIKE ? OR t2.name LIKE ? OR m.id LIKE ?)')
-            args += [f'%{q}%'] * 3
+            clause, found = team_match_filter(q)
+            where.append(f'({clause} OR m.id LIKE ?)')
+            args += [*found, f'{q}%']
         with store.connect() as db:
             rows = db.execute(
                 'SELECT m.id,m.status,m.kind,m.winner,m.reason,m.plies,m.created,m.pairing_id,s1.name bot1,s2.name bot2,'
@@ -916,85 +932,6 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         with store.connect() as db:
             rows = db.execute('SELECT * FROM audit ORDER BY id DESC LIMIT 200').fetchall()
         return jsonify(items=[dict(r) for r in rows])
-
-    # ---- Google Form import --------------------------------------------
-
-    def import_inputs():
-        request.max_content_length = IMPORT_BYTES
-        upload, bundle = request.files.get('csv'), request.files.get('files')
-        csv_data = upload.read() if upload else None
-        files = None
-        if bundle and bundle.filename:
-            files, bundled_csv = importer.Files.from_zip(bundle.read())
-            csv_data = csv_data or bundled_csv
-        if not csv_data:
-            raise Problem('Chọn file CSV tải từ Google Forms (hoặc ZIP có kèm CSV).')
-        overrides = {role: request.form.get(f'col_{role}', '').strip()
-                     for role in ('team', 'team_code', 'source', 'file', 'bot_name', 'members', 'email')}
-        options = {'create_teams': request.form.get('create_teams') == '1',
-                   'create_accounts': request.form.get('create_accounts') == '1',
-                   'tournament': request.form.get('tournament') or None}
-        return csv_data, files, overrides, options
-
-    @app.post('/api/admin/import')
-    def import_form():
-        actor = auth(True)
-        csv_data, files, overrides, options = import_inputs()
-        planned = importer.plan(store, csv_data, files, overrides, options['create_teams'])
-        if request.form.get('apply') != '1':
-            return jsonify(mapping=planned['mapping'], summary=planned['summary'], rows=importer.public_rows(planned))
-        iid = uid()
-        with store.connect(True) as db:
-            db.execute("INSERT INTO imports(id,actor,status,summary,created) VALUES(?,?,'running',?,?)",
-                       (iid, actor, json.dumps(planned['summary']), now()))
-
-        def work():
-            try:
-                found = importer.apply(store, planned, actor, options['tournament'], options['create_accounts'])
-                if found:
-                    credentials[iid] = (importer.credentials_csv(found), time.monotonic() + 3600)
-                summary = {**planned['summary'], 'imported': sum(r['status'] == 'imported' for r in planned['rows']),
-                           'accounts': len(found)}
-                status = 'done'
-            except Exception as exc:  # noqa: BLE001 - report every failure to the organiser
-                summary, status = {**planned['summary'], 'error': str(exc)[:500]}, 'failed'
-            with store.connect(True) as db:
-                db.execute('UPDATE imports SET status=?,summary=?,report=?,finished=? WHERE id=?',
-                           (status, json.dumps(summary, ensure_ascii=False),
-                            json.dumps(importer.public_rows(planned), ensure_ascii=False), now(), iid))
-            cache.clear()
-        threading.Thread(target=work, daemon=True).start()
-        return jsonify(id=iid, summary=planned['summary']), 202
-
-    @app.get('/api/admin/imports')
-    def imports():
-        auth(True)
-        with store.connect() as db:
-            rows = db.execute('SELECT id,actor,status,summary,created,finished FROM imports '
-                              'ORDER BY created DESC LIMIT 20').fetchall()
-        return jsonify(items=[{**dict(r), 'summary': json.loads(r['summary']),
-                               'credentials': r['id'] in credentials} for r in rows])
-
-    @app.get('/api/admin/imports/<iid>')
-    def import_status(iid):
-        auth(True)
-        with store.connect() as db:
-            row = db.execute('SELECT * FROM imports WHERE id=?', (iid,)).fetchone()
-        if not row:
-            raise Problem('Không tìm thấy lượt nhập.', 404)
-        return jsonify({**dict(row), 'summary': json.loads(row['summary']), 'report': json.loads(row['report']),
-                        'credentials': iid in credentials})
-
-    @app.get('/api/admin/imports/<iid>/credentials')
-    def import_credentials(iid):
-        actor = auth(True)
-        found = credentials.pop(iid, None)
-        if not found or found[1] < time.monotonic():
-            raise Problem('Thông tin đăng nhập chỉ tải được một lần trong vòng 1 giờ sau khi nhập.', 410)
-        with store.connect(True) as db:
-            store.audit(db, actor, 'import.credentials_downloaded', {'import': iid})
-        return Response(found[0], mimetype='text/csv',
-                        headers={'Content-Disposition': f'attachment; filename="tai-khoan-doi-{iid[:6]}.csv"'})
 
     # ---- pages ----------------------------------------------------------
 

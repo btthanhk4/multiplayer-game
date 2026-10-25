@@ -3,7 +3,7 @@ import {$, $$, escape, labels, formats, kinds, formatTime, badge, session, api, 
 
 document.getElementById('boot-note')?.remove();   // reaching here means every module loaded
 let editingFor = '';
-let me = null, tab = 'dashboard', tournaments = [], adminTournament = '', detail = null, importRows = [];
+let me = null, tab = 'dashboard', tournaments = [], adminTournament = '', detail = null;
 
 function setTab(value) {
   if (!$$('.view').some(el => el.id === value)) value = 'dashboard';
@@ -72,10 +72,6 @@ async function loadTournaments() {
   const source = $('#seed-source'), before = source.value;
   source.innerHTML = '<option value="">Đăng ký mở (thí sinh tự chọn bot)</option>' + completed.map(t => `<option value="${escape(t.id)}">Top N của: ${escape(t.name)}</option>`).join('');
   if (completed.some(t => t.id === before)) source.value = before;
-  const open = tournaments.filter(t => t.status === 'open' && !t.seed_from);
-  const target = $('#import-tournament'), selected = target.value;
-  target.innerHTML = '<option value="">Không đăng ký vào giải</option>' + open.map(t => `<option value="${escape(t.id)}">${escape(t.name)}</option>`).join('');
-  if (open.some(t => t.id === selected)) target.value = selected;
 }
 
 async function renderEvents() {
@@ -132,39 +128,6 @@ function syncTournamentForm() {
   $('#rounds-hint').textContent = 'Gợi ý: 7 vòng đủ chọn top 32 của 1.000 đội; 10–11 vòng để phân hạng toàn bộ.';
 }
 
-// ---- import -------------------------------------------------------------
-
-function renderImport(result) {
-  importRows = result.rows || result.report || [];
-  const s = result.summary || {};
-  $('#import-summary').innerHTML = `${result.mapping ? `Cột nhận diện: ${Object.entries(result.mapping).map(([k, v]) => `<code>${escape(k)}</code> = “${escape(v)}”`).join(', ')}<br>` : ''}${s.rows ?? importRows.length} dòng · ${s.ready ?? 0} sẵn sàng · ${s.imported != null ? `${s.imported} đã nhập · ` : ''}${s.unchanged ?? 0} không đổi · ${s.superseded ?? 0} bị thay · <strong>${s.error ?? 0} lỗi</strong>${s.accounts ? ` · ${s.accounts} tài khoản mới` : ''}${s.error && typeof s.error === 'string' ? `<br>${escape(s.error)}` : ''}`;
-  renderImportRows();
-}
-
-function renderImportRows() {
-  const filter = $('#import-filter').value;
-  const rows = importRows.filter(r => !filter || r.status === filter);
-  const tone = {error:'bad', ready:'', imported:'', superseded:'wait', unchanged:'wait'};
-  const names = {error:'Lỗi', ready:'Sẵn sàng', imported:'Đã nhập', superseded:'Bị thay', unchanged:'Không đổi'};
-  $('#import-rows').innerHTML = rows.length ? rows.slice(0, 1000).map(r => `<tr><td>${r.row}</td><td>${escape(r.team || r.code)}${r.created_team ? '<small>đội mới</small>' : ''}</td><td><span class="badge ${tone[r.status]}">${escape(names[r.status] || r.status)}</span></td><td>${escape(r.message)}</td></tr>`).join('')
-    : '<tr><td colspan="4">Không có dòng phù hợp.</td></tr>';
-}
-
-async function renderImportHistory() {
-  const {items} = await api('/admin/imports');
-  $('#import-history').innerHTML = items.length ? items.map(i => `<div class="job"><div>${badge(i.status === 'done' ? 'done' : i.status === 'failed' ? 'failed' : 'running')} ${formatTime(i.created)}<p>${i.summary.imported ?? '…'} đã nhập · ${i.summary.error ?? 0} lỗi${i.summary.accounts ? ` · ${i.summary.accounts} tài khoản` : ''}</p></div><div class="action-row"><button class="button" data-import="${i.id}">Xem</button>${i.credentials ? `<button class="button primary" data-credentials="${i.id}">Tải tài khoản (1 lần)</button>` : ''}</div></div>`).join('')
-    : '<p class="caption">Chưa nhập lần nào.</p>';
-}
-
-async function waitImport(id) {
-  for (;;) {
-    const result = await api(`/admin/imports/${id}`);
-    if (result.status !== 'running') { renderImport(result); await renderImportHistory(); return result; }
-    $('#import-summary').textContent = 'Đang nhập… (tạo tài khoản mất vài giây mỗi 100 đội)';
-    await new Promise(resolve => setTimeout(resolve, 1500));
-  }
-}
-
 // ---- people, bots, queue, log -------------------------------------------
 
 async function renderTeams() {
@@ -175,13 +138,13 @@ async function renderTeams() {
 
 async function renderUsers() {
   const {items} = await api(`/admin/users?q=${encodeURIComponent($('#user-search').value)}`);
-  $('#user-list').innerHTML = items.length ? items.map(u => `<div class="job"><div><strong>${escape(u.name)}</strong> <small>@${escape(u.username)}</small> ${u.role === 'admin' ? '<span class="badge">BTC</span>' : ''} ${u.disabled ? badge('disqualified') : ''}<p>${escape(u.team || 'Chưa có đội')}${u.student_id ? ` · MSSV ${escape(u.student_id)}` : ''} · tạo ${formatTime(u.created)}${u.must_change ? ' · đang dùng mật khẩu tạm' : ''}</p></div><div class="action-row"><button class="button" data-user-action="reset_password" data-user="${u.id}">Cấp lại mật khẩu</button>${u.team ? `<button class="button" data-user-action="remove_from_team" data-user="${u.id}">Rời đội</button>` : ''}<button class="button" data-user-action="${u.disabled ? 'enable' : 'disable'}" data-user="${u.id}">${u.disabled ? 'Mở khóa' : 'Khóa'}</button><button class="button" data-user-action="${u.role === 'admin' ? 'remove_admin' : 'make_admin'}" data-user="${u.id}">${u.role === 'admin' ? 'Bỏ quyền BTC' : 'Cấp quyền BTC'}</button></div></div>`).join('')
+  $('#user-list').innerHTML = items.length ? items.map(u => `<div class="job"><div><strong>${escape(u.name)}</strong> <small>@${escape(u.username)}</small> ${u.role === 'admin' ? '<span class="badge">BTC</span>' : ''} ${u.disabled ? badge('disqualified') : ''}<p>${escape(u.team || 'Chưa có đội')}${u.student_id ? ` · MSSV ${escape(u.student_id)}` : ''} · tạo ${formatTime(u.created)}${u.must_change ? ' · đang dùng mật khẩu tạm' : ''}</p></div><div class="action-row"><button class="button" data-user-action="reset_password" data-user="${u.id}">Cấp lại mật khẩu</button>${u.team ? `<button class="button" data-user-action="remove_from_team" data-user="${u.id}">Rời đội</button>` : ''}<button class="button" data-user-action="${u.disabled ? 'enable' : 'disable'}" data-user="${u.id}">${u.disabled ? 'Mở khóa' : 'Khóa'}</button><button class="button" data-user-action="${u.role === 'admin' ? 'remove_admin' : 'make_admin'}" data-user="${u.id}">${u.role === 'admin' ? 'Bỏ quyền BTC' : 'Cấp quyền BTC'}</button><button class="button danger" data-user-action="delete" data-user="${u.id}" data-username="${escape(u.username)}">Xóa tài khoản</button></div></div>`).join('')
     : '<p class="caption">Không tìm thấy tài khoản.</p>';
 }
 
 async function renderBots() {
   const {items} = await api(`/admin/submissions?q=${encodeURIComponent($('#bot-search').value)}&status=${$('#bot-status').value}`);
-  $('#bot-list').innerHTML = items.length ? items.map(s => `<article class="submission"><div><strong>${escape(s.team)}</strong><small>${escape(s.name)} · ${formatTime(s.created)} · ${s.origin === 'form' ? 'Google Form' : 'Web'} · ${escape(s.hash.slice(0,10))}${s.shared_by > 1 ? ` · <b class="red">trùng mã với ${s.shared_by} đội</b>` : ''}</small></div>${badge(s.status)}<div class="submission-log">${escape(s.log)}</div><div class="submission-actions"><button class="text-link" data-view-source="${s.id}" data-label="${escape(s.team)} · ${escape(s.name)}">Xem mã ↗</button></div></article>`).join('')
+  $('#bot-list').innerHTML = items.length ? items.map(s => `<article class="submission"><div><strong>${escape(s.team)}</strong><small>${escape(s.name)} · ${formatTime(s.created)} · ${s.origin === 'boss' ? 'Boss' : 'Web'} · ${escape(s.hash.slice(0,10))}${s.shared_by > 1 ? ` · <b class="red">trùng mã với ${s.shared_by} đội</b>` : ''}</small></div>${badge(s.status)}<div class="submission-log">${escape(s.log)}</div><div class="submission-actions"><button class="text-link" data-view-source="${s.id}" data-label="${escape(s.team)} · ${escape(s.name)}">Xem mã ↗</button></div></article>`).join('')
     : '<div class="empty">Không có bài nộp phù hợp.</div>';
 }
 
@@ -207,7 +170,6 @@ async function refresh() {
   if (!me) return;
   if (tab === 'dashboard') await renderDashboard();
   if (tab === 'events') await renderEvents();
-  if (tab === 'import') { await loadTournaments(); await renderImportHistory(); }
   if (tab === 'people') await Promise.all([renderTeams(), renderUsers()]);
   if (tab === 'bots') await renderBots();
   if (tab === 'matches') await renderMatches();
@@ -241,16 +203,18 @@ document.addEventListener('click', event => {
     notice(result.code ? `Mã đội mới: ${result.code}` : 'Đã cập nhật đội.'); await renderTeams(); });
   if (button.dataset.userAction) action(button, async () => {
     const kind = button.dataset.userAction;
-    if (['disable','remove_admin','remove_from_team'].includes(kind) && !confirm('Xác nhận thao tác với tài khoản này?')) return;
+    if (kind === 'delete') {
+      const typed = prompt(`XÓA VĨNH VIỄN tài khoản @${button.dataset.username}? Không khôi phục được. Bot và kết quả của đội vẫn được giữ.\n\nGõ tên đăng nhập để xác nhận:`);
+      if (typed === null) return;
+      if (typed.trim() !== button.dataset.username) throw new Error('Tên đăng nhập không khớp, chưa xóa.');
+    } else if (['disable','remove_admin','remove_from_team'].includes(kind) && !confirm('Xác nhận thao tác với tài khoản này?')) return;
     const result = await api(`/admin/users/${button.dataset.user}`, {action: kind});
     if (result.password) prompt('Mật khẩu tạm (chỉ hiện một lần, gửi riêng cho thí sinh):', result.password);
-    else notice('Đã cập nhật tài khoản.');
+    else notice(kind === 'delete' ? (result.team_kept ? 'Đã xóa tài khoản. Đội vẫn giữ bot và kết quả.' : 'Đã xóa tài khoản.') : 'Đã cập nhật tài khoản.');
     await renderUsers(); });
   if (button.dataset.viewSource) action(button, async () => {
     const {source} = await api(`/admin/submissions/${button.dataset.viewSource}/source`);
     $('#source-title').textContent = button.dataset.label; $('#source-view').textContent = source; $('#source-dialog').showModal(); });
-  if (button.dataset.import) action(button, async () => renderImport(await api(`/admin/imports/${button.dataset.import}`)));
-  if (button.dataset.credentials) action(button, async () => { await download(`/admin/imports/${button.dataset.credentials}/credentials`, 'tai-khoan-doi.csv'); notice('Đã tải. File này chứa mật khẩu: lưu riêng, gửi riêng cho từng đội.'); await renderImportHistory(); });
 });
 
 $('#settings-form').addEventListener('submit', event => { event.preventDefault(); action(event.submitter, async () => {
@@ -295,21 +259,6 @@ $('#force-freeze').addEventListener('click', event => action(event.target, async
 $('#next-round-button').addEventListener('click', event => action(event.target, async () => { const r = await api(`/admin/tournaments/${adminTournament}/next`, {}); notice(r.completed ? 'Giải đã hoàn tất. Tải bảng điểm CSV để công bố.' : `Đã mở vòng ${r.round} với ${r.pairs} cặp.`); await renderEvents(); }));
 $('#auto-toggle').addEventListener('change', event => action(null, async () => { await api(`/admin/tournaments/${adminTournament}/auto`, {value: event.target.checked}); notice(event.target.checked ? 'Giải sẽ tự mở vòng mới khi mọi ván xong.' : 'Đã tắt tự mở vòng.'); await renderEvents(); }));
 $('#export-button').addEventListener('click', event => action(event.target, () => download(`/admin/tournaments/${adminTournament}/export`, 'bang-diem.csv')));
-
-$('#import-form').addEventListener('submit', event => { event.preventDefault(); action(event.submitter, async () => {
-  const apply = event.submitter.value === 'apply', form = new FormData(event.target);
-  if (!form.get('csv')?.size && !form.get('files')?.size) throw new Error('Chọn file CSV hoặc ZIP có kèm CSV.');
-  if (!form.get('files')?.size) form.delete('files');
-  if (!form.get('csv')?.size) form.delete('csv');
-  if (apply && !confirm('Ghi các dòng “Sẵn sàng” vào hệ thống?')) return;
-  if (apply) form.set('apply', '1');
-  $('#import-summary').textContent = apply ? 'Đang tải lên…' : 'Đang phân tích…';
-  const result = await api('/admin/import', undefined, {form});
-  if (!apply) { renderImport(result); notice('Chạy thử xong. Kiểm tra các dòng lỗi rồi bấm “Nhập thật”.'); return; }
-  const done = await waitImport(result.id);
-  notice(done.status === 'done' ? `Đã nhập ${done.summary.imported} bài.${done.credentials ? ' Tải file tài khoản ngay: chỉ tải được một lần.' : ''}` : 'Nhập thất bại; xem ghi chú.', done.status !== 'done');
-}); });
-$('#import-filter').addEventListener('change', renderImportRows);
 
 let searchTimer;
 for (const [input, work] of [['#team-search', renderTeams], ['#user-search', renderUsers], ['#bot-search', renderBots], ['#match-search', renderMatches]]) {
