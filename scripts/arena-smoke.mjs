@@ -188,12 +188,26 @@ try {
   await page.unroute(new RegExp(`/api/matches/${target}/live`));
 
   const admin=await newPage();
-  await admin.goto(base+'/');
-  await admin.locator('#auth-form [name=username]').fill('arena_admin');
-  await admin.locator('#auth-form [name=password]').fill(password);
-  await admin.locator('#auth-submit').click(); await admin.locator('#gate').waitFor({state:'hidden'});
-  await admin.locator('#admin-link').waitFor();
   await admin.goto(base+'/arena/admin');
+  await admin.locator('#admin-login').waitFor();
+  assert.equal(await admin.locator('#console').isVisible(),false,'the console stays hidden until an admin signs in');
+  assert.equal((await admin.request.get(base+'/api/admin/overview')).status(),401);
+  await admin.screenshot({path:'artifacts/admin-gate.png'});
+  // A student account is turned away and not left signed in.
+  await admin.locator('#admin-login [name=username]').fill('browser_player');
+  await admin.locator('#admin-login [name=password]').fill(password);
+  await admin.locator('#admin-submit').click();
+  await admin.locator('#admin-error').filter({hasText:'không có quyền'}).waitFor();
+  assert.equal((await (await admin.request.get(base+'/api/me')).json()).user,null);
+  await admin.locator('#admin-login [name=username]').fill('arena_admin');
+  await admin.locator('#admin-login [name=password]').fill('wrong-password-1');
+  await admin.locator('#admin-submit').click();
+  await admin.locator('#admin-error').filter({hasText:'không đúng'}).waitFor();
+  await admin.locator('#admin-login [name=password]').fill(password);
+  await admin.locator('#admin-submit').click();
+  await admin.locator('#stats .stat').first().waitFor();
+  assert.equal(await admin.locator('#gate').evaluate(el=>getComputedStyle(el).display),'none');
+  await admin.reload();
   await admin.locator('#stats .stat').first().waitFor();
   await admin.screenshot({path:'artifacts/admin-dashboard.png',fullPage:true});
   await admin.locator('[role=tab][data-tab=matches]').click();

@@ -9,7 +9,7 @@ function setTab(value) {
   tab = value;
   $$('.view').forEach(el => el.hidden = el.id !== tab);
   $$('[role=tab]').forEach(el => el.setAttribute('aria-selected', String(el.dataset.tab === tab)));
-  history.replaceState(null, '', `#${tab}`);
+  history.replaceState(null, '', `${location.pathname}#${tab}`);
   refresher.now();
 }
 
@@ -323,7 +323,47 @@ const deadline = new Date(Date.now() + 3600000); deadline.setMinutes(deadline.ge
 $('#deadline').value = deadline.toISOString().slice(0, 16);
 syncTournamentForm();
 
-try { const result = await api('/me'); me = result.user?.role === 'admin' ? result.user : null; session.csrf = result.csrf; } catch { me = null; }
-$('#gate').hidden = Boolean(me);
-$('#console').hidden = !me;
-if (me) { $('#admin-name').textContent = `${me.name} · @${me.username}`; setTab(location.hash.slice(1) || 'dashboard'); }
+function enter(user) {
+  me = user;
+  document.body.classList.remove('guest');
+  $('#console').hidden = false;
+  $('#admin-name').textContent = `${user.name} · @${user.username}`;
+  setTab(location.hash.slice(1) || 'dashboard');
+}
+
+function leave() {
+  me = null;
+  document.body.classList.add('guest');
+  $('#console').hidden = true;
+  $('#admin-name').textContent = '';
+}
+
+$('#admin-show-password').addEventListener('click', event => {
+  const field = $('#admin-login').elements.password, show = field.type === 'password';
+  field.type = show ? 'text' : 'password'; event.target.textContent = show ? 'Ẩn' : 'Hiện'; event.target.setAttribute('aria-pressed', String(show));
+});
+$('#admin-login').elements.username.addEventListener('input', event => { event.target.value = event.target.value.replace(/\s+/g, '').toLowerCase(); });
+$('#admin-login').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.target, error = $('#admin-error');
+  error.textContent = '';
+  if (!form.elements.username.value.trim() || !form.elements.password.value) { error.textContent = 'Nhập tên đăng nhập và mật khẩu.'; return; }
+  event.submitter.disabled = true;
+  try {
+    await api('/login', {username: form.elements.username.value.trim().toLowerCase(), password: form.elements.password.value});
+    const result = await api('/me');
+    session.csrf = result.csrf;
+    if (result.user?.role !== 'admin') {
+      await api('/logout', {}).catch(() => {});   // a student signing in here should not stay signed in
+      session.csrf = null;
+      error.textContent = 'Tài khoản này không có quyền ban tổ chức. Hãy dùng tài khoản admin.';
+      return;
+    }
+    form.reset();
+    enter(result.user);
+  } catch (failure) { error.textContent = failure.message; }
+  finally { event.submitter.disabled = false; }
+});
+$('#admin-logout').addEventListener('click', event => action(event.target, async () => { await api('/logout', {}); session.csrf = null; leave(); }));
+
+try { const result = await api('/me'); session.csrf = result.csrf; result.user?.role === 'admin' ? enter(result.user) : leave(); } catch { leave(); }

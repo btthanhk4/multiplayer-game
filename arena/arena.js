@@ -34,7 +34,7 @@ function setTab(value) {
   tab = value;
   $$('.view').forEach(el => el.hidden = el.id !== tab);
   $$('[role=tab]').forEach(el => el.setAttribute('aria-selected', String(el.dataset.tab === tab)));
-  history.replaceState(null, '', `#${tab}`);
+  history.replaceState(null, '', `${location.pathname}#${tab}`);
   refresher.now();
   watch.scheduleLive(100);
 }
