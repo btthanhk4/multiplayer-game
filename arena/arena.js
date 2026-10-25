@@ -2,6 +2,8 @@ import {$, $$, escape, labels, formats, kinds, formatTime, badge, session, api, 
   poller, outcome, teamLink, starText, ago, sparkline, celebrate} from './common.js';
 import {createWatch} from './watch.js';
 
+document.getElementById('boot-note')?.remove();   // reaching here means every module loaded
+
 let me = null, team = null, health = null, tab = 'overview', register = false;
 let tournaments = [], submissions = [], selectedTournament = '', competition = null, standingsLimit = 100, ranked = null;
 let campaign = null, badges = null, selectedLevel = null, profile = null;

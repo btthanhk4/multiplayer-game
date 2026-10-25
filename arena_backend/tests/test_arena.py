@@ -1459,6 +1459,67 @@ class AdminTournaments(Base):
         self.assertEqual([(t['name'], t['status']) for t in listing], [('Giải của BTC', 'cancelled')])
 
 
+class VersionedAssets(Base):
+    def test_every_page_asks_for_scripts_and_styles_with_the_build_version(self):
+        import re
+        from arena_backend.app import ASSET_VERSION
+        for path in ('/', '/arena/', '/arena/admin', '/arena/guide.html'):
+            html = self.client.get(path).get_data(as_text=True)
+            assets = re.findall(r'(?:src|href)="(\./[\w.-]+\.(?:js|css)[^"]*)"', html)
+            self.assertTrue(assets, path)
+            for asset in assets:
+                self.assertTrue(asset.endswith(f'?v={ASSET_VERSION}'), (path, asset))
+        # Modules import each other with the same stamp, so a stale copy of one can never meet a new copy of another.
+        for name in ('arena', 'admin', 'common', 'watch'):
+            code = self.client.get(f'/arena/{name}.js?v={ASSET_VERSION}').get_data(as_text=True)
+            imports = re.findall(r"from\s+'(\.{1,2}/[\w./-]+\.js[^']*)'", code)
+            self.assertTrue(all(i.endswith(f'?v={ASSET_VERSION}') for i in imports), (name, imports))
+        self.assertIn(f"../rules.js?v={ASSET_VERSION}", self.client.get('/arena/common.js').get_data(as_text=True))
+
+    def test_only_exact_versioned_urls_are_cached_for_long(self):
+        from arena_backend.app import ASSET_VERSION
+        stamped = self.client.get(f'/arena/admin.js?v={ASSET_VERSION}')
+        self.assertEqual(stamped.headers['Cache-Control'], 'public, max-age=31536000, immutable')
+        self.assertEqual(stamped.mimetype, 'text/javascript')
+        for url in ('/arena/admin.js', '/arena/admin.js?v=old', '/arena/admin.js?v='):
+            self.assertEqual(self.client.get(url).headers['Cache-Control'], 'no-cache', url)
+        for page in ('/', '/arena/admin', '/arena/guide.html'):
+            self.assertEqual(self.client.get(page).headers['Cache-Control'], 'no-cache', page)
+        css = self.client.get(f'/arena/arena.css?v={ASSET_VERSION}')
+        self.assertEqual((css.mimetype, css.headers['Cache-Control']), ('text/css', 'public, max-age=31536000, immutable'))
+        self.assertEqual(self.client.get(f'/rules.js?v={ASSET_VERSION}').status_code, 200)
+        # Revalidation works, so an unstamped request costs a 304 rather than a download.
+        tag = self.client.get('/arena/admin.js').headers['ETag']
+        self.assertEqual(self.client.get('/arena/admin.js', headers={'If-None-Match': tag}).status_code, 304)
+        self.assertEqual(self.client.get('/api/health').headers['Cache-Control'], 'no-store')
+
+    def test_version_changes_when_any_script_changes(self):
+        import hashlib
+        from arena_backend.app import ASSET_VERSION, VERSIONED_FILES
+        from arena_backend.store import ROOT as repo
+        def digest(extra=b''):
+            return hashlib.sha256(b''.join((repo / n).read_bytes() for n in VERSIONED_FILES) + extra).hexdigest()[:10]
+        self.assertEqual(digest(), ASSET_VERSION)
+        self.assertNotEqual(digest(b'x'), ASSET_VERSION)
+
+    def test_forms_without_javascript_never_put_a_password_in_the_address(self):
+        import re
+        for page in ('/', '/arena/admin'):
+            html = self.client.get(page).get_data(as_text=True)
+            forms = re.findall(r'<form\b[^>]*>', html)
+            self.assertTrue(forms)
+            for tag in forms:
+                self.assertIn('method="post"', tag)
+                self.assertIn('action="/arena/enable-javascript"', tag)
+            self.assertIn('id="boot-note"', html)
+        answer = self.client.post('/arena/enable-javascript', data={'username': 'a', 'password': 'secret-never-echoed'})
+        self.assertEqual(answer.status_code, 400)
+        text = answer.get_data(as_text=True)
+        self.assertIn('chưa được gửi đi', text)
+        self.assertNotIn('secret-never-echoed', text)
+        self.assertEqual(self.client.get('/arena/enable-javascript').status_code, 404)   # only a POST target
+
+
 class AdminMatches(Base):
     def admin_client(self):
         self.register('boss_admin')

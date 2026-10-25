@@ -356,3 +356,11 @@ body.guest .gate{display:grid}
 .watch-card .action-row{margin-top:12px}
 .watch-card .action-row .button{min-height:38px;font-size:12px}
 .replay-controls[hidden]{display:none!important}
+/* Shown only if the page's script never started (stale or blocked); invisible for the first few seconds of a normal load. */
+.boot-note{margin:0 0 12px;padding:10px 14px;background:#f6ebe1;border-left:3px solid var(--red);font-size:12px;opacity:0;animation:boot-appear 0s linear 5s forwards}
+@keyframes boot-appear{to{opacity:1}}
+/* Visible by default (so a page whose script never ran still shows a form), but only after a beat: a signed-in
+   visitor's script removes the guest class first and never sees it. */
+body.guest .gate{opacity:0;animation:gate-in 0s linear .35s forwards}
+@keyframes gate-in{to{opacity:1}}
+.plain-page{max-width:560px;margin:12vh auto;padding:0 20px}.plain-page h1{font-size:34px}

@@ -32,7 +32,7 @@
       <section id="dashboard" class="view" role="tabpanel">
         <div id="stats" class="stat-grid"></div>
         <div class="admin-layout">
-          <form id="settings-form" class="paper-card"><p class="eyebrow">CÔNG TẮC SỰ KIỆN</p><h3>Mở / đóng chức năng</h3>
+          <form method="post" action="/arena/enable-javascript" id="settings-form" class="paper-card"><p class="eyebrow">CÔNG TẮC SỰ KIỆN</p><h3>Mở / đóng chức năng</h3>
             <label class="switch"><input type="checkbox" name="registration_open"> Cho đăng ký tài khoản</label>
             <label class="switch"><input type="checkbox" name="submissions_open"> Cho nộp bot trên web</label>
             <label class="switch"><input type="checkbox" name="ranked_open"> Mở đấu xếp hạng</label>
@@ -51,7 +51,7 @@
 
       <section id="events" class="view" role="tabpanel" hidden>
         <div class="admin-layout">
-          <form id="tournament-form" class="paper-card"><p class="eyebrow">TẠO GIẢI / VÒNG MỚI</p><h3>Mở giải</h3>
+          <form method="post" action="/arena/enable-javascript" id="tournament-form" class="paper-card"><p class="eyebrow">TẠO GIẢI / VÒNG MỚI</p><h3>Mở giải</h3>
             <label>Tên giải<input name="name" required minlength="3" maxlength="80" placeholder="OTTv2 · Vòng loại tân sinh viên"></label>
             <label>Thể thức<select name="format" id="format"><option value="swiss">Swiss theo điểm · tối đa 2.000 đội</option><option value="round_robin">Vòng tròn · tối đa 32 đội</option><option value="knockout">Loại trực tiếp · tối đa 1.024 đội</option></select></label>
             <label>Nguồn đội<select name="source" id="seed-source"><option value="">Đăng ký mở (thí sinh tự chọn bot)</option></select></label>
@@ -67,14 +67,14 @@
               <div class="action-row"><button id="freeze-button" class="button">Khóa danh sách</button><button id="force-freeze" class="button">Khóa bắt buộc</button><button id="next-round-button" class="button primary">Mở vòng / Hoàn tất</button></div>
               <div class="action-row"><label class="switch"><input type="checkbox" id="auto-toggle"> Tự mở vòng</label><button id="export-button" class="button">Tải bảng điểm CSV</button></div>
               <p class="caption">Khóa chỉ được sau hạn. “Khóa bắt buộc” loại các bot còn chờ kiểm tra. Vòng mới mở khi mọi ván của vòng trước đã xong (job lỗi cần thử lại trước).</p></div>
-            <form id="tournament-edit" class="paper-card"><p class="eyebrow">CHỈNH GIẢI ĐANG CHỌN</p><h3>Sửa thông tin và hạn</h3>
+            <form method="post" action="/arena/enable-javascript" id="tournament-edit" class="paper-card"><p class="eyebrow">CHỈNH GIẢI ĐANG CHỌN</p><h3>Sửa thông tin và hạn</h3>
               <label>Tên giải<input name="name" minlength="3" maxlength="80"></label>
               <label>Mô tả<textarea name="description" maxlength="500" rows="2"></textarea></label>
               <label id="edit-deadline-field">Hạn đăng ký (giờ máy bạn)<input name="deadline" type="datetime-local"></label>
               <label id="edit-rounds-field">Số vòng Swiss<input name="rounds" type="number" min="1" max="30"></label>
               <div class="action-row"><button class="button primary">Lưu thay đổi</button><button type="button" class="button" id="close-now">Đóng đăng ký ngay</button><button type="button" class="button danger" id="cancel-tournament">Hủy giải</button></div>
               <p class="caption">Hạn và số vòng chỉ đổi được khi giải còn nhận đăng ký. “Đóng đăng ký ngay” đưa hạn về hiện tại để bấm Khóa danh sách. Hủy giải sẽ hủy mọi ván chưa xong.</p></form>
-            <form id="add-entry" class="paper-card"><p class="eyebrow">THÊM ĐỘI THỦ CÔNG</p><label>Mã đội hoặc tên đội<input name="team" required maxlength="60" placeholder="K7QF2M9A hoặc Kéo Thần Tốc"></label><button class="button">Thêm vào giải bằng bot mới nhất</button><p class="caption">Dùng cho đội lỡ hạn hoặc nộp qua kênh khác. Chỉ trước khi khóa danh sách.</p></form>
+            <form method="post" action="/arena/enable-javascript" id="add-entry" class="paper-card"><p class="eyebrow">THÊM ĐỘI THỦ CÔNG</p><label>Mã đội hoặc tên đội<input name="team" required maxlength="60" placeholder="K7QF2M9A hoặc Kéo Thần Tốc"></label><button class="button">Thêm vào giải bằng bot mới nhất</button><p class="caption">Dùng cho đội lỡ hạn hoặc nộp qua kênh khác. Chỉ trước khi khóa danh sách.</p></form>
             <div class="paper-card"><p class="eyebrow">CÁC CẶP ĐẤU</p><label>Vòng<select id="admin-round"></select></label><div id="admin-round-view" class="job-list"></div></div>
             <div class="paper-card"><p class="eyebrow">BẢNG ĐIỂM</p><label>Tìm đội<input id="entry-search" type="search"></label><div class="table-scroll"><table><thead><tr><th>HẠNG</th><th>ĐỘI / BOT</th><th>XẾP LOẠI</th><th>ĐIỂM</th><th>T/H/B</th><th></th></tr></thead><tbody id="entry-body"></tbody></table></div></div>
           </div>
@@ -83,7 +83,7 @@
 
       <section id="import" class="view" role="tabpanel" hidden>
         <div class="admin-layout">
-          <form id="import-form" class="paper-card"><p class="eyebrow">GOOGLE FORMS → ĐẤU TRƯỜNG</p><h3>Nhập bài nộp</h3>
+          <form method="post" action="/arena/enable-javascript" id="import-form" class="paper-card"><p class="eyebrow">GOOGLE FORMS → ĐẤU TRƯỜNG</p><h3>Nhập bài nộp</h3>
             <label>File CSV (Google Forms → Phản hồi → Tải xuống .csv)<input type="file" name="csv" accept=".csv,text/csv"></label>
             <label>ZIP các file tải lên (tùy chọn, tải thư mục từ Drive)<input type="file" name="files" accept=".zip,application/zip"></label>
             <label>Đăng ký luôn vào giải đang mở<select name="tournament" id="import-tournament"></select></label>
@@ -141,13 +141,13 @@
       <ul><li>Mở vòng, khóa danh sách, xem bảng điểm</li><li>Quản lý đội, tài khoản và bài nộp</li><li>Nhập bài từ Google Form, theo dõi máy chấm</li></ul>
     </aside>
     <div class="gate-form">
-      <form id="admin-login" novalidate>
+      <form method="post" action="/arena/enable-javascript" id="admin-login" novalidate>
         <p class="eyebrow">ĐIỀU HÀNH</p>
         <h1 id="admin-title">Đăng nhập quản trị.</h1>
         <p class="caption">Chỉ tài khoản có quyền ban tổ chức mới vào được.</p>
         <label>Tên đăng nhập<input name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required maxlength="32"></label>
         <label>Mật khẩu<span class="password-row"><input name="password" type="password" autocomplete="current-password" required maxlength="128"><button type="button" class="text-link" id="admin-show-password" aria-pressed="false">Hiện</button></span></label>
-        <p id="admin-error" class="error-text" role="alert"></p>
+        <p class="boot-note" id="boot-note" role="status">Trang đang tải. Nếu nút chưa phản hồi sau vài giây, hãy tải lại bằng Ctrl + F5 và kiểm tra JavaScript đang bật.</p><p id="admin-error" class="error-text" role="alert"></p>
         <button class="button primary" id="admin-submit">Đăng nhập</button>
         <p class="caption gate-foot"><a href="/">← Về trang thí sinh</a></p>
       </form>

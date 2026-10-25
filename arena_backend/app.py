@@ -21,6 +21,20 @@ from .store import Store, Problem, ROOT, RULES_HASH, LIMITS, TEAM_SIZE, SYSTEM_T
 
 PUBLIC_FILES = {'rules.js', 'arena/arena.js', 'arena/admin.js', 'arena/common.js', 'arena/watch.js', 'arena/arena.css',
                 'arena/guide.html'}
+# Every script and stylesheet is requested as <name>?v=<hash of all of them>. A browser or CDN that still holds
+# an older copy can then never pair it with a newer page: a new deploy changes every URL.
+VERSIONED_FILES = ('arena/arena.js', 'arena/admin.js', 'arena/common.js', 'arena/watch.js', 'arena/arena.css', 'rules.js')
+ASSET_VERSION = hashlib.sha256(b''.join((ROOT / name).read_bytes() for name in VERSIONED_FILES)).hexdigest()[:10]
+JS_IMPORT = re.compile(r"(from\s+')(\.{1,2}/[\w./-]+\.js)(')")
+HTML_ASSET = re.compile(r'((?:src|href)=")(\./[\w.-]+\.(?:js|css))(")')
+NO_SCRIPT_PAGE = (
+    '<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+    '<title>Cần bật JavaScript</title><link rel="stylesheet" href="/arena/arena.css"></head><body><main class="plain-page">'
+    '<p class="eyebrow">TRANG CHƯA TẢI ĐƯỢC</p><h1>Trang chưa chạy được JavaScript.</h1>'
+    '<p>Thông tin bạn vừa nhập <b>chưa được gửi đi</b>. Nguyên nhân thường gặp: tiện ích trình duyệt chặn script, hoặc bản trang cũ còn lưu trong trình duyệt.</p>'
+    '<p>Hãy mở lại trang, nhấn <b>Ctrl + F5</b> (hoặc Cmd + Shift + R), kiểm tra JavaScript đang bật, rồi nhập lại.</p>'
+    '<p><a class="button primary" href="/">Quay lại trang chính</a></p></main></body></html>')
+
 SAMPLES = {'sdk/examples/first.py', 'sdk/examples/hunter.py', 'sdk/examples/guardian.py',
            'sdk/examples/template.py', 'sdk/local_arena.py'}
 SESSION_SECONDS = int(os.getenv('ARENA_SESSION_DAYS', '7')) * 86400
@@ -165,7 +179,8 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         if request.path.startswith('/api/') and request.method not in ('GET', 'HEAD') and response.status_code < 400:
             cache.clear()
         if request.path == '/' or request.path.startswith(('/api/', '/arena', '/rules.js')):
-            response.headers['Cache-Control'] = 'no-store' if request.path.startswith('/api/') else 'no-cache'
+            if 'Cache-Control' not in response.headers:
+                response.headers['Cache-Control'] = 'no-store' if request.path.startswith('/api/') else 'no-cache'
             response.headers['Content-Security-Policy'] = (
                 "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; "
                 "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; "
@@ -983,23 +998,50 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
 
     # ---- pages ----------------------------------------------------------
 
+    rendered = {}
+
+    def asset(name):
+        """A public script, stylesheet or page with its asset URLs stamped with this build's version."""
+        suffix = name.rsplit('.', 1)[-1]
+        if name not in rendered:
+            text = (ROOT / name).read_text(encoding='utf-8')
+            if suffix == 'js':
+                text = JS_IMPORT.sub(lambda m: f'{m[1]}{m[2]}?v={ASSET_VERSION}{m[3]}', text)
+            elif suffix == 'html':
+                text = HTML_ASSET.sub(lambda m: f'{m[1]}{m[2]}?v={ASSET_VERSION}{m[3]}', text)
+            rendered[name] = text.encode('utf-8')
+        body = rendered[name]
+        response = Response(body, mimetype={'js': 'text/javascript', 'css': 'text/css', 'html': 'text/html'}[suffix])
+        response.set_etag(hashlib.sha256(body).hexdigest()[:20])
+        # Only an exact versioned URL may be cached for long; anything else must be revalidated.
+        stamped = suffix != 'html' and request.args.get('v') == ASSET_VERSION
+        response.headers['Cache-Control'] = 'public, max-age=31536000, immutable' if stamped else 'no-cache'
+        return response.make_conditional(request)
+
     @app.get('/')
     def home():
-        return send_from_directory(ROOT / 'arena', 'index.html')
+        return asset('arena/index.html')
 
     @app.get('/arena')
     @app.get('/arena/')
     def arena():
-        return send_from_directory(ROOT / 'arena', 'index.html')
+        return asset('arena/index.html')
 
     @app.get('/arena/admin')
     @app.get('/arena/admin.html')
     def admin_page():
-        return send_from_directory(ROOT / 'arena', 'admin.html')
+        return asset('arena/admin.html')
+
+    @app.post('/arena/enable-javascript')
+    def no_script():
+        # Forms post here when the page's script did not run, so a password is never put in the address bar.
+        return Response(NO_SCRIPT_PAGE, status=400, mimetype='text/html')
 
     @app.get('/<path:filename>')
     def files(filename):
         if filename in PUBLIC_FILES:
+            if filename.rsplit('.', 1)[-1] in ('js', 'css', 'html'):
+                return asset(filename)
             return send_from_directory(ROOT, filename)
         if filename in SAMPLES:
             return send_from_directory(ROOT, filename, as_attachment=True)

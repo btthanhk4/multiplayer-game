@@ -1,6 +1,7 @@
 import {$, $$, escape, labels, formats, kinds, formatTime, badge, session, api, notice, action, options, countdown,
   duration, poller, outcome} from './common.js';
 
+document.getElementById('boot-note')?.remove();   // reaching here means every module loaded
 let editingFor = '';
 let me = null, tab = 'dashboard', tournaments = [], adminTournament = '', detail = null, importRows = [];
 

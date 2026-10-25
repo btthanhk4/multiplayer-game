@@ -187,6 +187,53 @@ try {
   await page.unroute(new RegExp(`/api/matches/${target}$`));
   await page.unroute(new RegExp(`/api/matches/${target}/live`));
 
+  // ---- sign-in resilience (stale cache, blocked scripts, no JavaScript) ----
+  const asked=[];
+  const probe=await newPage(1100);
+  probe.on('request',r=>{const u=new URL(r.url()); if(/\.(js|css)$/.test(u.pathname)&&u.pathname.startsWith('/arena/')||u.pathname==='/rules.js')asked.push(u.pathname+u.search);});
+  await probe.goto(base+'/arena/admin');
+  await probe.locator('#admin-login').waitFor();
+  assert.ok(asked.length>=4,'admin page loads its modules: '+asked.join(','));
+  assert.ok(asked.every(u=>/\?v=[0-9a-f]{10}$/.test(u)),'every script and stylesheet request carries the build version: '+asked.join(','));
+  await probe.waitForTimeout(5600);
+  assert.equal(await probe.locator('#boot-note').count(),0,'the "page still loading" note is removed once the scripts run');
+  // A CDN holding an OLD unversioned admin.js must no longer matter.
+  await probe.route(/\/arena\/admin\.js$/,route=>route.fulfill({contentType:'text/javascript',body:'/* stale copy that does nothing */'}));
+  await probe.reload();
+  await probe.locator('#admin-login [name=username]').fill('arena_admin');
+  await probe.locator('#admin-login [name=password]').fill(password);
+  await probe.locator('#admin-show-password').click();
+  assert.equal(await probe.locator('#admin-login [name=password]').getAttribute('type'),'text','show password works');
+  await probe.locator('#admin-show-password').click();
+  assert.equal(await probe.locator('#admin-login [name=password]').getAttribute('type'),'password','hide password works');
+  await probe.locator('#admin-submit').click();
+  await probe.locator('#stats .stat').first().waitFor();
+  assert.ok(!probe.url().includes('password='),'password never reaches the address bar');
+  await probe.locator('#admin-logout').click();
+  await probe.locator('#admin-login').waitFor();
+  // Script blocked entirely: the form must not leak the password, and the page must say what is wrong.
+  const blocked=await newPage(1100);
+  await blocked.route(/\/arena\/(admin|common)\.js/,route=>route.abort());
+  await blocked.goto(base+'/arena/admin');
+  await blocked.locator('#admin-login [name=username]').fill('arena_admin');
+  await blocked.locator('#admin-login [name=password]').fill('very-secret-password');
+  await blocked.waitForTimeout(5600);
+  assert.equal(await blocked.locator('#boot-note').evaluate(el=>getComputedStyle(el).opacity),'1','the note appears when scripts did not start');
+  await blocked.locator('#admin-submit').click();
+  await blocked.waitForURL(/enable-javascript/);
+  assert.ok(!blocked.url().includes('secret'),'no password in the URL when scripts are blocked');
+  assert.match(await blocked.locator('body').textContent(),/chưa được gửi đi/);
+  const plain=await browser.newContext({javaScriptEnabled:false}), noscript=await plain.newPage();
+  for(const [path,form,user,pass] of [['/','#auth-form','x_user','very-secret-password'],['/arena/admin','#admin-login','x_user','very-secret-password']]){
+    await noscript.goto(base+path);
+    await noscript.locator(`${form} [name=username]`).fill(user);
+    await noscript.locator(`${form} [name=password]`).fill(pass);
+    await noscript.locator(`${form} button.primary`).click();
+    await noscript.waitForURL(/enable-javascript/);
+    assert.ok(!noscript.url().includes('secret')&&!noscript.url().includes('?'),'no query string, no password: '+noscript.url());
+  }
+  await plain.close();
+
   const admin=await newPage();
   await admin.goto(base+'/arena/admin');
   await admin.locator('#admin-login').waitFor();
