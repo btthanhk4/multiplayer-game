@@ -136,11 +136,35 @@
   </main>
   <footer><span>OTT<span class="red">v2</span> / ARENA</span><span>Bot của bạn. Nước đi của bạn.</span><a href="./guide.html">Luật & giao thức ↗</a></footer>
 
-  <dialog id="auth-dialog"><form id="auth-form"><div class="dialog-top"><span class="eyebrow">TÀI KHOẢN ĐẤU TRƯỜNG</span><button type="button" class="close-button" data-close="auth-dialog" aria-label="Đóng">×</button></div><h2 id="auth-title">Trở lại bàn cờ.</h2>
-    <label>Tên đăng nhập<input name="username" autocomplete="username" required minlength="3" maxlength="32" pattern="[a-z0-9_]{3,32}" title="Chữ thường không dấu, số hoặc _"></label>
-    <label>Mật khẩu<input name="password" type="password" autocomplete="current-password" required maxlength="128"></label>
-    <div id="register-fields" hidden><label>Họ và tên<input name="name" minlength="2" maxlength="40" autocomplete="name"></label><label>Mã số sinh viên (không bắt buộc)<input name="student_id" maxlength="20" autocomplete="off"></label><label id="invite-field">Mã tham gia do BTC cung cấp<input name="invite" autocomplete="off"></label><p class="caption">Mật khẩu tối thiểu 12 ký tự. Mã nguồn bot riêng tư; tên đội và kết quả thi đấu công khai.</p></div>
-    <p id="auth-error" class="error-text" role="alert"></p><button class="button primary" id="auth-submit">Đăng nhập</button><button type="button" id="toggle-auth" class="text-link">Chưa có tài khoản? Đăng ký</button></form></dialog>
+  <section id="gate" class="gate" aria-labelledby="auth-title" hidden>
+    <aside class="gate-art" aria-hidden="true">
+      <a class="brand" href="/">ott<span>v2</span><sup>arena</sup></a>
+      <div class="gate-board">
+        <span class="stone p1">Đ</span><span class="stone p2">K</span><span class="stone p1">L</span>
+        <span class="stone p2">Đ</span><span class="stone p1">K</span><span class="stone p2">L</span>
+        <span class="stone p1">L</span><span class="stone p2">Đ</span><span class="stone p1">Đ</span>
+      </div>
+      <h2>Đấm thắng Kéo, Kéo thắng Lá, Lá thắng Đấm.</h2>
+      <p>Viết một hàm Python, để bot của đội bạn ra trận thay bạn.</p>
+      <ul><li>Leo tháp 5 boss mạnh dần</li><li>Sưu tập 17 huy hiệu</li><li>Leo bảng Elo, tranh cúp giải đấu</li></ul>
+    </aside>
+    <div class="gate-form">
+      <form id="auth-form" novalidate>
+        <p class="eyebrow">TÀI KHOẢN ĐẤU TRƯỜNG</p>
+        <h1 id="auth-title">Trở lại bàn cờ.</h1>
+        <p class="caption" id="auth-sub">Đăng nhập để vào đấu trường. Tài khoản là bắt buộc để xem và thi đấu.</p>
+        <div class="gate-tabs" role="tablist" aria-label="Chọn thao tác"><button type="button" role="tab" id="tab-login" aria-selected="true">Đăng nhập</button><button type="button" role="tab" id="tab-register" aria-selected="false">Tạo tài khoản</button></div>
+        <div id="register-fields" hidden><label>Họ và tên<input name="name" minlength="2" maxlength="40" autocomplete="name" placeholder="Nguyễn Văn A"></label></div>
+        <label>Tên đăng nhập<input name="username" autocomplete="username" required minlength="3" maxlength="32" pattern="[a-z0-9_]{3,32}" title="Chữ thường không dấu, số hoặc _" placeholder="vi_du_nguyenvana"></label>
+        <label>Mật khẩu<input name="password" type="password" autocomplete="current-password" required maxlength="128"></label>
+        <div id="register-more" hidden><label>Mã số sinh viên (không bắt buộc)<input name="student_id" maxlength="20" autocomplete="off"></label><label id="invite-field">Mã tham gia do BTC cung cấp<input name="invite" autocomplete="off"></label><p class="caption">Mật khẩu tối thiểu 12 ký tự. Mã nguồn bot riêng tư; tên đội và kết quả thi đấu công khai với người đã đăng nhập.</p></div>
+        <p id="auth-error" class="error-text" role="alert"></p>
+        <button class="button primary" id="auth-submit">Đăng nhập</button>
+        <button type="button" id="toggle-auth" class="text-link">Chưa có tài khoản? Tạo tài khoản miễn phí</button>
+        <p class="caption gate-foot"><a href="./guide.html">Luật &amp; giao thức bot ↗</a></p>
+      </form>
+    </div>
+  </section>
   <dialog id="password-dialog"><form id="password-form"><div class="dialog-top"><span class="eyebrow">BẢO MẬT</span><button type="button" class="close-button" data-close="password-dialog" aria-label="Đóng">×</button></div><h2>Đổi mật khẩu</h2>
     <label>Mật khẩu hiện tại<input name="current" type="password" autocomplete="current-password" required></label>
     <label>Mật khẩu mới (12+ ký tự)<input name="password" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label>

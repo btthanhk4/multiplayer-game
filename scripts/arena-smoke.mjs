@@ -29,11 +29,11 @@ async function newPage(width=1440){
 }
 async function register(page,username,name){
   await page.goto(base+'/');
-  await page.locator('#hero [data-auth=register]').click();
+  await page.locator('#tab-register').click();
   await page.locator('#auth-form [name=username]').fill(username);
   await page.locator('#auth-form [name=password]').fill(password);
   await page.locator('#auth-form [name=name]').fill(name);
-  await page.locator('#auth-submit').click(); await page.locator('#auth-dialog').waitFor({state:'hidden'});
+  await page.locator('#auth-submit').click(); await page.locator('#gate').waitFor({state:'hidden'});
   await page.locator('#create-team-form').waitFor();
 }
 try {
@@ -41,8 +41,12 @@ try {
   browser=await chromium.launch(process.platform==='win32'?{executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true}:{headless:true});
   const page=await newPage();
   await page.goto(base+'/');
-  await page.locator('#tournament-list .tournament-card').first().waitFor();
-  await page.screenshot({path:'artifacts/arena-home.png',fullPage:true});
+  await page.locator('#gate').waitFor();
+  assert.equal(await page.locator('main').isVisible(),false,'guests see only the sign-in gate');
+  assert.equal((await page.request.get(base+'/api/tournaments')).status(),401);
+  assert.equal((await page.request.get(base+'/api/feed')).status(),401);
+  assert.equal((await page.request.get(base+'/api/health')).status(),200);
+  await page.screenshot({path:'artifacts/arena-gate.png'});
   await register(page,'browser_player','Người viết chiến thuật');
   await page.locator('#create-team-form [name=name]').fill('Kéo Thần Tốc');
   await page.locator('#create-team-form button').click();
@@ -115,10 +119,9 @@ try {
 
   const admin=await newPage();
   await admin.goto(base+'/');
-  await admin.locator('#account-button').click();
   await admin.locator('#auth-form [name=username]').fill('arena_admin');
   await admin.locator('#auth-form [name=password]').fill(password);
-  await admin.locator('#auth-submit').click(); await admin.locator('#auth-dialog').waitFor({state:'hidden'});
+  await admin.locator('#auth-submit').click(); await admin.locator('#gate').waitFor({state:'hidden'});
   await admin.locator('#admin-link').waitFor();
   await admin.goto(base+'/arena/admin');
   await admin.locator('#stats .stat').first().waitFor();

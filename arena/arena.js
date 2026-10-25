@@ -51,10 +51,23 @@ function requireTeam() {
   return false;
 }
 
+function setMode(asRegister) {
+  register = asRegister;
+  const form = $('#auth-form');
+  $('#register-fields').hidden = $('#register-more').hidden = !register;
+  form.elements.name.required = register; form.elements.password.minLength = register ? 12 : 1;
+  form.elements.password.autocomplete = register ? 'new-password' : 'current-password';
+  $('#tab-login').setAttribute('aria-selected', String(!register)); $('#tab-register').setAttribute('aria-selected', String(register));
+  $('#auth-title').textContent = register ? 'Tạo tài khoản thi đấu.' : 'Trở lại bàn cờ.';
+  $('#auth-sub').textContent = register ? 'Mất chưa tới một phút. Sau đó lập đội hoặc vào đội bằng mã bạn bè gửi.' : 'Đăng nhập để vào đấu trường. Tài khoản là bắt buộc để xem và thi đấu.';
+  $('#auth-submit').textContent = register ? 'Tạo tài khoản' : 'Đăng nhập';
+  $('#toggle-auth').textContent = register ? 'Đã có tài khoản? Đăng nhập' : 'Chưa có tài khoản? Tạo tài khoản miễn phí';
+  $('#auth-error').textContent = '';
+}
+
 function openAuth(asRegister) {
-  register = !asRegister;
-  $('#toggle-auth').click();
-  $('#auth-dialog').showModal();
+  setMode(asRegister);
+  $('#gate').hidden = false;
 }
 
 async function loadMe() {
@@ -66,6 +79,8 @@ async function loadMe() {
 }
 
 function renderAccount() {
+  document.body.classList.toggle('guest', !me);
+  $('#gate').hidden = Boolean(me);
   $('#account-button').textContent = me ? `${me.name}${team ? ` · ${team.name}` : ''}` : 'Đăng nhập';
   $('#admin-link').hidden = me?.role !== 'admin';
   $('#password-banner').hidden = !me?.must_change;
@@ -473,6 +488,7 @@ async function refresh() {
   if (loading) return;
   loading = true;
   try {
+    if (!me) { health = await api('/health'); renderHealth(); return; }
     const [h, ts] = await Promise.all([api('/health'), api('/tournaments')]);
     health = h; tournaments = ts.items;
     renderHealth(); tournamentCards();
@@ -590,27 +606,24 @@ $('#account-button').addEventListener('click', () => {
   $('#account-detail').textContent = `@${me.username}${team ? ` · Đội ${team.name}` : ' · Chưa có đội'}`;
   $('#account-dialog').showModal();
 });
-$('#logout').addEventListener('click', event => action(event.target, async () => { await api('/logout', {}); me = team = session.csrf = null; forget(); $('#account-dialog').close(); renderAccount(); setTab('overview'); }));
+$('#logout').addEventListener('click', event => action(event.target, async () => { await api('/logout', {}); me = team = badges = campaign = session.csrf = null; forget(); $('#account-dialog').close(); watched.clear(); renderAccount(); setMode(false); refresher.now(); }));
 $('#change-password').addEventListener('click', () => { $('#account-dialog').close(); $('#password-dialog').showModal(); });
 $('#open-password').addEventListener('click', () => $('#password-dialog').showModal());
 $('#password-form').addEventListener('submit', async event => { event.preventDefault(); $('#password-error').textContent = '';
   try { await api('/me/password', Object.fromEntries(new FormData(event.target))); event.target.reset(); $('#password-dialog').close(); await loadMe(); notice('Đã đổi mật khẩu.'); }
   catch (error) { $('#password-error').textContent = error.message; } });
-$('#toggle-auth').addEventListener('click', () => {
-  register = !register; const form = $('#auth-form');
-  $('#register-fields').hidden = !register; form.elements.name.required = register; form.elements.password.minLength = register ? 12 : 1;
-  form.elements.password.autocomplete = register ? 'new-password' : 'current-password';
-  $('#auth-title').textContent = register ? 'Tạo tài khoản thi đấu.' : 'Trở lại bàn cờ.';
-  $('#auth-submit').textContent = register ? 'Tạo tài khoản' : 'Đăng nhập';
-  $('#toggle-auth').textContent = register ? 'Đã có tài khoản? Đăng nhập' : 'Chưa có tài khoản? Đăng ký'; $('#auth-error').textContent = '';
-});
+$('#toggle-auth').addEventListener('click', () => setMode(!register));
+$('#tab-login').addEventListener('click', () => setMode(false));
+$('#tab-register').addEventListener('click', () => setMode(true));
 $('#auth-form').addEventListener('submit', async event => {
-  event.preventDefault(); event.submitter.disabled = true; $('#auth-error').textContent = '';
+  event.preventDefault(); $('#auth-error').textContent = '';
+  if (!event.target.reportValidity()) return;
+  event.submitter.disabled = true;
   const data = Object.fromEntries(new FormData(event.target)); data.username = data.username.trim().toLowerCase();
   try {
     await api(register ? '/register' : '/login', data);
-    event.target.elements.password.value = ''; $('#auth-dialog').close(); await loadMe(); forget();
-    if (register) { notice('Chào mừng! Bước tiếp theo: lập đội hoặc vào đội bằng mã.'); setTab('team'); } else refresher.now();
+    event.target.elements.password.value = ''; await loadMe(); forget();
+    if (register) { notice('Chào mừng! Bước tiếp theo: lập đội hoặc vào đội bằng mã.'); setTab('team'); } else route();
   } catch (error) { $('#auth-error').textContent = error.message; }
   finally { event.submitter.disabled = false; }
 });
@@ -638,7 +651,10 @@ else {
 $('#source-size').textContent = `${new TextEncoder().encode($('#source').value).length.toLocaleString('vi-VN')} B`;
 await loadMe();
 // Shared links: /#watch=<match> opens a replay, /#team=<team> opens a profile.
-const shared = location.hash.slice(1);
-if (shared.startsWith('watch=')) { setTab('watch'); action(null, () => toggleWatch(shared.slice(6))); }
-else if (shared.startsWith('team=')) { setTab('overview'); action(null, () => openTeam(shared.slice(5))); }
-else setTab(shared || 'overview');
+function route() {
+  const shared = location.hash.slice(1);
+  if (shared.startsWith('watch=')) { setTab('watch'); action(null, () => toggleWatch(shared.slice(6))); }
+  else if (shared.startsWith('team=')) { setTab('overview'); action(null, () => openTeam(shared.slice(5))); }
+  else setTab(shared || 'overview');
+}
+if (me) route(); else { setMode(false); refresher.now(); }

@@ -140,6 +140,14 @@ class AccountsAndTeams(Base):
         self.assertEqual(self.post('/login', {'username': 'alice', 'password': 'incorrect'}).status_code, 401)
         self.assertEqual(self.post('/login', {'username': 'alice', 'password': 'test-only-password-123'}).status_code, 200)
 
+    def test_guests_only_reach_health_me_and_sign_in(self):
+        for path in ('/tournaments', '/ranked', '/feed', '/campaign', '/matches', '/teams/x', '/submissions'):
+            self.assertEqual(self.client.get('/api' + path).status_code, 401, path)
+        self.assertEqual(self.client.get('/api/health').status_code, 200)
+        self.assertEqual(self.client.get('/api/me').json['user'], None)
+        self.register('visitor')
+        self.assertEqual(self.client.get('/api/tournaments').status_code, 200)
+
     def test_campus_nat_allows_many_registrations_from_one_ip(self):
         for i in range(60):
             client = self.app.test_client()

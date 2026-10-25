@@ -122,6 +122,9 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
                 g.user = {'id': row['user_id'], 'username': row['username'], 'name': row['name'],
                           'role': row['role'], 'team_id': row['team_id'], 'must_change': bool(row['must_change'])}
                 g.session = dict(row)
+        # Everything except the sign-in screen's own needs requires an account.
+        if not g.user and request.method in ('GET', 'HEAD') and request.path not in ('/api/health', '/api/me'):
+            raise Problem('Bạn cần đăng nhập để xem nội dung này.', 401)
         if g.user and request.method not in ('GET', 'HEAD'):
             if not secrets.compare_digest(request.headers.get('X-CSRF-Token', ''), g.session['csrf']):
                 raise Problem('Phiên thao tác không hợp lệ. Hãy tải lại trang.', 403)
