@@ -329,6 +329,8 @@ async function renderCompetition() {
   if (id !== selectedTournament) return;
   competition = result;
   const t = result.tournament;
+  const shown = $('#competition-info details[data-rules]');
+  if (shown) ruleState.set(shown.dataset.rules, shown.open);   // survive the refresh even if the toggle event has not fired yet
   $('#competition-info').innerHTML = `<div class="tournament-head"><p>${badge(t.status)} <strong>${escape(t.name)}</strong></p><p class="caption">${escape(formats[t.format])} · Vòng ${t.round}/${t.rounds}${result.unfinished ? ` · ${result.unfinished} ván đang chờ/chạy` : ''}${t.status === 'open' ? ` · Hạn chọn bot ${formatTime(t.deadline)} (${countdown(t.deadline)})` : ''}<br>Bản đồ: <strong>${escape(mapLabel(t.map))}</strong> · Luật cố định: ${escape(t.rules_hash.slice(0,12))} · ${t.config.turn_seconds}s/lượt · quỹ ${t.config.game_seconds}s/ván · Hai ván đổi màu mỗi cặp.</p>${t.description ? `<p>${escape(t.description)}</p>` : ''}<details class="more" ${ruleState.get(t.id) ? 'open' : ''} data-rules="${escape(t.id)}"><summary>Luật chơi của giải này, từng vòng</summary>${roundRulesHtml(t)}</details></div>${podium(result)}`;
   const open = t.status === 'open' && t.deadline > Date.now()/1000 && !t.seed_from;
   $('#join-form').hidden = !open || !me;

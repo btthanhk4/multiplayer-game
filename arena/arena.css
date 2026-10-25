@@ -388,3 +388,17 @@ label small{font-weight:400;color:var(--muted)}
 .action-grid .button{width:100%;margin:0}.action-grid small{display:block;font-size:11px;color:var(--muted);margin-top:4px;line-height:1.5}
 .fold[open] summary{margin-bottom:12px}
 @media(max-width:700px){.stepper{flex-wrap:wrap}.stepper li{flex:1 1 30%}.action-grid{grid-template-columns:1fr}}
+
+/* Phones: rows stack instead of squeezing text into slivers. */
+@media(max-width:700px){
+.standings-tools label,.standings-tools .switch{flex:1 1 100%}
+.submission{grid-template-columns:minmax(0,1fr) auto;gap:10px 12px;padding:16px 14px}
+.submission>.submission-log,.submission>.submission-actions{grid-column:1/-1;grid-row:auto}
+.submission-actions{justify-content:flex-start}
+.admin-layout,.admin-layout.even,.team-layout,.lab-layout,.dash-grid,.tiles,.onboarding{grid-template-columns:minmax(0,1fr)}
+.admin-layout>*,.team-layout>*,.lab-layout>*,.dash-grid>*{min-width:0}
+.paper-card input,.paper-card select,.paper-card textarea{max-width:100%}
+.job{flex-direction:column;align-items:stretch}.job>div{min-width:0}.job .action-row{justify-content:flex-start}
+.stepper{flex-direction:column;gap:2px}.stepper li{flex:none;text-align:left;padding:6px 10px;border-bottom:0;border-left:4px solid var(--line)}
+.stepper li.done{border-left-color:var(--green)}.stepper li.current{border-left-color:var(--red)}
+}

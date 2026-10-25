@@ -20,6 +20,34 @@ const services=[spawn(python,['-m','arena_backend','--data',data,'serve','--port
 let browser;
 const errors=[];
 const noOverflow=async page=>assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),'No horizontal overflow');
+// Phone-width audit: no sideways scrolling and no text squeezed into a sliver, on every tab, at the narrowest real phones.
+async function auditLayout(page,tabs,label){
+  for(const width of [320,360,412]){
+    await page.setViewportSize({width,height:800});
+    for(const tab of tabs){
+      await page.locator(`[role=tab][data-tab=${tab}]`).click();
+      await page.waitForTimeout(200);
+      const problems=await page.evaluate(()=>{
+        const out=[],limit=window.innerWidth+2;
+        if(document.documentElement.scrollWidth>window.innerWidth+1)out.push('page scrolls sideways');
+        const scrolls=el=>{for(let p=el.parentElement;p&&p!==document.body;p=p.parentElement){const o=getComputedStyle(p).overflowX;if(o==='auto'||o==='scroll'||o==='hidden')return true}return false};
+        for(const el of document.querySelectorAll('main *, .masthead *')){
+          if(['OPTION','SCRIPT','STYLE','PATH','svg','SVG'].includes(el.tagName))continue;
+          const box=el.getBoundingClientRect();
+          if(!box.width||!box.height||getComputedStyle(el).visibility==='hidden')continue;
+          const own=[...el.childNodes].filter(n=>n.nodeType===3).map(n=>n.textContent).join('').trim();
+          const name=`${el.tagName.toLowerCase()}${el.className&&typeof el.className==='string'?'.'+el.className.split(' ')[0]:''}`;
+          const font=parseFloat(getComputedStyle(el).fontSize)||12;
+          if(el.classList.contains('sr-only'))continue;
+          if(own.length>=8&&box.width<90&&box.height>font*4&&!scrolls(el))out.push(`squeezed ${name}: ${own.slice(0,24)} (${Math.round(box.width)}px)`);
+          if(box.right>limit&&!scrolls(el)&&!el.closest('.table-scroll,pre,textarea'))out.push(`past the edge ${name}: ${own.slice(0,24)} (right ${Math.round(box.right)})`);
+        }
+        return [...new Set(out)].slice(0,8);
+      });
+      assert.deepEqual(problems,[],`${label} · ${tab} · ${width}px`);
+    }
+  }
+}
 async function newPage(width=1440){
   const context=await browser.newContext({viewport:{width,height:1000}});
   const page=await context.newPage();
@@ -250,6 +278,9 @@ try {
   }
   await plain.close();
 
+  await auditLayout(page,['overview','team','lab','campaign','ranked','competition','watch'],'student');
+  await page.setViewportSize({width:1440,height:1000});
+
   const admin=await newPage();
   await admin.goto(base+'/arena/admin');
   await admin.locator('#admin-login').waitFor();
@@ -337,8 +368,7 @@ try {
   await admin.locator('#cleanup-teams').click();
   await admin.locator('#notice').filter({hasText:/Đã dọn|Không có đội nào trống/}).waitFor();
   admin.removeAllListeners('dialog');
-  await admin.setViewportSize({width:390,height:844});
-  await noOverflow(admin);
+  await auditLayout(admin,['dashboard','events','people','bots','matches','queue','log'],'admin');
   assert.deepEqual(errors,[]);
   console.log('PASS: registration, team create/join, bot validation, boss campaign clear + unlock, ranked queue/cancel, tournament entry, dashboard checklist/feed/badges, team profile, four replays with speed/expand, admin dashboard, tournament create, mobile layout.');
 } finally {
