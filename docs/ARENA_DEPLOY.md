@@ -1,121 +1,136 @@
-# OTTv2 Arena — triển khai trên một máy chủ
+# OTTv2 Arena — triển khai và vận hành cho ~1.000 tân sinh viên
 
-## Có gì trong V1
+## Có gì trong V2
 
-- Game người chơi hiện tại + đấu trường tại `/arena/`, cùng web server.
-- Đăng ký bằng mã mời khi public, mật khẩu scrypt, phiên đăng nhập cookie HttpOnly, CSRF, phân quyền người chơi/BTC. Không lưu token vào localStorage.
-- File Python một file, tối đa 64 KiB; nhiều phiên bản bất biến; kiểm tra qua hàng đợi; chỉ chủ bài được đọc source qua API.
-- Trận tập hai ván đổi màu; vòng tròn (2–32 bot), Swiss theo điểm (2–500 bot); khóa bài trước khi chạy; bảng điểm tính lại từ kết quả.
-- Khán đài tối đa bốn bàn, replay đầy đủ từng nước và nhật ký điều hành.
-- SQLite WAL lưu metadata, source riêng tư, replay và job. V1 không cần Workers/D1/R2. Một máy, một runner trước; không đặt database trên ổ mạng.
+- **Tài khoản và đội**: sinh viên tự đăng ký bằng mã tham gia; tạo đội hoặc vào đội bằng mã 8 ký tự (mặc định tối đa 4 người, `ARENA_TEAM_SIZE`). Bot, Elo và đăng ký giải thuộc về đội.
+- **Dashboard sinh viên** (`/`): lộ trình 5 bước, thẻ đội/bot/Elo/giải đang mở, vị trí trong hàng chờ, bảng điểm có tìm kiếm, xem từng vòng, khán đài 4 bàn kèm replay.
+- **Dashboard ban tổ chức** (`/arena/admin`): số liệu hệ thống và ước tính thời gian chấm, công tắc sự kiện (đăng ký, nộp bài, xếp hạng, đấu tập, chế độ chỉ xem), thông báo toàn trang, quản lý giải, nhập Google Form, tìm và xử lý đội/tài khoản, xem mã nghi sao chép, hàng đợi, nhật ký.
+- **Thể thức**: Swiss (≤ 2.000 đội), vòng tròn (≤ 32), loại trực tiếp (≤ 1.024, có thể lấy top N của giải trước). Có tự mở vòng, truất quyền giữa giải (xử thua các ván chưa đấu) và xếp loại Xuất sắc/Giỏi/Khá/Đạt. Bảng điểm xuất ra CSV.
+- **Máy chấm**: mỗi bot một sandbox cho cả ván (giao thức 2). Có nhiều luồng chấm song song (`--slots`), hàng đợi ưu tiên (kiểm tra bot → giải → xếp hạng → đấu tập), tự chạy lại lỗi hạ tầng tối đa 3 lần, và trả job về hàng đợi khi runner dừng.
+- **Tạo động lực (V3)**: chiến dịch 5 boss mạnh dần (bot trong `sdk/examples` và `sdk/bosses`, tự đăng ký và được kiểm tra khi API khởi động), bảng vàng chiến dịch, 17 huy hiệu, bảng tin trực tiếp (lật kèo, thắng trắng, hạ boss, vô địch), hồ sơ công khai của đội kèm đồ thị Elo, giao hữu với đội bất kỳ, bục trao giải, replay có link chia sẻ (`/#watch=<id>`), tua nhanh và phóng to, cùng pháo hoa khi đội thắng.
+- SQLite WAL, kết nối dùng lại theo luồng, cache 2–3 giây cho dữ liệu công khai, và giới hạn tần suất phù hợp với việc cả trường dùng chung một IP NAT.
 
-**Mức sẵn sàng:** bản V1 để thử nội bộ và chuẩn bị server. Chưa chứng nhận an toàn production hay tải 500 bot. Cần chạy smoke gVisor, rà soát sandbox và tổng duyệt trên máy thật trước khi nhận code công khai.
-
-## 1. Chạy thử trên Windows
-
-Yêu cầu Python 3.10+, Node.js 20+; Node dùng `rules.js` hiện có để xử lý luật. Python không viết lại luật.
+## 1. Chạy thử trên máy phát triển
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -r arena_backend/requirements.txt
 .\.venv\Scripts\python -m arena_backend admin admin
 .\.venv\Scripts\python -m arena_backend serve
+.\.venv\Scripts\python -m arena_backend worker --mode samples --slots 2   # cửa sổ khác
 ```
 
-Mật khẩu admin được hỏi trực tiếp, không ghi vào command line. Mở **http://localhost:8080/arena/**. Không dùng `127.0.0.1` thay cho localhost nếu giữ cấu hình Origin mặc định.
+Mở `http://localhost:8080/`. Đăng nhập bằng tài khoản admin rồi vào `/arena/admin`. Chế độ `samples` chỉ chạy **nguyên bản** ba bot trong `sdk/examples/` và các boss trong `sdk/bosses/`; mã khác sẽ báo cần runner Docker. Chế độ `docker-dev` dùng runtime Docker mặc định, chỉ dành cho mã tin cậy khi phát triển. Không public server khi đang dùng hai chế độ này; CLI cũng từ chối chúng khi `ARENA_ORIGIN` là địa chỉ public.
 
-Terminal thứ hai, nếu chưa có Docker/gVisor:
+## 2. Ước tính công suất
 
-```powershell
-.\.venv\Scripts\python -m arena_backend worker --mode samples
-```
+Kết quả `scripts/arena-load.py` trên một laptop Windows, khi client và server chạy chung một máy:
 
-Chế độ `samples` chỉ thực thi source trùng hash với ba file trong `sdk/examples/`. Trong Xưởng bot, bấm bot mẫu rồi nộp nguyên bản. Mã thay đổi sẽ không được chạy trên host; job báo cần runner Docker. UI/replay ghi rõ thử nội bộ. Không public server với chế độ này.
+| Tình huống | Kết quả |
+|---|---|
+| 1.000 lượt đăng ký (64 đồng thời) | 26 giây, 0 lỗi. Chi phí chính là băm mật khẩu scrypt. |
+| 1.000 dashboard mở, mỗi tab refresh ~15 giây | ~330 req/s, p95 < 20 ms, 0 lỗi |
+| Vòng Swiss 1.000 đội: ghép cặp + bảng điểm | < 2 giây |
 
-Để thử code tùy chỉnh do chính BTC viết trên Docker Desktop:
+**Máy chấm là nút cổ chai thật sự.** Mỗi ván cần 2 sandbox gVisor (khởi động ~1–2 giây) cộng thời gian bot suy nghĩ. Một ván thường mất 10–30 giây, tối đa 2 × 60 giây suy nghĩ cộng chi phí khởi động. Một vòng Swiss 1.000 đội có 1.000 ván:
 
-```powershell
-docker build -t ottv2-bot:1 arena_backend/sandbox
-.\.venv\Scripts\python scripts/arena-sandbox-smoke.py --mode docker-dev
-.\.venv\Scripts\python -m arena_backend worker --mode docker-dev
-```
+| Luồng chấm | Ván trung bình 20 s | Ván trung bình 40 s |
+|---|---|---|
+| 8 (`--slots 8`, máy 8–12 lõi) | ~42 phút/vòng | ~83 phút/vòng |
+| 16 (2 máy runner × 8) | ~21 phút/vòng | ~42 phút/vòng |
 
-`docker-dev` sử dụng runtime Docker mặc định, chỉ dùng cho phát triển cục bộ với code tin cậy. Runner CLI từ chối chế độ này khi ARENA_ORIGIN là địa chỉ public. Không chạy đồng thời runner `samples` và `docker-dev` trên cùng hàng đợi.
+Chiến dịch boss và giao hữu cũng tốn máy chấm: mỗi lượt là 2 ván, ưu tiên ngang đấu tập (sau giải và xếp hạng). Mỗi đội chỉ có một lượt boss và một lượt giao hữu chạy cùng lúc, và có giới hạn 30 lượt boss/giờ (`ARENA_RATE_CAMPAIGN_TEAM`). Nếu 1.000 đội cùng leo tháp, hàng đợi có thể dài vài giờ; khi đó hãy tắt *Mở chiến dịch boss* hoặc tăng `--slots`. Boss 5 nghĩ tới ~0,6 giây mỗi nước, nên ván với boss 5 dài hơn ván thường.
 
-## 2. Hợp đồng bot và thể lệ V1
+Khuyến nghị: dùng máy API 4 lõi / 8 GB. Mỗi máy runner có bao nhiêu lõi trống thì đặt `--slots` bằng chừng đó (mỗi sandbox `--cpus=1`, `--memory=256m`, nên 8 slot cần khoảng 4 GB RAM cho bot). Nhiều runner có thể dùng chung một database **trên cùng máy**. Không đặt SQLite lên ổ mạng; nếu cần runner ở máy khác, phải thiết kế lại (ví dụ chuyển sang PostgreSQL). Admin dashboard hiển thị "Ước tính xong" dựa trên thời gian chấm thực tế của giờ gần nhất.
 
-Xem `/arena/guide.html` hoặc [sổ tay](../arena/guide.html). Bot export hàm `choose_move(observation)` trả `{from: [r,c], to: [r,c]}`. Python khởi tạo mới mỗi lượt, random seeded; không giữ trạng thái chạy nền. Runtime trong image: Python 3.12, thư viện chuẩn.
-
-Giới hạn: 1 giây CPU/process, 3 giây wall sau handshake, 256 MiB RAM, 4 KiB JSON, 4 KiB stderr/lượt. RLIMIT_NPROC hard=1 sau khởi động adapter, network none, cap-drop ALL, read-only rootfs, no-new-privileges. Giới hạn PID/cgroup ngoài là 64 để gVisor khởi động các tiến trình phụ trợ; kiểm thử child-process xác nhận bot vẫn không tạo được tiến trình con. Source/observation truyền qua stdin, không mount host vào sandbox; không đưa environment secret vào container. Docker daemon/socket chỉ runner sử dụng, không cấp cho API hoặc bot.
-
-Không có nước hợp lệ được tính hòa theo **bổ sung thể lệ Arena V1**; engine gốc không thay đổi. Bot lỗi là thua kỹ thuật; lỗi hạ tầng là job lỗi và BTC thử lại, không tự xử thua. Chẩn đoán lỗi bot trong trận được giữ ở audit BTC, không xuất traceback riêng tư trong replay công khai.
-
-V1 chỉ đăng ký bản **đã valid trước deadline**. Không có cơ chế grace cho bản đang kiểm tra; giao diện và thể lệ ghi rõ để thí sinh nộp sớm. Không khóa sớm trước hạn. Snapshot cố định submission/hash. Chưa hỗ trợ rút thí sinh sau khóa, xử lý phúc khảo sửa điểm hay tự tổ chức chung kết. BTC có thể tạo giải tiếp theo riêng.
-
-Swiss là thuật toán xác định, ghép gần điểm và ưu tiên tránh gặp lại; có thể gặp lại khi ghép tham lam không tìm thấy đối thủ mới. Không tuyên bố tương thích chuẩn FIDE. BYE ưu tiên ít BYE rồi thấp điểm, cho 1 điểm cặp, 0 điểm ván, 0 đối thủ Buchholz. Xếp điểm cặp → Buchholz → điểm ván; còn bằng thì đồng hạng. Kết quả của một cặp chỉ được tính khi đủ cả hai ván.
-
-## 3. Chuẩn bị Linux server
-
-Khuyến nghị bắt đầu 4 lõi, 16 GB RAM, SSD trống 50 GB; một runner xử lý một ván tại một thời điểm. Nhiều tài khoản không đồng nghĩa nhiều ván chạy đồng thời. Đo tải trước khi tăng worker hoặc số suất.
-
-1. Cài Git, Python 3.12 + venv, Node.js LTS, Docker Engine và **gVisor (`runsc`)**. Làm theo [hướng dẫn chính thức gVisor](https://gvisor.dev/docs/user_guide/quick_start/docker/). Không tự hạ runtime khi `runsc` thiếu.
-2. Clone repo vào `/opt/ottv2`, checkout đúng commit phát hành. Tạo `.venv`, cài requirements. Mã nguồn và venv do tài khoản triển khai quản lý; hai tài khoản dịch vụ không được sửa code.
-3. Tạo group `ottv2`, hai user hệ thống `ottv2-web`, `ottv2-runner`; cả hai thuộc group `ottv2`, chỉ runner thuộc group `docker`. Thành viên nhóm Docker có quyền mạnh trên host; không dùng tài khoản API cho runner.
-4. Tạo `/var/lib/ottv2`, sở hữu group `ottv2`, quyền `2770`, hai service ghi được. Chỉ mục này chứa DB/WAL/source; không đặt vào thư mục web hay repo public.
-5. Sao chép `deploy/.env.example` ra `/etc/ottv2.env`, thay Origin và mã mời ngẫu nhiên. EnvironmentFile không phải file được app tự load: systemd sẽ truyền biến; khi chạy CLI thủ công phải export cùng biến tương ứng. Giữ file bí mật, không commit.
-6. Build image, chạy kiểm tra sandbox dưới tài khoản runner:
+Trước sự kiện, chạy thử tải trên **máy staging giống hệt production**:
 
 ```sh
-docker build -t ottv2-bot:1 /opt/ottv2/arena_backend/sandbox
-/opt/ottv2/.venv/bin/python /opt/ottv2/scripts/arena-sandbox-smoke.py --mode docker
+python scripts/arena-load.py --base https://staging.example.org --users 1000 --invite MÃ --unique-bots
 ```
 
-7. Tạo admin tại đúng thư mục data (chạy bằng tài khoản dịch vụ có quyền ghi, umask 0007):
+## 3. Hợp đồng bot và thể lệ
+
+Xem `/arena/guide.html`. Tóm tắt: `choose_move(observation)` trả `{from: [r,c], to: [r,c]}`. Mỗi bot được nạp một lần mỗi ván và giữ biến toàn cục trong ván. Giới hạn: 3 giây/lượt, quỹ 60 giây suy nghĩ mỗi ván, 5 giây nạp mã, 256 MiB RAM, 4 KiB kết quả, 1 MiB log, 400 nửa lượt (đủ thì hòa). Sandbox chặn mạng, đặt rootfs chỉ đọc, `cap-drop ALL`, `no-new-privileges`, `RLIMIT_NPROC=1` sau khi adapter khởi động, giới hạn PID cgroup 64 và CPU tích lũy bằng quỹ thời gian + 20 giây. `print()` của bot được chuyển sang stderr nên không thể làm hỏng giao thức.
+
+Bot lỗi thua kỹ thuật ván đó; nếu cả hai bot cùng lỗi thì ván hòa. Lỗi hạ tầng không bao giờ bị tính là bot thua: hệ thống tự chạy lại 3 lần, sau đó job chờ BTC bấm "Thử lại". Chẩn đoán lỗi bot trong trận chỉ nằm trong nhật ký BTC. Riêng log kiểm tra bot thì đội tự xem được, để biết cách sửa.
+
+Thay đổi `rules.js` hoặc `LIMITS` sẽ làm các giải đã khóa từ chối mở vòng mới. Chốt engine trước khi khóa danh sách giải đầu tiên.
+
+## 4. Chuẩn bị Linux server
+
+1. Cài Git, Python 3.12 + venv, Node.js LTS, Docker Engine và **gVisor (`runsc`)** theo [hướng dẫn gVisor](https://gvisor.dev/docs/user_guide/quick_start/docker/). Nếu thiếu `runsc`, không tự hạ xuống runtime mặc định.
+2. Clone vào `/opt/ottv2`, checkout commit phát hành, tạo `.venv`, cài requirements.
+3. Tạo group `ottv2` và hai user hệ thống `ottv2-web`, `ottv2-runner`. Chỉ runner thuộc group `docker`.
+4. Tạo `/var/lib/ottv2` (group `ottv2`, quyền `2770`).
+5. Sao chép `deploy/.env.example` ra `/etc/ottv2.env`. Đặt Origin, mã mời ngẫu nhiên và `ARENA_RUNNER_SLOTS`. Giữ file bí mật.
+6. `docker build -t ottv2-bot:1 /opt/ottv2/arena_backend/sandbox`, rồi chạy `scripts/arena-sandbox-smoke.py --mode docker` dưới tài khoản runner. Mọi dòng phải là PASS.
+7. Tạo admin: `.venv/bin/python -m arena_backend --data /var/lib/ottv2 admin admin` (umask 0007).
+8. Cài hai unit trong `deploy/`, bật lên, rồi kiểm tra `/api/health` và tab Tổng quan của admin (phải thấy "N luồng chấm").
+
+Docker Compose: xem [deploy/README.md](../deploy/README.md).
+
+## 5. Public qua Cloudflare Tunnel
+
+Trỏ hostname về `http://127.0.0.1:8080`. Đặt `ARENA_ORIGIN=https://…` đúng với URL trình duyệt dùng, và bật `ARENA_TRUST_CLOUDFLARE=1` khi API chỉ bind loopback, để giới hạn tần suất dùng IP thật. Mã mời (`ARENA_REGISTRATION_CODE`) là bắt buộc khi public. Đây là lớp chặn chính, vì giới hạn theo IP được đặt rộng (mặc định 3.000 lượt đăng ký/giờ/IP) cho cả trường chung NAT. Giới hạn theo tài khoản/đội vẫn chặt: 20 lần đăng nhập sai/15 phút/tài khoản, 20 bài nộp/giờ/đội, tối đa 3 bài chờ kiểm tra/đội. Tất cả đều chỉnh được bằng biến `ARENA_RATE_*`.
+
+## 6. Thu bài bằng Google Forms
+
+Thiết kế form:
+
+1. **Mã đội** (câu trả lời ngắn, bắt buộc). Hướng dẫn thí sinh lấy mã ở mục *Đội của tôi*. Nếu đội chưa có trên hệ thống, dùng **Tên đội** và bật "Tạo đội mới" khi nhập.
+2. **Thành viên / MSSV** (tùy chọn, được lưu vào ghi chú đội).
+3. **Mã nguồn**: nên dùng câu hỏi **đoạn văn** để dán mã (chỉ cần CSV). Nếu dùng **tải file**, yêu cầu đặt tên file là `MÃĐỘI.py`. Sau đó vào Drive → thư mục câu hỏi → *Tải xuống* để lấy ZIP.
+
+Nhập trong `/arena/admin` → *Nhập Google Form*: chọn CSV (và ZIP nếu có), bấm **Chạy thử**, đọc các dòng lỗi, rồi bấm **Nhập thật**. Hệ thống xử lý các trường hợp sau:
+
+- Một đội nộp nhiều lần thì lấy dòng cuối; các dòng cũ được đánh dấu "bị thay".
+- Mã trùng với bản nộp gần nhất của đội thì bỏ qua.
+- Tự bỏ khối ```python, ký tự NBSP và zero-width do copy từ web/Word.
+- File không UTF-8, file > 64 KiB, file HTML (tải sai từ Drive), thiếu `choose_move` đều được báo lỗi theo từng dòng; các dòng khác vẫn nhập bình thường.
+- ZIP chỉ được đọc trong bộ nhớ, bỏ qua đường dẫn, giới hạn kích thước từng file và tổng dung lượng.
+- Có nhiều file cùng khớp một đội thì lấy file mới nhất và kèm cảnh báo.
+- "Tạo tài khoản cho đội mới" sinh mật khẩu tạm, và tài khoản bị buộc đổi mật khẩu. File tài khoản **chỉ tải được một lần trong 1 giờ**: hãy lưu riêng và gửi riêng cho từng đội.
+
+CLI tương đương (có thêm `--dry-run`): `python -m arena_backend import-form responses.csv --files drive.zip --tournament ID --create-teams --credentials /root/tai-khoan.csv`.
+
+## 7. Kịch bản ngày thi
+
+| Thời điểm | Việc cần làm |
+|---|---|
+| T-7 ngày | Chạy thử tải trên staging, chạy smoke sandbox, tổ chức một giải kín 16–32 bot, thử backup/restore. |
+| T-3 ngày | Mở chiến dịch boss để sinh viên làm quen: ai qua Boss 1 là bot đã chạy đúng. Kiểm tra bảng *Trạng thái các boss* trên admin: cả 5 boss phải “Hợp lệ”. |
+| T-1 ngày | Chốt commit, image và engine. Tạo giải Swiss với hạn chọn bot, bật *Tự mở vòng*. Đăng thông báo. |
+| Mở cổng | Bật đăng ký. Theo dõi chỉ số "SV chưa có đội" và nhắc lập đội. |
+| Trước hạn 30 phút | Thông báo hạn chót. Hàng chờ kiểm tra sẽ dài hơn; số "Ước tính xong" cho biết còn bao lâu. |
+| Sau hạn | Chờ "Bài nộp đang chờ" về 0, rồi bấm **Khóa danh sách** (hoặc **Khóa bắt buộc** để loại các bot chưa được kiểm tra). Tắt đấu xếp hạng, đấu tập/giao hữu và chiến dịch boss; backup; rồi **Mở vòng**. |
+| Mỗi vòng | Xem "Job lỗi". Nếu có, bấm *Thử lại mọi job lỗi*. Vòng tiếp theo tự mở. |
+| Chung kết | Tạo giải *Loại trực tiếp* với nguồn đội "Top N của" vòng Swiss: danh sách được khóa ngay với hạt giống theo hạng. |
+| Kết thúc | Tải CSV bảng điểm và xếp loại. Backup. Bật lại đấu xếp hạng nếu muốn. |
+
+Xử lý sự cố:
+
+- **Runner chết/khởi động lại**: job đang chạy tự về hàng đợi (dừng êm) hoặc được thu hồi sau 90 giây. Container mồ côi bị dọn sau 30 giây.
+- **Máy chủ quá tải hoặc DB bận**: API trả 503, và trình duyệt tự giãn chu kỳ refresh rồi thử lại. Có thể bật *Chế độ chỉ xem* để chặn mọi thao tác ghi trong lúc xử lý.
+- **Gia hạn nộp bài**: tạo giải mới với hạn mới hoặc nhập thêm qua Google Form. Admin vẫn thêm được đăng ký sau hạn cho tới lúc khóa danh sách.
+- **Gian lận/sao chép**: tab *Bài nộp* có ghi chú "trùng mã với N đội". Lưu ý bot mẫu nguyên bản trùng nhiều là chuyện bình thường. Dùng *Truất quyền* trên bảng điểm giải hoặc với cả đội.
+- **Quên mật khẩu**: tab *Đội & tài khoản* → *Cấp lại mật khẩu* (hiện một lần, buộc đổi khi đăng nhập).
+
+## 8. Sao lưu và khôi phục
 
 ```sh
-cd /opt/ottv2
-umask 0007
-.venv/bin/python -m arena_backend --data /var/lib/ottv2 admin admin
+ARENA_DATA=/var/lib/ottv2 .venv/bin/python -m arena_backend backup /duong-dan-backup/arena-$(date +%F-%H%M).sqlite3
 ```
 
-8. Cài hai unit trong `deploy/` vào systemd sau khi đã tạo user/group/path. Đọc và điều chỉnh paths trước khi enable. API bind `127.0.0.1:8080`; runner tự đọc cùng SQLite.
-9. Bật `ottv2-api` và `ottv2-runner`, kiểm tra journal và `/api/health`. API vẫn nhận bài khi runner tắt, nhưng API dừng thì không nhận bài được.
+Lệnh dùng SQLite backup API nên bản sao luôn nhất quán khi hệ thống đang chạy, và không ghi đè file đã có. Sao lưu trước và sau mỗi vòng. Để khôi phục: dừng API và runner, đặt bản backup thành `arena.sqlite3` trong một thư mục mới (không đặt cạnh WAL/SHM cũ), rồi đổi `ARENA_DATA`. Database V1 (mỗi người một bot) được tự nâng lên V2 khi khởi động lần đầu: mỗi người chơi cũ thành một đội một người, kết quả và Elo được giữ nguyên. Hãy backup trước khi nâng cấp.
 
-V1 tạo một container mới cho mỗi nước đi, ưu tiên cách ly dễ kiểm tra. Chi phí khởi động có thể lớn; chưa cam kết chạy 4.740 ván trong thời gian nào. Image ID được ghi vào replay. Trước giải cần pin image, engine và phiên bản triển khai, không rebuild/đổi code giữa vòng.
-
-## 4. Public qua Cloudflare Tunnel
-
-Tạo named Tunnel và hostname ổn định trên tên miền của BTC. Trỏ service về `http://127.0.0.1:8080`; có cấu hình mẫu tại `deploy/cloudflared.example.yml`. Không public cổng Docker, DB hoặc runner. Xem [tài liệu Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/).
-
-Đặt `ARENA_ORIGIN=https://arena.ten-mien-cua-ban` đúng URL trình duyệt dùng. Khi đó cookie Secure được bật, mọi POST khác Origin bị từ chối. `ARENA_REGISTRATION_CODE` bắt buộc khi public. V1 chỉ phục vụ cùng origin, không mở CORS tùy ý. Nếu muốn giữ riêng UI Arena trên GitHub Pages, cần triển khai xác thực/CORS riêng trước; game người chơi cũ vẫn có thể ở Pages.
-
-`ARENA_TRUST_CLOUDFLARE=1` chỉ dùng khi API bind loopback, cloudflared là lối vào tin cậy. Khi đó IP từ CF-Connecting-IP dùng để giới hạn đăng ký/login; không bật nếu reverse proxy không kiểm soát được header. Chưa có OAuth/email reset ở V1; `admin USER` có thể đặt lại mật khẩu và cấp quyền admin, vì vậy chỉ BTC được truy cập CLI này. Khôi phục tài khoản người chơi qua DB cần quy trình xác minh thủ công, chưa có UI reset.
-
-Quick Tunnel chỉ để thử, không dùng làm địa chỉ giải chính thức. Khi bạn cung cấp server/domain, mới thực hiện các bước cài và public thực tế.
-
-## 5. Sao lưu, khôi phục, sự cố
+## 9. Kiểm thử
 
 ```sh
-ARENA_DATA=/var/lib/ottv2 .venv/bin/python -m arena_backend backup /duong-dan-backup/arena-2026-10-16.sqlite3
-```
-
-Lệnh dùng SQLite backup API để tạo bản nhất quán gồm tài khoản, source, snapshot, kết quả và replay. Không copy riêng file DB đang mở và bỏ WAL. Không ghi đè backup đã có. Bảo vệ bản backup như source riêng tư; giữ bản ngoài máy runner.
-
-Khôi phục: dừng cả API và runner, giữ nguyên data cũ để đối chiếu, khôi phục bản backup thành `arena.sqlite3` trong một thư mục mới, đặt quyền group thích hợp, đổi ARENA_DATA/ReadWritePaths rồi khởi động. Không đặt DB khôi phục cạnh WAL/SHM cũ. Kiểm tra integrity, số entries và kết quả trước khi mở lại.
-
-Job có lease 90 giây, heartbeat 15 giây, attempt token để chặn kết quả cũ. Job bị mất runner được nhận lại tối đa ba lần tự động; lỗi hạ tầng thông thường chuyển `failed`, BTC retry có audit. Worker quét container mang label riêng của database mỗi 30 giây, xóa container không còn lease hợp lệ sau sự cố. Trận lỗi chạy lại từ đầu; không cam kết code dùng nguồn ngẫu nhiên riêng/thời gian sẽ ra cùng ván. Replay đã ghi được tái hiện từ log nước đi.
-
-Hạn mức mặc định: 10 bài nộp/giờ/tài khoản, 10 cặp tập/giờ, mỗi người tối đa một cặp tập đang chờ/chạy. Danh sách UI hiện 100 bài/trận/job mới nhất; chưa có tìm kiếm kho lịch sử lớn. Theo dõi dung lượng DB, lượt chờ, thời gian ván, OOM và log. Sao lưu mỗi ngày và trước/sau khóa giải. V1 chưa tự xóa dữ liệu theo retention; BTC phải chốt chính sách trước public.
-
-## 6. Kiểm thử và điều kiện mở giải
-
-```sh
-npm ci
-npm test
+npm ci && npm test
 .venv/bin/python -m unittest discover -s arena_backend/tests -v
 .venv/bin/python scripts/arena-sandbox-smoke.py --mode docker
+ARENA_PYTHON=.venv/bin/python node scripts/arena-smoke.mjs
 ```
 
-Browser smoke: xem đầu file `scripts/arena-smoke.mjs`. Chạy qua môi trường data thử trong `artifacts/`, không dùng DB giải đang diễn ra.
-
-Trước public: smoke gVisor đạt; rà soát sandbox/permissions; thử mất runner, backup/restore; chốt thể lệ; chạy hết một giải kín 16–32 bot. Trước 500 suất: tổng duyệt toàn bộ workload, nguồn điện/mạng, số worker, công bằng CPU, thời gian vòng và hạn mức dịch vụ. Các kiểm thử phát triển không thay cho thử tải hoặc đánh giá bảo mật độc lập.
+Test tự động không thay thế được việc rà soát bảo mật độc lập và tổng duyệt trên phần cứng thật.

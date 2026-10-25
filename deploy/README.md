@@ -32,7 +32,7 @@ To test the three bundled bots without accepting arbitrary contestant code:
 docker compose -f deploy/compose.yaml --profile demo up -d sample-worker
 ```
 
-Open an SSH tunnel from a workstation with `ssh -L 8091:127.0.0.1:8091 USER@SERVER`, then visit `http://localhost:8091/arena/`. The database persists in the `ottv2_arena_data` Docker volume. Do not use `docker compose down -v` unless you intend to delete it.
+Open an SSH tunnel from a workstation with `ssh -L 8091:127.0.0.1:8091 USER@SERVER`, then visit `http://localhost:8091/` (organisers: `/arena/admin`). The database persists in the `ottv2_arena_data` Docker volume. Do not use `docker compose down -v` unless you intend to delete it.
 
 The runner requires Docker with gVisor (`runsc`). Build the bot image, run the sandbox smoke test and start the runner only after `docker info` shows a `runsc` runtime:
 
@@ -46,5 +46,7 @@ docker run --rm --network none \
 OTT_DOCKER_GID="$(stat -c %g /var/run/docker.sock)" \
   docker compose -f deploy/compose.yaml --profile runner up -d runner
 ```
+
+Set `ARENA_RUNNER_SLOTS` in `deploy/.env.server` to the number of CPU cores the host can give to bots (each game runs two sandboxes, one thinking at a time). Check *Luồng chấm* and *Ước tính xong* on `/arena/admin` after starting it.
 
 The runner service shares the private data volume, has no network and accesses the Docker socket through the host socket group. Access to that socket grants powerful control of the host; only the runner receives it. The Compose file leaves the existing services and their ports alone. A public origin must use HTTPS; the sample worker deliberately refuses public origins.

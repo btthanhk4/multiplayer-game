@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#eeeae0">
+  <base href="/arena/">
+  <title>Điều hành — OTTv2 Arena</title>
+  <link rel="stylesheet" href="./arena.css">
+  <script type="module" src="./admin.js"></script>
+</head>
+<body class="admin">
+  <header class="masthead">
+    <a class="brand" href="/">ott<span>v2</span><sup>điều hành</sup></a>
+    <nav aria-label="Điều hướng"><a href="/">← Trang thí sinh</a><span id="admin-name" class="caption"></span></nav>
+  </header>
+  <main>
+    <div id="gate" class="empty" hidden>Trang này dành cho ban tổ chức. <a class="text-link" href="/">Đăng nhập bằng tài khoản admin ở trang chính ↗</a></div>
+    <div id="console" hidden>
+      <div class="service-strip"><span id="service-status" role="status">Đang tải…</span><span id="service-detail"></span></div>
+      <div class="section-nav" role="tablist" aria-label="Khu vực điều hành">
+        <button role="tab" aria-selected="true" data-tab="dashboard">01 <span>Tổng quan</span></button>
+        <button role="tab" aria-selected="false" data-tab="events">02 <span>Giải đấu</span></button>
+        <button role="tab" aria-selected="false" data-tab="import">03 <span>Nhập Google Form</span></button>
+        <button role="tab" aria-selected="false" data-tab="people">04 <span>Đội & tài khoản</span></button>
+        <button role="tab" aria-selected="false" data-tab="bots">05 <span>Bài nộp</span></button>
+        <button role="tab" aria-selected="false" data-tab="queue">06 <span>Hàng đợi</span></button>
+        <button role="tab" aria-selected="false" data-tab="log">07 <span>Nhật ký</span></button>
+      </div>
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+
+      <section id="dashboard" class="view" role="tabpanel">
+        <div id="stats" class="stat-grid"></div>
+        <div class="admin-layout">
+          <form id="settings-form" class="paper-card"><p class="eyebrow">CÔNG TẮC SỰ KIỆN</p><h3>Mở / đóng chức năng</h3>
+            <label class="switch"><input type="checkbox" name="registration_open"> Cho đăng ký tài khoản</label>
+            <label class="switch"><input type="checkbox" name="submissions_open"> Cho nộp bot trên web</label>
+            <label class="switch"><input type="checkbox" name="ranked_open"> Mở đấu xếp hạng</label>
+            <label class="switch"><input type="checkbox" name="practice_open"> Mở đấu tập</label>
+            <label class="switch"><input type="checkbox" name="campaign_open"> Mở chiến dịch boss</label>
+            <label class="switch danger"><input type="checkbox" name="read_only"> Chế độ chỉ xem (bảo trì / sự cố)</label>
+            <label>Thông báo hiển thị cho mọi người<textarea name="announcement" maxlength="500" rows="3" placeholder="Ví dụ: Vòng 2 bắt đầu lúc 14:00. Hạn chọn bot 13:30."></textarea></label>
+            <button class="button primary">Lưu cài đặt</button>
+            <p class="caption">Khi một vòng giải lớn đang chạy, tắt đấu xếp hạng, đấu tập/giao hữu và chiến dịch để máy chấm dành toàn bộ cho giải. Ván giải luôn được ưu tiên trong hàng đợi.</p>
+          </form>
+          <div><div class="paper-card"><p class="eyebrow">MÁY CHẤM</p><h3>Công suất & hàng đợi</h3><div id="capacity"></div></div>
+          <div class="paper-card"><p class="eyebrow">CHIẾN DỊCH</p><h3>Trạng thái các boss</h3><div id="boss-status"></div></div></div>
+        </div>
+      </section>
+
+      <section id="events" class="view" role="tabpanel" hidden>
+        <div class="admin-layout">
+          <form id="tournament-form" class="paper-card"><p class="eyebrow">TẠO GIẢI / VÒNG MỚI</p><h3>Mở giải</h3>
+            <label>Tên giải<input name="name" required minlength="3" maxlength="80" placeholder="OTTv2 · Vòng loại tân sinh viên"></label>
+            <label>Thể thức<select name="format" id="format"><option value="swiss">Swiss theo điểm · tối đa 2.000 đội</option><option value="round_robin">Vòng tròn · tối đa 32 đội</option><option value="knockout">Loại trực tiếp · tối đa 1.024 đội</option></select></label>
+            <label>Nguồn đội<select name="source" id="seed-source"><option value="">Đăng ký mở (thí sinh tự chọn bot)</option></select></label>
+            <label id="seed-count-field" hidden>Số đội đi tiếp (top N của giải nguồn)<input name="seed_count" type="number" min="2" max="1024" value="16"></label>
+            <label id="rounds-field">Số vòng Swiss<input name="rounds" type="number" min="1" max="30" value="7" required><small class="caption" id="rounds-hint"></small></label>
+            <label id="deadline-field">Hạn đăng ký/chọn bot (giờ máy bạn)<input name="deadline" id="deadline" type="datetime-local" required></label>
+            <label>Mô tả / thể lệ ngắn<textarea name="description" maxlength="500" rows="2"></textarea></label>
+            <label class="switch"><input type="checkbox" name="auto_advance" checked> Tự mở vòng tiếp khi mọi ván xong</label>
+            <button class="button primary">Tạo giải</button>
+          </form>
+          <div>
+            <div class="paper-card"><p class="eyebrow">ĐIỀU KHIỂN</p><h3>Giải đấu</h3><label>Chọn giải<select id="admin-tournament"></select></label><div id="tournament-state" class="caption"></div>
+              <div class="action-row"><button id="freeze-button" class="button">Khóa danh sách</button><button id="force-freeze" class="button">Khóa bắt buộc</button><button id="next-round-button" class="button primary">Mở vòng / Hoàn tất</button></div>
+              <div class="action-row"><label class="switch"><input type="checkbox" id="auto-toggle"> Tự mở vòng</label><button id="export-button" class="button">Tải bảng điểm CSV</button></div>
+              <p class="caption">Khóa chỉ được sau hạn. “Khóa bắt buộc” loại các bot còn chờ kiểm tra. Vòng mới mở khi mọi ván của vòng trước đã xong (job lỗi cần thử lại trước).</p></div>
+            <div class="paper-card"><p class="eyebrow">BẢNG ĐIỂM</p><label>Tìm đội<input id="entry-search" type="search"></label><div class="table-scroll"><table><thead><tr><th>HẠNG</th><th>ĐỘI / BOT</th><th>XẾP LOẠI</th><th>ĐIỂM</th><th>T/H/B</th><th></th></tr></thead><tbody id="entry-body"></tbody></table></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="import" class="view" role="tabpanel" hidden>
+        <div class="admin-layout">
+          <form id="import-form" class="paper-card"><p class="eyebrow">GOOGLE FORMS → ĐẤU TRƯỜNG</p><h3>Nhập bài nộp</h3>
+            <label>File CSV (Google Forms → Phản hồi → Tải xuống .csv)<input type="file" name="csv" accept=".csv,text/csv"></label>
+            <label>ZIP các file tải lên (tùy chọn, tải thư mục từ Drive)<input type="file" name="files" accept=".zip,application/zip"></label>
+            <label>Đăng ký luôn vào giải đang mở<select name="tournament" id="import-tournament"></select></label>
+            <label class="switch"><input type="checkbox" name="create_teams" value="1"> Tạo đội mới nếu chưa có trên hệ thống</label>
+            <label class="switch"><input type="checkbox" name="create_accounts" value="1"> Tạo một tài khoản đăng nhập cho mỗi đội mới</label>
+            <details><summary>Chỉ định cột thủ công (khi tự nhận diện sai)</summary>
+              <label>Cột tên đội<input name="col_team"></label><label>Cột mã đội<input name="col_team_code"></label>
+              <label>Cột mã nguồn dán<input name="col_source"></label><label>Cột file tải lên<input name="col_file"></label>
+              <label>Cột tên bot<input name="col_bot_name"></label><label>Cột thành viên<input name="col_members"></label><label>Cột email<input name="col_email"></label></details>
+            <div class="action-row"><button class="button" name="mode" value="dry">Chạy thử (không ghi)</button><button class="button primary" name="mode" value="apply">Nhập thật</button></div>
+            <p class="caption">Mỗi đội chỉ lấy câu trả lời <strong>mới nhất</strong>. File cần UTF-8, ≤ 64 KiB, có hàm <code>choose_move</code>. Với form tải file, yêu cầu thí sinh đặt tên file là mã đội hoặc tên đội (ví dụ <code>K7QF2M9A.py</code>).</p>
+          </form>
+          <div><div class="paper-card"><p class="eyebrow">KẾT QUẢ</p><div id="import-summary" class="caption">Chưa chạy.</div><label>Lọc<select id="import-filter"><option value="">Tất cả</option><option value="error">Lỗi</option><option value="ready">Sẵn sàng</option><option value="imported">Đã nhập</option><option value="superseded">Bị thay bản mới</option><option value="unchanged">Không đổi</option></select></label><div class="table-scroll"><table><thead><tr><th>DÒNG</th><th>ĐỘI</th><th>TRẠNG THÁI</th><th>GHI CHÚ</th></tr></thead><tbody id="import-rows"></tbody></table></div></div>
+            <div class="paper-card"><p class="eyebrow">LỊCH SỬ NHẬP</p><div id="import-history"></div></div></div>
+        </div>
+      </section>
+
+      <section id="people" class="view" role="tabpanel" hidden>
+        <div class="admin-layout even">
+          <div class="paper-card"><p class="eyebrow">ĐỘI</p><label>Tìm (tên đội, mã, thành viên, MSSV)<input id="team-search" type="search"></label><div id="team-list"></div></div>
+          <div class="paper-card"><p class="eyebrow">TÀI KHOẢN</p><label>Tìm (tên đăng nhập, họ tên, MSSV, đội)<input id="user-search" type="search"></label><div id="user-list"></div></div>
+        </div>
+      </section>
+
+      <section id="bots" class="view" role="tabpanel" hidden>
+        <div class="standings-tools"><label>Tìm (đội, tên bot, hash)<input id="bot-search" type="search"></label><label>Trạng thái<select id="bot-status"><option value="">Tất cả</option><option value="queued">Đang chờ</option><option value="running">Đang chạy</option><option value="valid">Hợp lệ</option><option value="rejected">Cần sửa</option><option value="failed">Lỗi hạ tầng</option></select></label></div>
+        <div id="bot-list" class="submission-list"></div>
+        <p class="caption">“Trùng mã với N đội” giúp phát hiện sao chép; bot mẫu nguyên bản thường trùng nhiều và là bình thường.</p>
+      </section>
+
+      <section id="queue" class="view" role="tabpanel" hidden>
+        <div class="standings-tools"><label>Trạng thái<select id="job-status"><option value="">Ưu tiên lỗi → đang chạy → chờ</option><option value="failed">Lỗi</option><option value="running">Đang chạy</option><option value="queued">Đang chờ</option><option value="done">Xong</option></select></label><button id="retry-all" class="button">Thử lại mọi job lỗi</button></div>
+        <div id="job-list"></div>
+      </section>
+
+      <section id="log" class="view" role="tabpanel" hidden><div id="audit-list" class="audit-panel"></div></section>
+    </div>
+  </main>
+  <dialog id="source-dialog"><div class="dialog-top"><span class="eyebrow" id="source-title">MÃ NGUỒN</span><button type="button" class="close-button" data-close="source-dialog" aria-label="Đóng">×</button></div><pre id="source-view" class="source-view"></pre></dialog>
+</body>
+</html>

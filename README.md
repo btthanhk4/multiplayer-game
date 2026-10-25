@@ -1,18 +1,17 @@
 # OTTv2 Arena
 
-Trang chủ `/` là **Đấu trường bot Python**. Người chơi viết bot, nộp kiểm tra, đấu xếp hạng tự động hoặc đăng ký giải do ban tổ chức mở. `/arena/` vẫn dùng được cho các liên kết cũ. Bàn cờ chơi tay trước đây không còn được phục vụ trên website Arena.
+Trang chủ `/` là **Đấu trường bot Python**. Sinh viên lập đội, viết bot, nộp kiểm tra, đấu xếp hạng hoặc thi giải do ban tổ chức mở. Ban tổ chức điều hành ở `/arena/admin`. `/arena/` vẫn dùng được cho các liên kết cũ. Bàn cờ chơi tay trước đây không còn được phục vụ trên website Arena.
 
 ## Luồng người chơi
 
-1. Đăng ký bằng mã tham gia do ban tổ chức cấp và đăng nhập.
+1. Đăng ký bằng mã tham gia do ban tổ chức cấp. **Tạo đội** hoặc **vào đội** bằng mã 8 ký tự (tối đa 4 người).
 2. Viết một file Python UTF-8 tối đa 64 KiB, định nghĩa `choose_move(observation)` và trả `{'from': [row, col], 'to': [row, col]}`. Xem [giao thức bot](arena/guide.html).
-3. Nộp mã. Runner kiểm tra tối đa 12 nửa lượt mẫu. Bản hợp lệ có thể dùng để đấu tập, xếp hạng hoặc đăng ký giải.
-4. Ở **Đấu xếp hạng**, chọn bot hợp lệ và tìm đối thủ. Hệ thống ưu tiên người chưa gặp trong 24 giờ, sau đó Elo gần nhất. Nếu chưa có ai thì bot ở hàng chờ; có thể hủy trước khi ghép.
-5. Mỗi cặp có hai ván đổi màu. Sau khi cả hai kết thúc, Elo cập nhật một lần; người xem có thể mở từng ván và replay.
+3. Nộp mã trên web, hoặc qua Google Form để BTC nhập. Runner kiểm tra 12 nửa lượt mẫu. Bản hợp lệ dùng được để đấu tập, xếp hạng hoặc đăng ký giải.
+4. Ở **Chiến dịch boss**, leo tháp 5 boss mạnh dần (cần ≥ 1,5/2 điểm mỗi ải; 2/2 được ★★★) để lên bảng vàng và mở huy hiệu. Bấm tên đội bất kỳ để xem hồ sơ và mời giao hữu.
+5. Ở **Đấu xếp hạng**, chọn bot và tìm đối thủ. Hệ thống ưu tiên đội chưa gặp trong 24 giờ, sau đó Elo gần nhất. Mỗi cặp có hai ván đổi màu; Elo cập nhật sau khi cả hai kết thúc.
+6. Ở **Giải đấu**, chọn bot trước hạn. BTC khóa danh sách (bot không hợp lệ tự bị loại) rồi mở các vòng Swiss, vòng tròn hoặc loại trực tiếp. Bảng điểm có xếp loại Xuất sắc/Giỏi/Khá/Đạt.
 
-Elo bắt đầu ở 1000. Mỗi ván thắng/hòa/thua được 1/0,5/0 điểm; điểm cặp dùng tổng hai ván. Công thức Elo: `round(K × (điểm ván / 2 − kỳ vọng))`, K=32 và giảm cho các cặp gặp lại trong 24 giờ, tối thiểu 8. Điểm Elo **không** cộng vào bảng giải chính thức.
-
-Trong giải, ban tổ chức khóa bot sau hạn rồi mở từng vòng. Swiss ghép gần điểm và hoán đổi cặp để giảm tái đấu; vòng tròn cho mỗi cặp gặp một lần. Mỗi cặp thi hai ván đổi màu; thắng/hòa/thua cặp được 1/0,5/0 điểm. Đồng điểm xét Buchholz, sau đó điểm ván.
+Elo bắt đầu ở 1000; `round(K × (điểm ván / 2 − kỳ vọng))`, K=32, giảm khi gặp lại trong 24 giờ, tối thiểu 8. Elo **không** cộng vào bảng giải.
 
 ## Chạy tại máy phát triển
 
@@ -23,15 +22,10 @@ python -m venv .venv
 .\.venv\Scripts\python -m pip install -r arena_backend/requirements.txt
 .\.venv\Scripts\python -m arena_backend admin admin
 .\.venv\Scripts\python -m arena_backend serve
+.\.venv\Scripts\python -m arena_backend worker --mode samples --slots 2
 ```
 
-Mở `http://localhost:8080/`. Ở cửa sổ khác, có thể chạy runner chỉ dành cho **bot mẫu nguyên bản**:
-
-```powershell
-.\.venv\Scripts\python -m arena_backend worker --mode samples
-```
-
-Runner production cần Docker và gVisor để chạy mã tùy ý của người chơi. Xem [triển khai](docs/ARENA_DEPLOY.md) và [Compose](deploy/README.md).
+Mở `http://localhost:8080/`. Runner `samples` chỉ chạy **bot mẫu nguyên bản**. Runner production cần Docker và gVisor để chạy mã tùy ý của người chơi. Xem [triển khai và vận hành cho ~1.000 sinh viên](docs/ARENA_DEPLOY.md) và [Compose](deploy/README.md).
 
 ## Kiểm thử
 
@@ -39,6 +33,5 @@ Runner production cần Docker và gVisor để chạy mã tùy ý của ngườ
 npm test
 python -m unittest discover -s arena_backend/tests -v
 node scripts/arena-smoke.mjs
+python scripts/arena-load.py --base http://127.0.0.1:8080 --users 1000   # chỉ trên dữ liệu staging
 ```
-
-Các test chức năng không phải phép thử tải 5.000 người dùng. Trước khi mở giải lớn cần thử tải API, SQLite và nhiều runner với bộ bot đại diện.

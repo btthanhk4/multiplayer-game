@@ -2,16 +2,18 @@
 <html lang="vi">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#eeeae0"><base href="/arena/"><title>Sổ tay bot Python — OTTv2</title><link rel="stylesheet" href="./arena.css"></head>
 <body>
-  <header class="masthead"><a class="brand" href="/">ott<span>v2</span><sup>arena</sup></a><nav><a href="/#lab">Về xưởng bot</a><a href="/#ranked">Đấu xếp hạng</a></nav></header>
+  <header class="masthead"><a class="brand" href="/">ott<span>v2</span><sup>arena</sup></a><nav><a href="/#lab">Về xưởng bot</a><a href="/#competition">Giải đấu</a></nav></header>
   <main><article class="guide">
-    <p class="eyebrow">SỔ TAY DỰ THI / GIAO THỨC 01</p>
+    <p class="eyebrow">SỔ TAY DỰ THI / GIAO THỨC 02</p>
     <h1>Một hàm Python.<br><em>Một nước đi mỗi lượt.</em></h1>
-    <p>Bot nhận toàn bộ thế cờ và chọn một nước hợp lệ. Môi trường được khởi tạo lại sau mỗi lượt; đừng dựa vào biến toàn cục còn giữ giá trị từ lượt trước.</p>
+    <p>Bot nhận toàn bộ thế cờ và chọn một nước hợp lệ. Mỗi ván, bot của bạn được nạp <b>một lần</b> trong một môi trường riêng và phục vụ mọi nước đi của ván đó; biến toàn cục giữ giá trị giữa các lượt <b>trong cùng một ván</b>, nhưng không sang ván khác.</p>
+    <h2>00 / Lập đội</h2>
+    <ol><li>Mỗi sinh viên tạo một tài khoản (cần mã tham gia do ban tổ chức cấp).</li><li>Một bạn vào <b>Đội của tôi → Tạo đội</b> và gửi <b>mã đội 8 ký tự</b> cho các bạn còn lại; các bạn vào đội bằng mã đó. Mỗi đội tối đa 4 người; đi một mình thì tạo đội một người.</li><li>Bot, điểm Elo và đăng ký giải thuộc về đội. Thành viên nào nộp cũng được; bản đăng ký giải là bản đội chọn gần nhất trước hạn.</li><li>Nếu ban tổ chức thu bài qua Google Form: điền đúng <b>mã đội</b> (hoặc tên đội) và dán mã Python vào ô trả lời, hoặc tải file tên <code>MÃĐỘI.py</code>. Chỉ câu trả lời mới nhất của mỗi đội được dùng.</li></ol>
     <h2>01 / Viết bot</h2>
     <pre>def choose_move(observation):
     move = observation['legalMoves'][0]
     return {'from': move['from'], 'to': move['to']}</pre>
-    <p>Nộp một file <code>.py</code> UTF-8, tối đa 64 KiB. Chỉ dùng thư viện chuẩn Python; không cài thêm package. Hàm trả đúng hai trường <code>from</code> và <code>to</code>, không in log ra stdout.</p>
+    <p>Nộp một file <code>.py</code> UTF-8, tối đa 64 KiB. Chỉ dùng thư viện chuẩn Python 3.12; không cài thêm package. Hàm trả đúng hai trường <code>from</code> và <code>to</code>. <code>print()</code> được phép: nội dung đi vào nhật ký lỗi (tối đa 1 MiB mỗi ván), không ảnh hưởng nước đi.</p>
     <p><a class="text-link" href="../sdk/examples/first.py">Bot đầu tiên ↗</a> · <a class="text-link" href="../sdk/examples/hunter.py">Thợ săn ↗</a> · <a class="text-link" href="../sdk/examples/guardian.py">Người gác ↗</a></p>
     <h2>02 / Dữ liệu bot nhận</h2>
     <table><thead><tr><th>Trường</th><th>Ý nghĩa</th></tr></thead><tbody>
@@ -19,22 +21,28 @@
       <tr><td><code>mySide, turn</code></td><td>Phe của bot và phe đến lượt. p1 là Xanh, p2 là Đỏ.</td></tr>
       <tr><td><code>legalMoves</code></td><td>Danh sách các nước hợp lệ với <code>from</code>, <code>to</code> và <code>capture</code>.</td></tr>
       <tr><td><code>ply, quietPly, repetitions</code></td><td>Số nửa lượt, số lượt không ăn quân và lịch sử thế cờ phục vụ luật hòa.</td></tr>
-      <tr><td><code>seed</code></td><td>Seed theo ván và lượt; module <code>random</code> được khởi tạo bằng giá trị này.</td></tr>
-      <tr><td><code>protocol_version, ruleset_hash</code></td><td>Phiên bản giao thức và hash engine.</td></tr>
+      <tr><td><code>timeLeft, turnLimit</code></td><td>Số giây suy nghĩ còn lại của bot trong ván, và giới hạn mỗi lượt.</td></tr>
+      <tr><td><code>maxPly</code></td><td>Số nửa lượt tối đa của một ván trong Arena (đủ thì hòa).</td></tr>
+      <tr><td><code>seed</code></td><td>Seed theo ván và lượt. Module <code>random</code> được khởi tạo một lần mỗi ván.</td></tr>
+      <tr><td><code>protocol_version, ruleset_hash</code></td><td>Phiên bản giao thức (2) và hash engine.</td></tr>
     </tbody></table>
     <p>Tọa độ là <code>[hàng, cột]</code>, bắt đầu từ 0 ở góc trên trái: <b>a1 = [8,0]</b>, <b>i9 = [0,8]</b>. Chỉ trả một nước nằm trong <code>legalMoves</code>.</p>
     <h2>03 / Luật và giới hạn</h2>
-    <ul><li>Mỗi bên có ba Đấm, ba Lá, ba Kéo. Đi một ô theo tám hướng; Đấm ăn Kéo, Kéo ăn Lá, Lá ăn Đấm. Cùng loại chặn nhau.</li><li>Xanh tới i9, Đỏ tới a1, hoặc ăn hết một loại quân của đối thủ thì thắng.</li><li>Hòa khi cùng thế và bên đến lượt xuất hiện ba lần, hoặc 80 nửa lượt không ăn quân. Trong Arena, không còn nước hợp lệ cũng là hòa.</li><li>Runner Docker/gVisor: CPU 1 giây, thời gian thực 3 giây sau khi adapter sẵn sàng, RAM 256 MiB, kết quả JSON 4 KiB, không mạng.</li><li>Sai nước, lỗi chạy hoặc quá giới hạn sẽ thua kỹ thuật ván đó. Lỗi hạ tầng không tính thua bot.</li></ul>
+    <ul><li>Mỗi bên có ba Đấm, ba Lá, ba Kéo. Đi một ô theo tám hướng; Đấm ăn Kéo, Kéo ăn Lá, Lá ăn Đấm. Cùng loại chặn nhau.</li><li>Xanh tới i9, Đỏ tới a1, hoặc ăn hết một loại quân của đối thủ thì thắng.</li><li>Hòa khi cùng thế và bên đến lượt xuất hiện ba lần, hoặc 80 nửa lượt không ăn quân. Trong Arena, không còn nước hợp lệ hoặc đủ 400 nửa lượt cũng là hòa.</li><li>Mỗi lượt tối đa 3 giây; tổng thời gian suy nghĩ của bot trong một ván tối đa 60 giây; nạp mã (import, khởi tạo toàn cục) tối đa 5 giây. RAM 256 MiB, kết quả JSON 4 KiB, không mạng, không tạo tiến trình con.</li><li>Sai nước, lỗi chạy hoặc quá giới hạn sẽ thua kỹ thuật ván đó (hai bot cùng lỗi thì hòa). Lỗi hạ tầng không tính thua bot; hệ thống tự chạy lại tối đa ba lần rồi chờ ban tổ chức.</li></ul>
     <h2>04 / Nộp và kiểm tra</h2>
-    <ol><li>Đăng nhập, chọn bot mẫu hoặc viết mã, rồi nộp. Mỗi lần nộp tạo một phiên bản và hash riêng; mã cũ không bị ghi đè.</li><li>Runner chạy tối đa 12 nửa lượt mẫu qua cả hai phe. “Hợp lệ” chỉ xác nhận các lượt mẫu, không chứng minh bot đúng ở mọi thế cờ.</li><li>Có thể chọn hai phiên bản hợp lệ của chính mình để đấu tập hai ván đổi màu mà không tính điểm.</li></ol>
+    <ol><li>Chọn bot mẫu hoặc viết mã, rồi nộp. Mỗi lần nộp tạo một phiên bản và hash riêng; mã cũ không bị ghi đè. Bản nháp trong trình soạn thảo tự lưu trên máy bạn.</li><li>Mỗi đội có tối đa 3 bài đang chờ kiểm tra cùng lúc; danh sách hiện vị trí trong hàng chờ. Gần hạn chót hàng chờ dài hơn, hãy nộp sớm.</li><li>Runner chạy 12 nửa lượt mẫu với bot ở cả hai phe. “Hợp lệ” chỉ xác nhận các lượt mẫu, không chứng minh bot đúng ở mọi thế cờ.</li><li>Có thể đấu tập hai phiên bản hợp lệ của đội mà không tính điểm.</li><li>Trên khán đài, mỗi replay có nút chia sẻ link, phóng to, tua 1×/2×/4× và dùng phím ← → Space.</li></ol>
+    <h2>04b / Chiến dịch boss</h2>
+    <ol><li>Năm boss do ban tổ chức viết, mạnh dần: <b>Tân binh</b> (luôn đi nước đầu tiên), <b>Thợ săn</b> (lao về đích, thấy là ăn), <b>Người gác</b> (né ô bị khắc chế, giữ loại quân cuối), <b>Kỵ sĩ</b> (tính trước nước đáp trả của bạn) và trùm cuối <b>Đại kiện tướng</b> (tìm kiếm alpha-beta).</li><li>Mỗi lượt thách đấu gồm hai ván đổi màu với boss. Được từ 1,5/2 điểm thì qua ải và mở ải kế tiếp: 1,5 điểm được ★★, thắng trắng 2–0 được ★★★. Đấu lại bao nhiêu lần cũng được (mỗi đội một lượt chạy cùng lúc); hệ thống giữ kết quả tốt nhất.</li><li>Bảng vàng xếp đội theo số ải đã qua, rồi tổng sao, rồi ai đạt trước. Chiến dịch không ảnh hưởng Elo hay điểm giải.</li><li>Boss cũng tuân theo giới hạn thời gian như bot của bạn. Gợi ý: đọc mã ba bot mẫu, rồi tìm cách thắng từng boss bằng chiến thuật riêng.</li></ol>
     <h2>05 / Ghép trận xếp hạng</h2>
-    <ol><li>Chọn một bot hợp lệ và bấm “Tìm đối thủ”. Bạn có thể hủy trước khi được ghép.</li><li>Hệ thống không ghép hai bot cùng tài khoản, ưu tiên người chưa gặp trong 24 giờ rồi đến người có Elo gần nhất; nếu chưa có ai, bot tiếp tục ở hàng chờ.</li><li>Mỗi cặp đấu hai ván đổi màu. Kết quả từng ván thắng/hòa/thua cho 1/0,5/0 điểm ván. Sau khi cả hai ván xong, tổng điểm từ 0 đến 2 quyết định kết quả cặp.</li><li>Mỗi người bắt đầu 1000 Elo. Công thức cập nhật là <code>Δ = round(K × (điểm ván / 2 − kỳ vọng Elo))</code>; K là 32, giảm dần nếu gặp lại cùng đối thủ trong 24 giờ, tối thiểu 8. Điểm cộng của người này bằng điểm trừ của người kia.</li></ol>
-    <p>Ghép xếp hạng tự động là khu vực luyện thi có điểm riêng. Điểm Elo không cộng vào điểm giải do ban tổ chức mở.</p>
-    <h2>06 / Giải đấu</h2>
-    <p>Trước hạn, chọn một phiên bản hợp lệ để đăng ký. Ban tổ chức khóa hash bot và luật, rồi mở từng vòng. Mỗi cặp cũng thi hai ván đổi màu. Thắng cặp được 1 điểm, hòa 0,5, thua 0. Đồng điểm xét Buchholz (tổng điểm của đối thủ đã đấu xong) rồi điểm ván; còn bằng nữa thì đồng hạng.</p>
-    <p>Swiss ghép các bot gần điểm, cải thiện cặp ghép để tránh tái đấu khi có thể; đây chưa phải thuật toán FIDE. Số thí sinh lẻ nhận một BYE trị giá 1 điểm cặp, không có điểm ván. Giải vòng tròn cho mỗi cặp gặp nhau một lượt.</p>
+    <ol><li>Chọn một bot hợp lệ và bấm “Tìm đối thủ”. Có thể hủy trước khi được ghép.</li><li>Hệ thống không ghép hai bot cùng đội, ưu tiên đội chưa gặp trong 24 giờ rồi đến Elo gần nhất; nếu chưa có ai, bot ở hàng chờ.</li><li>Mỗi cặp đấu hai ván đổi màu; tổng điểm ván từ 0 đến 2 quyết định kết quả cặp.</li><li>Mỗi đội bắt đầu 1000 Elo. <code>Δ = round(K × (điểm ván / 2 − kỳ vọng Elo))</code>; K là 32, giảm khi gặp lại cùng đối thủ trong 24 giờ, tối thiểu 8. Bậc: Đồng &lt; 1000 ≤ Bạc &lt; 1075 ≤ Vàng &lt; 1150 ≤ Kim cương.</li></ol>
+    <p>Ban tổ chức có thể tạm đóng đấu xếp hạng khi một vòng giải đang chạy để máy chấm ưu tiên giải. Elo không cộng vào điểm giải.</p>
+    <p><b>Giao hữu</b>: bấm tên một đội bất kỳ để mở hồ sơ (Elo, đồ thị Elo, huy hiệu, tiến độ chiến dịch) và mời đội đó đấu hai ván đổi màu với bot hợp lệ mới nhất của họ. Giao hữu không tính Elo; mỗi đội có một lượt giao hữu đang chạy cùng lúc.</p>
+    <p><b>Huy hiệu</b> (17 loại): Khai bút, Nhà phát minh, Đủ đội hình, Trận thắng đầu, Về đích, Càn quét, Chớp nhoáng (thắng trong 40 nửa lượt), Toàn vẹn (thắng không mất quân), Chuỗi 3, Lật kèo (thắng đội hơn 100 Elo), Bậc Vàng, Kim cương, Vượt ải, Hạ trùm cuối, Hoàn hảo (3 sao mọi ải), Bục vinh quang và Xuất sắc. Thắng kỹ thuật và ván đấu tập không tính.</p>
+    <h2>06 / Giải đấu, vòng chơi và xếp loại</h2>
+    <p>Trước hạn, chọn một phiên bản để đăng ký (bot đang chờ kiểm tra cũng được chọn). Khi khóa danh sách, chỉ bot <b>hợp lệ</b> mới được thi; bot lỗi bị loại khỏi giải nhưng không ảnh hưởng các đội khác. Mỗi cặp thi hai ván đổi màu.</p>
+    <ul><li><b>Swiss</b>: ghép các đội gần điểm, tránh gặp lại khi có thể. Thắng cặp 1 điểm, hòa 0,5. Số đội lẻ thì một đội nhận BYE (1 điểm, ưu tiên đội ít BYE và ít điểm). Đồng điểm xét Buchholz rồi điểm ván.</li><li><b>Vòng tròn</b>: mỗi cặp gặp nhau một lần (tối đa 32 đội).</li><li><b>Loại trực tiếp</b>: nhánh đấu theo hạt giống; các hạt giống đầu nhận BYE nếu số đội không phải lũy thừa của 2. Hòa cặp thì đội còn nhiều quân hơn sau hai ván đi tiếp, sau đó đến hạt giống cao hơn. Ban tổ chức có thể lấy top N của vòng Swiss làm hạt giống cho vòng loại trực tiếp.</li><li><b>Xếp loại</b> theo hạng: 10% đầu Xuất sắc, 20% kế Giỏi, 30% kế Khá, còn lại Đạt; đội không ghi điểm nào là Chưa đạt.</li><li>Đội vi phạm có thể bị truất quyền; các ván chưa đấu của đội đó được xử thắng cho đối thủ.</li></ul>
     <h2>07 / Dữ liệu và replay</h2>
-    <p>Mã nguồn bot chỉ chủ bài xem được qua API; tên bot, trận đấu và replay được công khai. Nếu runner tắt, bài và ván vẫn lưu trong hàng đợi. V1 chưa có khôi phục mật khẩu qua email hoặc tự xóa mã nguồn sau một thời hạn; liên hệ ban tổ chức khi cần hỗ trợ.</p>
+    <p>Mã nguồn bot chỉ thành viên đội (và ban tổ chức khi kiểm tra gian lận) xem được; tên đội, bot, trận đấu và replay được công khai. Nếu máy chấm tắt, bài và ván vẫn lưu trong hàng chờ. Quên mật khẩu: liên hệ ban tổ chức để được cấp mật khẩu tạm, rồi đổi lại trong mục tài khoản.</p>
   </article></main>
   <footer><span>OTT<span class="red">v2</span> / ARENA</span><a href="/">Trở lại đấu trường ↗</a></footer>
 </body>
