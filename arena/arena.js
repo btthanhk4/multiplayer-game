@@ -93,6 +93,15 @@ function renderAccount() {
 
 const skew = () => health ? health.server_time - Date.now()/1000 : 0;
 
+// Rough wait for a job that is `position` places back: places divided across the running slots, times the
+// recent average job time. Shown as an estimate only; a deep queue or slow bots change it.
+function etaText(position, kind) {
+  const slots = health?.runner_slots, average = health?.avg_seconds?.[kind] ?? (kind === 'validate' ? 3 : 12);
+  if (!position || !slots) return '';
+  const seconds = Math.max(5, Math.ceil(position / slots) * average);
+  return ` (ước tính ${seconds < 90 ? `${Math.round(seconds)} giây` : `${Math.round(seconds / 60)} phút`})`;
+}
+
 function renderHealth() {
   $('#service-status').textContent = health.open.read_only ? 'Đang bảo trì · chỉ xem' : health.runner_online ? `Máy chấm đang chạy · ${health.runner_slots} luồng` : 'Bài nộp được lưu · Chờ máy chấm';
   $('#service-status').classList.toggle('online', health.runner_online && !health.open.read_only);
@@ -229,7 +238,7 @@ function submissionRows() {
   $('#submission-count').textContent = `${submissions.length} PHIÊN BẢN`;
   $('#submission-list').innerHTML = !me ? '<div class="empty">Đăng nhập và lập đội để lưu chiến thuật.</div>'
     : !team ? '<div class="empty">Lập đội hoặc vào đội để nộp bot.</div>'
-    : submissions.length ? submissions.map(s => `<article class="submission"><div><strong>${escape(s.name)}</strong><small>${formatTime(s.created)} · ${escape(s.author || (s.origin === 'form' ? 'Google Form' : ''))} · ${escape(s.hash.slice(0,10))}</small></div>${badge(s.status)}<div class="submission-log">${s.position ? `Vị trí #${s.position} trong hàng chờ kiểm tra.` : escape(s.log || 'Bài đã được lưu. Chờ máy chấm tiếp nhận.')}</div><div class="submission-actions"><button class="text-link" data-source="${s.id}">Mở mã ↗</button>${s.status==='valid'?`<button class="text-link" data-boss-bot="${s.id}">Đánh boss ↗</button><button class="text-link" data-rank-bot="${s.id}">Tìm đối thủ ↗</button>`:''}</div></article>`).join('')
+    : submissions.length ? submissions.map(s => `<article class="submission"><div><strong>${escape(s.name)}</strong><small>${formatTime(s.created)} · ${escape(s.author || (s.origin === 'form' ? 'Google Form' : ''))} · ${escape(s.hash.slice(0,10))}</small></div>${badge(s.status)}<div class="submission-log">${s.position ? `Vị trí #${s.position} trong hàng chờ kiểm tra${etaText(s.position, 'validate')}.` : escape(s.log || 'Bài đã được lưu. Chờ máy chấm tiếp nhận.')}</div><div class="submission-actions"><button class="text-link" data-source="${s.id}">Mở mã ↗</button>${s.status==='valid'?`<button class="text-link" data-boss-bot="${s.id}">Đánh boss ↗</button><button class="text-link" data-rank-bot="${s.id}">Tìm đối thủ ↗</button>`:''}</div></article>`).join('')
     : '<div class="empty">Chưa có bài nộp. Bắt đầu bằng một bot mẫu ở phía trên.</div>';
   const valid = submissions.filter(s => s.status === 'valid');
   for (const id of ['#practice-a','#practice-b','#ranked-submission','#campaign-submission']) options(id, valid);
@@ -266,7 +275,7 @@ function renderCampaign(data) {
   $('#campaign-status').textContent = closed ? 'Chiến dịch đang tạm đóng để ưu tiên giải đấu.'
     : !me ? 'Đăng nhập và lập đội để thách đấu.' : !team ? 'Lập đội để thách đấu.'
     : running ? ([running.first_status, running.second_status].includes('failed') ? 'Một ván gặp sự cố hạ tầng; ban tổ chức sẽ chạy lại.'
-      : `Đang đấu Boss ${running.level} · ${running.boss}. ${position ? `Ván đang ở vị trí #${position} trong hàng chờ.` : 'Hai ván đang chạy trên server.'}`)
+      : `Đang đấu Boss ${running.level} · ${running.boss}. ${position ? `Ván đang ở vị trí #${position} trong hàng chờ${etaText(position, 'game')}.` : 'Hai ván đang chạy trên server.'}`)
     : boss?.status !== 'valid' ? 'Boss đang được máy chấm kiểm tra, chờ ít phút.'
     : 'Hai ván đổi màu với boss. Được từ 1,5 điểm là qua ải.';
   $('#campaign-runs').innerHTML = mine?.runs.length ? mine.runs.map(r => `<div class="campaign-run"><p><strong>Ải ${r.level} · ${escape(r.boss || '')}</strong><br><span class="caption">${escape(r.bot)} · ${r.status === 'done' ? `${String(r.points).replace('.', ',')}/2 điểm · ${r.stars ? `<span class="stars">${starText(r.stars)}</span>` : 'chưa qua'}` : escape(labels[r.status] || r.status)}</span></p><div class="action-row"><button class="text-link" data-watch="${r.first_match}">Ván 1</button><button class="text-link" data-watch="${r.second_match}">Ván 2</button></div></div>`).join('')
@@ -291,7 +300,7 @@ function renderRanked(data) {
   $('#ranked-queue').textContent = !health?.open.ranked_open ? 'Đấu xếp hạng đang tạm đóng để ưu tiên giải đấu.'
     : mine?.queued ? `Đang tìm đối thủ cho ${mine.queued.bot}. Có thể rời trang; bot vẫn ở hàng chờ.`
     : active ? [active.first_status,active.second_status].includes('failed') ? 'Một ván gặp sự cố hạ tầng. Ban tổ chức sẽ chạy lại; chưa tính điểm.'
-      : `Đã ghép với ${active.a===team.id?active.b_name:active.a_name}. ${position ? `Ván đang ở vị trí #${position} trong hàng chờ.` : 'Hai ván đang chạy trên server.'}`
+      : `Đã ghép với ${active.a===team.id?active.b_name:active.a_name}. ${position ? `Ván đang ở vị trí #${position} trong hàng chờ${etaText(position, 'game')}.` : 'Hai ván đang chạy trên server.'}`
     : 'Chọn bot hợp lệ để tìm một đội khác.';
   $('#ranked-standings').innerHTML = data.leaderboard.length ? data.leaderboard.map((row,index) =>
     `<tr class="${row.team_id===team?.id?'mine':''}"><td class="rank">${index < 3 ? ['🥇','🥈','🥉'][index] : index+1}</td><td>${teamLink(row.team_id, row.name)}</td><td><strong>${row.rating}</strong></td><td>${tier(row.tier)}</td><td>${row.played}</td><td>${row.wins} / ${row.draws} / ${row.losses}</td></tr>`).join('')
@@ -398,7 +407,7 @@ function renderLiveBanner() {
   if (!pending.length) { el.hidden = true; el.replaceChildren(); return; }
   const m = pending[0], running = m.status === 'running';
   el.hidden = false;
-  el.innerHTML = `<span class="live-pill ${running ? '' : 'wait'}">${running ? '● ĐANG ĐẤU' : 'ĐANG CHỜ'}</span><span><strong>${escape(m.team1)}</strong> × <strong>${escape(m.team2)}</strong> · ${escape(kinds[m.kind] || '')}${!running && m.position ? ` · vị trí #${m.position} trong hàng chờ` : ''}${pending.length > 1 ? ` · và ${pending.length - 1} ván khác` : ''}</span><button class="button ${running ? 'primary' : ''}" data-watch="${m.id}">${running ? 'Xem trực tiếp' : 'Theo dõi'} ↗</button>`;
+  el.innerHTML = `<span class="live-pill ${running ? '' : 'wait'}">${running ? '● ĐANG ĐẤU' : 'ĐANG CHỜ'}</span><span><strong>${escape(m.team1)}</strong> × <strong>${escape(m.team2)}</strong> · ${escape(kinds[m.kind] || '')}${!running && m.position ? ` · vị trí #${m.position} trong hàng chờ${etaText(m.position, 'game')}` : ''}${pending.length > 1 ? ` · và ${pending.length - 1} ván khác` : ''}</span><button class="button ${running ? 'primary' : ''}" data-watch="${m.id}">${running ? 'Xem trực tiếp' : 'Theo dõi'} ↗</button>`;
 }
 
 async function copyLink(url, label) {

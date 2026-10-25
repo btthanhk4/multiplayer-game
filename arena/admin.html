@@ -39,6 +39,7 @@
             <label class="switch"><input type="checkbox" name="ranked_open"> Mở đấu xếp hạng</label>
             <label class="switch"><input type="checkbox" name="practice_open"> Mở đấu tập</label>
             <label class="switch"><input type="checkbox" name="campaign_open"> Mở chiến dịch boss</label>
+            <label class="switch"><input type="checkbox" name="live_open"> Cho xem ván trực tiếp (tắt để máy chấm nhẹ hơn)</label>
             <label class="switch danger"><input type="checkbox" name="read_only"> Chế độ chỉ xem (bảo trì / sự cố)</label>
             <label>Thông báo hiển thị cho mọi người<textarea name="announcement" maxlength="500" rows="3" placeholder="Ví dụ: Vòng 2 bắt đầu lúc 14:00. Hạn chọn bot 13:30."></textarea></label>
             <button class="button primary">Lưu cài đặt</button>
@@ -67,6 +68,15 @@
               <div class="action-row"><button id="freeze-button" class="button">Khóa danh sách</button><button id="force-freeze" class="button">Khóa bắt buộc</button><button id="next-round-button" class="button primary">Mở vòng / Hoàn tất</button></div>
               <div class="action-row"><label class="switch"><input type="checkbox" id="auto-toggle"> Tự mở vòng</label><button id="export-button" class="button">Tải bảng điểm CSV</button></div>
               <p class="caption">Khóa chỉ được sau hạn. “Khóa bắt buộc” loại các bot còn chờ kiểm tra. Vòng mới mở khi mọi ván của vòng trước đã xong (job lỗi cần thử lại trước).</p></div>
+            <form id="tournament-edit" class="paper-card"><p class="eyebrow">CHỈNH GIẢI ĐANG CHỌN</p><h3>Sửa thông tin và hạn</h3>
+              <label>Tên giải<input name="name" minlength="3" maxlength="80"></label>
+              <label>Mô tả<textarea name="description" maxlength="500" rows="2"></textarea></label>
+              <label id="edit-deadline-field">Hạn đăng ký (giờ máy bạn)<input name="deadline" type="datetime-local"></label>
+              <label id="edit-rounds-field">Số vòng Swiss<input name="rounds" type="number" min="1" max="30"></label>
+              <div class="action-row"><button class="button primary">Lưu thay đổi</button><button type="button" class="button" id="close-now">Đóng đăng ký ngay</button><button type="button" class="button danger" id="cancel-tournament">Hủy giải</button></div>
+              <p class="caption">Hạn và số vòng chỉ đổi được khi giải còn nhận đăng ký. “Đóng đăng ký ngay” đưa hạn về hiện tại để bấm Khóa danh sách. Hủy giải sẽ hủy mọi ván chưa xong.</p></form>
+            <form id="add-entry" class="paper-card"><p class="eyebrow">THÊM ĐỘI THỦ CÔNG</p><label>Mã đội hoặc tên đội<input name="team" required maxlength="60" placeholder="K7QF2M9A hoặc Kéo Thần Tốc"></label><button class="button">Thêm vào giải bằng bot mới nhất</button><p class="caption">Dùng cho đội lỡ hạn hoặc nộp qua kênh khác. Chỉ trước khi khóa danh sách.</p></form>
+            <div class="paper-card"><p class="eyebrow">CÁC CẶP ĐẤU</p><label>Vòng<select id="admin-round"></select></label><div id="admin-round-view" class="job-list"></div></div>
             <div class="paper-card"><p class="eyebrow">BẢNG ĐIỂM</p><label>Tìm đội<input id="entry-search" type="search"></label><div class="table-scroll"><table><thead><tr><th>HẠNG</th><th>ĐỘI / BOT</th><th>XẾP LOẠI</th><th>ĐIỂM</th><th>T/H/B</th><th></th></tr></thead><tbody id="entry-body"></tbody></table></div></div>
           </div>
         </div>

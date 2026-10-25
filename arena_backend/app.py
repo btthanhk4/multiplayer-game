@@ -226,7 +226,8 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
                 'announcement': values.get('announcement', ''),
                 'open': {key: values.get(key) == '1' for key in
                          ('registration_open', 'submissions_open', 'ranked_open', 'practice_open', 'campaign_open',
-                          'read_only')}}
+                          'live_open', 'read_only')},
+                'avg_seconds': {k: round(v, 1) for k, v in store.timing().items()}}
 
     @app.get('/api/health')
     def health():
@@ -633,7 +634,8 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         moves = live['moves']
         reset = since > len(moves)
         return jsonify({**{k: v for k, v in live.items() if k != 'moves'}, 'ply': len(moves), 'reset': reset,
-                        'moves': moves if reset else moves[since:], 'viewers': touch_viewer(mid)})
+                        'moves': moves if reset else moves[since:], 'viewers': touch_viewer(mid),
+                        'live': settings().get('live_open') == '1'})
 
     @app.get('/api/me/live')
     def my_live():
@@ -666,6 +668,26 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
             bool(data.get('auto_advance')), str(data.get('description') or '')[:500],
             data.get('seed_from') or None, data.get('seed_count'))
         return jsonify(id=tid), 201
+
+    @app.post('/api/admin/tournaments/<tid>/update')
+    def update_tournament(tid):
+        actor, data = auth(True), body()
+        store.update_tournament(tid, actor, data.get('name'), data.get('description'), data.get('deadline'), data.get('rounds'))
+        return jsonify(ok=True)
+
+    @app.post('/api/admin/tournaments/<tid>/cancel')
+    def cancel_tournament(tid):
+        return jsonify(store.cancel_tournament(tid, auth(True)))
+
+    @app.post('/api/admin/tournaments/<tid>/entries')
+    def add_entry(tid):
+        actor, data = auth(True), body()
+        return jsonify(store.admin_add_entry(tid, data.get('team'), actor)), 201
+
+    @app.post('/api/admin/tournaments/<tid>/entries/<team>/remove')
+    def remove_entry(tid, team):
+        store.admin_remove_entry(tid, team, auth(True))
+        return jsonify(ok=True)
 
     @app.post('/api/admin/tournaments/<tid>/freeze')
     def freeze(tid):

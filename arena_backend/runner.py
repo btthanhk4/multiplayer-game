@@ -282,7 +282,9 @@ def observation(packet, seed, time_left=None):
 
 
 # Live viewers see a new batch of moves about this often; a 400-move game is ~6 KB per write.
-PROGRESS_INTERVAL = 0.4
+PROGRESS_INTERVAL = 1.0
+# Live viewing is a luxury: stop publishing move-by-move progress when the queue is this deep.
+LIVE_SHED_BACKLOG = 150
 
 
 class Worker:
@@ -444,6 +446,9 @@ class Worker:
                 reason = 'technical:both' if len(faults) == 2 else 'technical:' + str(next(iter(faults.values()))).split(':', 1)[0]
                 self.audit_faults(job, faults)
             last_progress = 0
+            with self.store.connect() as db:
+                live_on = self.store.settings(db).get('live_open') == '1' and db.execute(
+                    "SELECT COUNT(*) FROM jobs WHERE status='queued'").fetchone()[0] < LIVE_SHED_BACKLOG
             while not winner and not packet['state']['winner']:
                 self.check(lost)
                 if not packet['legalMoves']:
@@ -453,7 +458,7 @@ class Worker:
                     winner, reason = 'draw', 'ply_limit'
                     break
                 side = packet['state']['turn']
-                if time.monotonic() - last_progress > PROGRESS_INTERVAL:
+                if live_on and time.monotonic() - last_progress > PROGRESS_INTERVAL:
                     self.publish(job, moves, side, budgets)
                     last_progress = time.monotonic()
                 try:
@@ -470,8 +475,11 @@ class Worker:
                 if isinstance(bot, BotProcess):
                     bot.close()
         state = packet['state']
+        # The move list rebuilds the game; keep only what a result page needs (history and repetition
+        # tables are most of the size of a stored replay).
+        final = {k: v for k, v in state.items() if k not in ('history', 'repetitions')}
         return {'winner': winner or state['winner'], 'reason': reason or state['winReason'],
-                'moves': moves, 'final_state': state, 'rules_hash': RULES_HASH,
+                'moves': moves, 'final_state': final, 'rules_hash': RULES_HASH,
                 'source_hashes': {side: s['hash'] for side, s in submissions.items()},
                 'seed': seed, 'limits': LIMITS, 'execution_mode': self.executor.mode,
                 'time_used': {side: round(LIMITS['game_seconds'] - left, 3) for side, left in budgets.items()},

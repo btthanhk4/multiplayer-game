@@ -290,7 +290,9 @@ class Runner(Base):
             packet = referee.call('new')
             for move in replay['moves']:
                 packet = referee.call('move', **{k: move[k] for k in ('from', 'to')})
-            self.assertEqual(packet['state'], replay['final_state'])
+            trimmed = {k: v for k, v in packet['state'].items() if k not in ('history', 'repetitions')}
+            self.assertEqual(trimmed, replay['final_state'])
+            self.assertNotIn('history', replay['final_state'])
             self.assertLessEqual(len(replay['moves']), LIMITS['max_plies'])
         finally:
             referee.close()
@@ -1215,6 +1217,246 @@ class LiveSpectating(Base):
         with self.store.connect() as db:
             row = db.execute('SELECT status,progress FROM matches WHERE id=?', (mid,)).fetchone()
         self.assertEqual((row['status'], row['progress']), ('done', None))
+
+
+class ScaleAndFairness(Base):
+    def team_with_bot(self, name, source=HUNTER):
+        team, user = self.team(name)
+        return team, user, self.valid(team, source, name)
+
+    def test_aging_stops_boss_and_practice_games_starving_behind_ranked(self):
+        (_, ua, sa), (_, _, sb) = self.team_with_bot("Già A"), self.team_with_bot("Già B")
+        with self.store.connect(True) as db:
+            old_practice = self.store.create_match(db, sa, sb, ua)           # priority 3
+            for _ in range(3):
+                self.store.create_match(db, sa, sb, ua, kind='ranked')       # priority 2
+        job = self.store.claim('t', 'samples')
+        self.assertNotEqual(job['ref'], old_practice, 'fresh ranked games go before a fresh practice game')
+        self.store.release(job)
+        with self.store.connect(True) as db:
+            db.execute("UPDATE jobs SET created=? WHERE ref=?", (now() - 600, old_practice))   # waited 10 minutes
+        positions = self.store.queue_positions(self.store.open(), [old_practice])
+        self.assertEqual(positions[old_practice], 1)
+        self.assertEqual(self.store.claim('t', 'samples')['ref'], old_practice)
+
+    def test_validation_always_beats_aged_games(self):
+        (_, ua, sa), (_, _, sb) = self.team_with_bot("Gấp A"), self.team_with_bot("Gấp B")
+        with self.store.connect(True) as db:
+            game = self.store.create_match(db, sa, sb, ua)
+            db.execute("UPDATE jobs SET created=? WHERE ref=?", (now() - 86400, game))
+        team, user = self.team('Nộp muộn')
+        fresh = self.store.submit(team, user, 'moi', HUNTER + '\n# unique new bot\n')
+        self.assertEqual(self.store.claim('t', 'samples')['ref'], fresh)
+
+    def test_back_pressure_refuses_optional_games_but_never_tournaments(self):
+        import arena_backend.store as store_module
+        (a, ua, sa), (b, ub, sb) = self.team_with_bot('Tải A'), self.team_with_bot('Tải B')
+        old_low, old_ranked = store_module.QUEUE_CAP_LOW, store_module.QUEUE_CAP_RANKED
+        store_module.QUEUE_CAP_LOW, store_module.QUEUE_CAP_RANKED = 2, 2
+        try:
+            self.store.practice(a, ua, sa, sa)                               # two games fill the low-priority cap
+            with self.assertRaises(Problem) as caught:
+                self.store.practice(b, ub, sb, sb)
+            self.assertEqual(caught.exception.status, 429)
+            self.assertIn('quá tải', str(caught.exception))
+            with self.assertRaises(Problem):
+                self.store.friendly(b, ub, sb, a)
+            with self.store.connect(True) as db:
+                for _ in range(2):
+                    self.store.create_match(db, sa, sb, ua, kind='ranked')
+            with self.assertRaises(Problem) as caught:
+                self.store.join_ranked(b, sb)
+            self.assertEqual(caught.exception.status, 429)
+            with self.store.connect(True) as db:                              # tournaments are exempt
+                self.store.create_match(db, sa, sb, ua, kind='tournament')
+        finally:
+            store_module.QUEUE_CAP_LOW, store_module.QUEUE_CAP_RANKED = old_low, old_ranked
+
+    def test_same_new_bot_from_many_teams_is_graded_once(self):
+        source = HUNTER + '\n# everybody pastes this exact file\n'
+        teams = [self.team(f'Cùng mã {i}') for i in range(5)]
+        ids = [self.store.submit(team, user, 'sao chép', source) for team, user in teams]
+        with self.store.connect() as db:
+            jobs = db.execute("SELECT COUNT(*) FROM jobs WHERE kind='validate'").fetchone()[0]
+            self.assertEqual(jobs, 1, 'one check for five identical submissions')
+            statuses = [db.execute('SELECT status FROM submissions WHERE id=?', (i,)).fetchone()[0] for i in ids]
+        self.assertEqual(statuses, ['queued'] * 5)
+        job = self.store.claim('t', 'samples')
+        self.assertEqual(job['ref'], ids[0])
+        self.assertTrue(self.store.finish(job, {'valid': True, 'log': 'ổn'}))
+        with self.store.connect() as db:
+            rows = db.execute('SELECT status,log FROM submissions ORDER BY created,rowid').fetchall()
+        self.assertEqual([r['status'] for r in rows], ['valid'] * 5)
+        self.assertIn('Dùng chung', rows[4]['log'])
+        # Later copies reuse the finished result instead of queueing anything.
+        again = self.store.submit(teams[0][0], teams[0][1], 'lại', source, limit=False)
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT status FROM submissions WHERE id=?', (again,)).fetchone()[0], 'valid')
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM jobs WHERE kind='validate'").fetchone()[0], 1)
+
+    def test_followers_share_a_rejection_an_outage_and_the_retry(self):
+        source = 'def choose_move(o):\n    return 1 +\n'                      # contains choose_move, so it is accepted for checking
+        (t1, u1), (t2, u2) = self.team('Lỗi A'), self.team('Lỗi B')
+        first = self.store.submit(t1, u1, 'a', source)
+        second = self.store.submit(t2, u2, 'b', source)
+        for _ in range(3):                                                   # infrastructure fails three times
+            job = self.store.claim('t', 'samples')
+            self.store.fail(job, 'docker chết')
+        with self.store.connect() as db:
+            self.assertEqual({r[0] for r in db.execute('SELECT status FROM submissions')}, {'failed'})
+            jid = db.execute("SELECT id FROM jobs WHERE kind='validate'").fetchone()[0]
+        self.store.retry(jid, 'admin')
+        with self.store.connect() as db:
+            self.assertEqual({r[0] for r in db.execute('SELECT status FROM submissions')}, {'queued'})
+        job = self.store.claim('t', 'samples')
+        self.store.finish(job, {'valid': False, 'log': 'SyntaxError'})
+        with self.store.connect() as db:
+            rows = {r['id']: r['status'] for r in db.execute('SELECT id,status FROM submissions')}
+        self.assertEqual(rows, {first: 'rejected', second: 'rejected'})
+
+    def test_live_view_can_be_switched_off_and_sheds_load(self):
+        from arena_backend import runner as runner_module
+        team, user = self.team('Tắt xem')
+        a, b = self.valid(team, HUNTER, 'a'), self.valid(team, HUNTER, 'b')
+
+        def snapshots():
+            with self.store.connect(True) as db:
+                self.store.create_match(db, a, b, requester=user)
+            seen, real = [], self.store.progress
+            self.store.progress = lambda job, state: (seen.append(state), real(job, state))
+            old, runner_module.PROGRESS_INTERVAL = runner_module.PROGRESS_INTERVAL, 0
+            try:
+                Worker(self.store, TrustedExecutor()).run_once()
+            finally:
+                runner_module.PROGRESS_INTERVAL = old
+                self.store.progress = real
+            return seen
+        self.assertGreater(len(snapshots()), 0)
+        self.store.set_settings('admin', {'live_open': False})
+        self.assertEqual(snapshots(), [], 'no per-move writes while live viewing is off')
+        self.store.set_settings('admin', {'live_open': True})
+        old, runner_module.LIVE_SHED_BACKLOG = runner_module.LIVE_SHED_BACKLOG, 0
+        try:
+            self.assertEqual(snapshots(), [], 'and none while the queue is deeper than the shed threshold')
+        finally:
+            runner_module.LIVE_SHED_BACKLOG = old
+        self.register('liveflag')
+        self.assertTrue(self.client.get('/api/health').json['open']['live_open'])
+
+    def test_health_reports_average_job_times_for_wait_estimates(self):
+        team, user, sid = self.team_with_bot('Ước tính')
+        with self.store.connect(True) as db:
+            self.store.create_match(db, sid, sid, user)
+        job = self.store.claim('t', 'samples')
+        with self.store.connect(True) as db:
+            db.execute('UPDATE jobs SET started=? WHERE id=?', (now() - 4, job['id']))
+        self.store.finish(job, {'winner': 'draw', 'reason': 'quiet', 'moves': []})
+        average = self.client.get('/api/health').json['avg_seconds']
+        self.assertAlmostEqual(average['game'], 4, delta=1.5)
+
+
+class AdminTournaments(Base):
+    def test_edit_name_deadline_rounds_then_only_cosmetic_changes_after_freeze(self):
+        tid = self.tournament('swiss', rounds=3)
+        self.store.update_tournament(tid, 'admin', name='  Tên   mới  ', description='Thể lệ', rounds=5)
+        later = now() + 7200
+        self.store.update_tournament(tid, 'admin', deadline=later)
+        with self.store.connect() as db:
+            t = db.execute('SELECT * FROM tournaments WHERE id=?', (tid,)).fetchone()
+        self.assertEqual((t['name'], t['description'], t['rounds'], t['deadline']), ('Tên mới', 'Thể lệ', 5, later))
+        for bad in ({'name': 'ab'}, {'rounds': 0}, {'rounds': 31}, {'rounds': 2.5}, {'deadline': now() + 86400 * 400},
+                    {'deadline': 'soon'}, {}):
+            with self.assertRaises(Problem, msg=bad):
+                self.store.update_tournament(tid, 'admin', **bad)
+        with self.assertRaises(Problem) as caught:
+            self.store.update_tournament('nope', 'admin', name='Không có')
+        self.assertEqual(caught.exception.status, 404)
+        self.entrants(tid, 2)
+        self.close_deadline(tid)
+        self.store.freeze(tid, 'admin')
+        self.store.update_tournament(tid, 'admin', name='Đổi tên sau khi khóa')
+        with self.assertRaises(Problem) as caught:
+            self.store.update_tournament(tid, 'admin', deadline=now() + 600)
+        self.assertEqual(caught.exception.status, 409)
+
+    def test_closing_now_makes_the_tournament_freezable(self):
+        tid = self.tournament('swiss', rounds=2)
+        self.entrants(tid, 3)
+        with self.assertRaises(Problem):
+            self.store.freeze(tid, 'admin')                    # deadline is still in the future
+        self.store.update_tournament(tid, 'admin', deadline=now())
+        self.assertEqual(self.store.freeze(tid, 'admin')['accepted'], 3)
+
+    def test_cancel_stops_games_and_blocks_further_rounds(self):
+        tid = self.tournament('swiss', rounds=2)
+        self.entrants(tid, 4)
+        self.close_deadline(tid)
+        self.store.freeze(tid, 'admin')
+        self.store.next_round(tid, 'admin')
+        result = self.store.cancel_tournament(tid, 'admin')
+        self.assertEqual(result['games_cancelled'], 4)
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT status FROM tournaments WHERE id=?', (tid,)).fetchone()[0], 'cancelled')
+            self.assertEqual({r[0] for r in db.execute('SELECT status FROM matches')}, {'cancelled'})
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM jobs WHERE status='queued' AND kind='game'").fetchone()[0], 0)
+        self.assertIsNone(self.store.claim('t', 'samples'))
+        for call in (lambda: self.store.cancel_tournament(tid, 'admin'), lambda: self.store.next_round(tid, 'admin')):
+            with self.assertRaises(Problem):
+                call()
+
+    def test_add_entry_by_code_name_or_id_and_remove_before_freeze(self):
+        tid = self.tournament('swiss', rounds=2)
+        late, _ = self.team('Đội nộp muộn')
+        self.valid(late, name='bản cũ')
+        newest = self.valid(late, FIRST, 'bản mới')
+        self.close_deadline(tid)                               # after the deadline admins may still add teams
+        with self.store.connect() as db:
+            code = db.execute('SELECT code FROM teams WHERE id=?', (late,)).fetchone()[0]
+        self.assertEqual(self.store.admin_add_entry(tid, code.lower(), 'admin')['team'], 'Đội nộp muộn')
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT submission_id FROM entries WHERE team_id=?', (late,)).fetchone()[0], newest)
+        self.assertEqual(self.store.admin_add_entry(tid, 'đội NỘP muộn', 'admin')['team'], 'Đội nộp muộn')   # idempotent
+        empty, _ = self.team('Chưa có bot')
+        for ref, status in (('', 400), ('khong-co-doi', 404), ('Chưa có bot', 409)):
+            with self.assertRaises(Problem) as caught:
+                self.store.admin_add_entry(tid, ref, 'admin')
+            self.assertEqual(caught.exception.status, status, ref)
+        del empty
+        with self.assertRaises(Problem) as caught:
+            self.store.admin_add_entry(tid, 'b0550000000000000000b055', 'admin')
+        self.assertEqual(caught.exception.status, 404)
+        self.store.admin_remove_entry(tid, late, 'admin')
+        with self.assertRaises(Problem) as caught:
+            self.store.admin_remove_entry(tid, late, 'admin')
+        self.assertEqual(caught.exception.status, 404)
+        self.store.admin_add_entry(tid, code, 'admin')
+        rival, _ = self.team('Đội đối thủ')
+        self.valid(rival)
+        self.store.admin_add_entry(tid, 'Đội đối thủ', 'admin')
+        self.store.freeze(tid, 'admin')
+        with self.assertRaises(Problem) as caught:
+            self.store.admin_remove_entry(tid, rival, 'admin')
+        self.assertEqual(caught.exception.status, 409)
+        with self.assertRaises(Problem):
+            self.store.admin_add_entry(tid, code, 'admin')
+
+    def test_http_endpoints_need_an_admin(self):
+        tid = self.tournament('swiss', rounds=2)
+        self.register('plain_player')
+        for path, body in ((f'/admin/tournaments/{tid}/update', {'name': 'Hack'}), (f'/admin/tournaments/{tid}/cancel', {}),
+                           (f'/admin/tournaments/{tid}/entries', {'team': 'x'})):
+            self.assertEqual(self.post(path, body).status_code, 403, path)
+        with self.store.connect(True) as db:
+            db.execute("UPDATE users SET role='admin' WHERE username='plain_player'")
+        self.assertEqual(self.post(f'/admin/tournaments/{tid}/update', {'name': 'Giải của BTC'}).status_code, 200)
+        team, _ = self.team('Qua HTTP')
+        self.valid(team)
+        added = self.post(f'/admin/tournaments/{tid}/entries', {'team': 'Qua HTTP'})
+        self.assertEqual(added.status_code, 201, added.json)
+        self.assertEqual(self.post(f'/admin/tournaments/{tid}/entries/{team}/remove', {}).status_code, 200)
+        self.assertEqual(self.post(f'/admin/tournaments/{tid}/cancel', {}).status_code, 200)
+        listing = self.client.get('/api/tournaments').json['items']
+        self.assertEqual([(t['name'], t['status']) for t in listing], [('Giải của BTC', 'cancelled')])
 
 
 class AdminMatches(Base):

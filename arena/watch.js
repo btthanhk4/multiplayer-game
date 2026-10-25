@@ -5,7 +5,8 @@
 import {$, escape, api, notice, kinds, formatTime, badge, board, outcome, newGame, pieceCounts, teamLink,
   extendStates, compactMoves} from './common.js';
 
-const MAX_WATCH = 4;
+// Live viewing is a luxury for the grader and the API, so each person watches at most two boards.
+const MAX_WATCH = 2;
 const LIVE = ['queued', 'running', 'failed'];
 const SHORT = {rock: 'Đ', paper: 'L', scissors: 'K'};
 const SIDE = {p1: 'Xanh', p2: 'Đỏ'};
@@ -31,6 +32,7 @@ export function createWatch(ctx) {
     if (item.offline) return '<span class="live-pill off">MẤT KẾT NỐI</span> Đang thử lại…';
     const viewers = item.viewers > 1 ? ` <span class="viewers">· ${item.viewers} người đang xem</span>` : '';
     if (item.status === 'queued') return `<span class="live-pill wait">ĐANG CHỜ</span> Máy chấm sẽ nhận ván này sớm${l.position ? ` · vị trí #${l.position}` : ''}${viewers}`;
+    if (item.status === 'running' && item.liveOff) return `<span class="live-pill wait">ĐANG CHẠY</span> Xem trực tiếp đang tắt để ưu tiên chấm bài · bản phát lại sẽ có khi ván kết thúc${viewers}`;
     if (item.status === 'running') {
       const turn = l.thinking ? ` · <b>${SIDE[l.thinking]}</b> đang nghĩ` : ' · đang khởi động sandbox';
       const left = l.left ? ` · ⏱ Xanh ${clock(l.left.p1)} / Đỏ ${clock(l.left.p2)}` : '';
@@ -150,7 +152,7 @@ export function createWatch(ctx) {
       throw error;
     }
     const changed = data.status !== item.status || item.offline;
-    item.offline = false; item.viewers = data.viewers;
+    item.offline = false; item.viewers = data.viewers; item.liveOff = data.live === false;
     item.live = {thinking: data.thinking, left: data.left, position: data.position};
     if (data.reset) setMoves(item, data.moves);
     else if (data.moves.length) { item.moves.push(...data.moves); extendStates(item.states, data.moves); }
@@ -160,7 +162,7 @@ export function createWatch(ctx) {
     if (changed) skeleton(item.id); else paint(item.id);
   }
 
-  function scheduleLive(delay = 1500) {
+  function scheduleLive(delay = 2000) {
     clearTimeout(liveTimer);
     if (ctx.tab() !== 'watch' || document.hidden) return;
     if (![...watched.values()].some(item => LIVE.includes(item.status))) return;
@@ -178,7 +180,8 @@ export function createWatch(ctx) {
         if (watched.has(item.id) && item.meta) paint(item.id);
       }
     }));
-    scheduleLive(worst ? Math.min(15000, 1500 * 2 ** worst) : watched.size > 1 ? 2200 : 1500);
+    const quiet = items.some(item => item.liveOff);   // nothing new will arrive while live viewing is off
+    scheduleLive(worst ? Math.min(15000, 2000 * 2 ** worst) : quiet ? 6000 : watched.size > 1 ? 3000 : 2000);
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleLive(100); });
 
@@ -233,7 +236,7 @@ export function createWatch(ctx) {
 
   async function toggle(id, opts = {}) {
     if (watched.has(id)) { drop(id); return; }
-    if (watched.size >= MAX_WATCH) throw new Error('Bạn đang xem bốn bàn. Bỏ một bàn để mở trận khác.');
+    if (watched.size >= MAX_WATCH) throw new Error('Bạn đang xem hai bàn. Bỏ một bàn để mở trận khác.');
     if (ctx.tab() !== 'watch') ctx.setTab('watch');
     if (!watched.size) $('#watch-grid').replaceChildren();
     const item = {id, meta: null, moves: [], states: [newGame()], position: 0, playing: false, speed: 1, clock: 0, follow: false,

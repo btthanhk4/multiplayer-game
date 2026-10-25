@@ -25,6 +25,10 @@ parser.add_argument('--seconds', type=int, default=120)
 parser.add_argument('--interval', type=float, default=15, help='Dashboard refresh period per user')
 parser.add_argument('--invite', default='')
 parser.add_argument('--unique-bots', action='store_true', help='Make every bot distinct so each one is validated')
+parser.add_argument('--storm', action='store_true', help='Solo teams: everyone submits a unique bot at once, then everyone '
+                    'asks for a ranked match at once; waits for the grader and reports time-to-result')
+parser.add_argument('--storm-timeout', type=int, default=3600)
+parser.add_argument('--shared-bot', action='store_true', help='With --storm: everyone submits the identical bundled sample (checked once)')
 args = parser.parse_args()
 SOURCE = (Path(__file__).resolve().parents[1] / 'sdk/examples/hunter.py').read_text(encoding='utf-8')
 latencies, statuses, lock = [], Counter(), threading.Lock()
@@ -120,11 +124,89 @@ def report(title):
     statuses.clear()
 
 
+
+def solo(index_client):
+    index, client = index_client
+    status, _ = client.call('/team', {'name': f'Storm {run} {index}'})
+    if status != 201:
+        return None
+    started = time.monotonic()
+    source = SOURCE if args.shared_bot else SOURCE + f'\n# storm {run} {index}\n'
+    status, _ = client.call('/submissions', {'name': 'Storm', 'source': source})
+    client.close()
+    return (client, started) if status == 201 else None
+
+
+def wait_until(entries, check, label):
+    """Poll every client until check(client) is truthy; returns seconds-to-done per client."""
+    pending, done, begin = dict(enumerate(entries)), {}, time.monotonic()
+    while pending and time.monotonic() - begin < args.storm_timeout:
+        with ThreadPoolExecutor(args.concurrency) as pool:
+            finished = [i for i, ok in zip(list(pending), pool.map(lambda i: check(pending[i][0]), list(pending))) if ok]
+        for i in finished:
+            done[i] = time.monotonic() - pending.pop(i)[1]
+        print(f'  {label}: {len(done)}/{len(entries)} done', flush=True)
+        if pending:
+            time.sleep(4)
+    return sorted(done.values())
+
+
+def summary(title, values, total):
+    if not values:
+        print(f'{title}: none finished'); return
+    print(f'{title}: {len(values)}/{total} finished; wait p50={values[len(values)//2]:.0f}s '
+          f'p95={values[int(len(values)*.95)-1]:.0f}s max={values[-1]:.0f}s')
+
+
+def storm(clients):
+    begin = time.monotonic()
+    with ThreadPoolExecutor(args.concurrency) as pool:
+        entries = [e for e in pool.map(solo, enumerate(clients)) if e]
+    print(f'{len(entries)} solo teams submitted a unique bot in {time.monotonic() - begin:.1f}s')
+    report('team + submit burst')
+
+    def validated(client):
+        _, payload = client.call('/submissions', label='poll:submissions')
+        items = payload.get('items') or []
+        client.close()
+        return bool(items) and items[0]['status'] in ('valid', 'rejected')
+    values = wait_until(entries, validated, 'validated')
+    summary('validation', values, len(entries))
+
+    begin = time.monotonic()
+
+    def queue(entry):
+        client, _ = entry
+        _, payload = client.call('/submissions', label='poll:submissions')
+        items = [i for i in payload.get('items') or [] if i['status'] == 'valid']
+        if not items:
+            return entry
+        status, _ = client.call('/ranked/queue', {'submission_id': items[0]['id']})
+        client.close()
+        return (client, time.monotonic()) if status in (200, 201) else None
+    with ThreadPoolExecutor(args.concurrency) as pool:
+        queued = [e for e in pool.map(queue, entries) if e]
+    print(f'{len(queued)} teams asked for a ranked match in {time.monotonic() - begin:.1f}s')
+    report('ranked burst')
+
+    def played(client):
+        _, payload = client.call('/ranked', label='poll:ranked')
+        client.close()
+        series = ((payload.get('mine') or {}).get('series')) or []
+        return any(row['status'] == 'done' for row in series)
+    values = wait_until(queued, played, 'ranked results')
+    summary('ranked (queue -> both games finished)', values, len(queued))
+    report('polling while the grader worked')
+
+
 started = time.monotonic()
 with ThreadPoolExecutor(args.concurrency) as pool:
     clients = [c for c in pool.map(student, range(args.users)) if c]
 print(f'Registered {len(clients)}/{args.users} in {time.monotonic() - started:.1f}s')
 report('registration')
+if args.storm:
+    storm(clients)
+    raise SystemExit(0)
 with ThreadPoolExecutor(args.concurrency) as pool:
     list(pool.map(team_up, enumerate(clients[i:i+3] for i in range(0, len(clients), 3))))
 report('teams and submissions')

@@ -25,8 +25,15 @@ PRIORITY = {'validate': 0, 'tournament': 1, 'ranked': 2, 'campaign': 3, 'friendl
 TEAM_SIZE = int(os.getenv('ARENA_TEAM_SIZE', '4'))
 PENDING_PER_TEAM = int(os.getenv('ARENA_PENDING_PER_TEAM', '3'))
 CAPACITY = {'round_robin': 32, 'swiss': 2000, 'knockout': 1024}
+# Back-pressure: refuse new optional games when this many are already waiting, so one stampede of
+# practice/boss/ranked requests cannot bury the grader for hours. Tournament games are never refused.
+QUEUE_CAP_LOW = int(os.getenv('ARENA_QUEUE_CAP_LOW', '2000'))        # practice, friendly, campaign
+QUEUE_CAP_RANKED = int(os.getenv('ARENA_QUEUE_CAP_RANKED', '4000'))  # ranked games
+# A waiting job moves up one priority level per this many seconds, at most AGING_LEVELS levels, so a
+# steady stream of higher-priority work cannot starve boss/practice games forever. Validation always goes first.
+AGING_SECONDS, AGING_LEVELS = 300.0, 1.5
 DEFAULT_SETTINGS = {'registration_open': '1', 'submissions_open': '1', 'ranked_open': '1',
-                    'practice_open': '1', 'campaign_open': '1', 'read_only': '0', 'announcement': ''}
+                    'practice_open': '1', 'campaign_open': '1', 'live_open': '1', 'read_only': '0', 'announcement': ''}
 # Share of ranked teams (cumulative) that reach each classification.
 TIERS = [(0.10, 'Xuất sắc'), (0.30, 'Giỏi'), (0.60, 'Khá'), (1.0, 'Đạt')]
 ELO_TIERS = [(1150, 'Kim cương'), (1075, 'Vàng'), (1000, 'Bạc'), (0, 'Đồng')]
@@ -630,7 +637,7 @@ class Store:
         sid = uid()
         # Hundreds of freshmen submit the unchanged sample bots; reuse a finished check.
         known = db.execute("SELECT status,log FROM submissions WHERE hash=? AND checked=? "
-                           "AND status IN ('valid','rejected') ORDER BY created DESC LIMIT 1",
+                           "AND status IN ('valid','rejected') ORDER BY created DESC,rowid DESC LIMIT 1",
                            (digest, ENGINE_KEY)).fetchone()
         if known:
             note = ' (Dùng lại kết quả của bản có cùng mã.)'
@@ -639,24 +646,43 @@ class Store:
                        'VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                        (sid, team, author, name, source, digest, known['status'], log, now(), origin, ENGINE_KEY))
         else:
-            db.execute('INSERT INTO submissions(id,team_id,author,name,source,hash,created,origin) '
-                       'VALUES(?,?,?,?,?,?,?,?)', (sid, team, author, name, source, digest, now(), origin))
-            self.job(db, 'validate', sid, PRIORITY['validate'])
+            # Hundreds of teams submit the same sample at the same minute: grade it once and let the
+            # others wait for that result instead of queueing hundreds of identical checks.
+            inflight = db.execute("SELECT 1 FROM submissions s JOIN jobs j ON j.kind='validate' AND j.ref=s.id "
+                                  "WHERE s.hash=? AND j.status IN ('queued','running') LIMIT 1", (digest,)).fetchone()
+            note = 'Đang dùng chung lượt kiểm tra của bản có cùng mã (đang chờ máy chấm).' if inflight else ''
+            db.execute('INSERT INTO submissions(id,team_id,author,name,source,hash,log,created,origin) '
+                       'VALUES(?,?,?,?,?,?,?,?,?)', (sid, team, author, name, source, digest, note, now(), origin))
+            if not inflight:
+                self.job(db, 'validate', sid, PRIORITY['validate'])
         self.audit(db, author or 'system', 'submission.created', {'id': sid, 'team': team, 'origin': origin})
         return sid
 
-    @staticmethod
-    def queue_positions(db, refs):
-        positions = {}
+    # Validation first; everything else by priority, moving up a level for every AGING_SECONDS waited.
+    EFFECTIVE = (f"CASE WHEN priority=0 THEN -10.0 ELSE priority - MIN({AGING_LEVELS}, (? - created)/{AGING_SECONDS}) END")
+
+    @classmethod
+    def queue_positions(cls, db, refs):
+        positions, moment = {}, now()
         for ref in refs:
-            job = db.execute("SELECT priority,created,rowid rid FROM jobs WHERE ref=? AND status='queued'", (ref,)).fetchone()
+            job = db.execute(f"SELECT created,rowid rid,{cls.EFFECTIVE} eff FROM jobs WHERE ref=? AND status='queued'",
+                             (moment, ref)).fetchone()
             if job:
-                # Same order as claim(): priority, then creation time, then insertion order.
+                # Same order as claim(): effective priority, then creation time, then insertion order.
                 positions[ref] = 1 + db.execute(
-                    "SELECT COUNT(*) FROM jobs WHERE status='queued' AND (priority<? OR (priority=? AND "
-                    "(created<? OR (created=? AND rowid<?))))",
-                    (job['priority'], job['priority'], job['created'], job['created'], job['rid'])).fetchone()[0]
+                    f"SELECT COUNT(*) FROM jobs WHERE status='queued' AND ({cls.EFFECTIVE}<? OR ({cls.EFFECTIVE}=? AND "
+                    f"(created<? OR (created=? AND rowid<?))))",
+                    (moment, job['eff'], moment, job['eff'], job['created'], job['created'], job['rid'])).fetchone()[0]
         return positions
+
+    @staticmethod
+    def check_capacity(db, kind):
+        low = kind in ('practice', 'friendly', 'campaign')
+        limit, level = (QUEUE_CAP_LOW, 3) if low else (QUEUE_CAP_RANKED, 2)
+        waiting = db.execute("SELECT COUNT(*) FROM jobs WHERE kind='game' AND status='queued' AND priority=?",
+                             (level,)).fetchone()[0]
+        if waiting >= limit:
+            raise Problem(f'Máy chấm đang quá tải ({waiting} ván đang chờ). Hãy thử lại sau ít phút.', 429)
 
     # ---- matches and ranked ladder ---------------------------------------
 
@@ -671,6 +697,7 @@ class Store:
     def practice(self, team, actor, a, b):
         with self.connect(True) as db:
             self.require_open(db, 'practice_open', 'Đấu tập đang tạm đóng để ưu tiên giải đấu.')
+            self.check_capacity(db, 'practice')
             for sid in (a, b):
                 if not db.execute("SELECT 1 FROM submissions WHERE id=? AND team_id=? AND status='valid'",
                                   (sid, team)).fetchone():
@@ -716,6 +743,7 @@ class Store:
     def join_ranked(self, team, sid, actor=None):
         with self.connect(True) as db:
             self.require_open(db, 'ranked_open', 'Đấu xếp hạng đang tạm đóng để ưu tiên giải đấu.')
+            self.check_capacity(db, 'ranked')
             if not db.execute("SELECT 1 FROM submissions WHERE id=? AND team_id=? AND status='valid'",
                               (sid, team)).fetchone():
                 raise Problem('Chỉ được ghép trận với bot hợp lệ của đội bạn.')
@@ -873,6 +901,7 @@ class Store:
     def challenge(self, team, actor, level, sid):
         with self.connect(True) as db:
             self.require_open(db, 'campaign_open', 'Chiến dịch đang tạm đóng để ưu tiên giải đấu.')
+            self.check_capacity(db, 'campaign')
             boss = None
             if type(level) is int:
                 boss = db.execute('SELECT b.*,s.status FROM bosses b JOIN submissions s ON s.id=b.submission_id '
@@ -917,6 +946,7 @@ class Store:
     def friendly(self, team, actor, sid, opponent):
         with self.connect(True) as db:
             self.require_open(db, 'practice_open', 'Giao hữu đang tạm đóng để ưu tiên giải đấu.')
+            self.check_capacity(db, 'friendly')
             if opponent == team:
                 raise Problem('Hãy chọn một đội khác. Muốn so hai bot của đội, dùng Đấu tập.')
             if not db.execute("SELECT 1 FROM submissions WHERE id=? AND team_id=? AND status='valid'",
@@ -926,7 +956,7 @@ class Store:
             if not other:
                 raise Problem('Không tìm thấy đội đối thủ.', 404)
             rival = db.execute("SELECT id FROM submissions WHERE team_id=? AND status='valid' "
-                               'ORDER BY created DESC LIMIT 1', (opponent,)).fetchone()
+                               'ORDER BY created DESC,rowid DESC LIMIT 1', (opponent,)).fetchone()
             if not rival:
                 raise Problem(f'Đội {other["name"]} chưa có bot hợp lệ để giao hữu.', 409)
             if db.execute("SELECT 1 FROM matches m WHERE m.kind='friendly' AND m.status IN ('queued','running') "
@@ -1026,7 +1056,7 @@ class Store:
                 position = 1 + db.execute('SELECT COUNT(*) FROM ratings WHERE played>0 AND rating>?',
                                           (value,)).fetchone()[0]
             bot = db.execute("SELECT name FROM submissions WHERE team_id=? AND status='valid' "
-                             'ORDER BY created DESC LIMIT 1', (team,)).fetchone()
+                             'ORDER BY created DESC,rowid DESC LIMIT 1', (team,)).fetchone()
             campaign = self.campaign_progress(db, team)
             return {
                 **dict(row), 'system': system,
@@ -1126,6 +1156,79 @@ class Store:
         if seed_from:
             self.freeze(tid, actor)
         return tid
+
+    def update_tournament(self, tid, actor, name=None, description=None, deadline=None, rounds=None):
+        """Rename, re-describe, move the deadline or change the Swiss round count (open tournaments only)."""
+        with self.connect(True) as db:
+            t = db.execute('SELECT * FROM tournaments WHERE id=?', (tid,)).fetchone()
+            if not t:
+                raise Problem('Không tìm thấy giải.', 404)
+            changes = {}
+            if name is not None:
+                label = ' '.join(str(name).split())
+                if not 3 <= len(label) <= 80:
+                    raise Problem('Tên giải cần 3–80 ký tự.')
+                changes['name'] = label
+            if description is not None:
+                changes['description'] = str(description).strip()[:500]
+            if deadline is not None or rounds is not None:
+                if t['status'] != 'open':
+                    raise Problem('Chỉ đổi hạn hoặc số vòng khi giải còn nhận đăng ký.', 409)
+                if deadline is not None:
+                    if type(deadline) not in (int, float) or not now() - 86400 <= deadline <= now() + 86400 * 365:
+                        raise Problem('Hạn đăng ký phải nằm trong một năm tới.')
+                    changes['deadline'] = float(deadline)
+                if rounds is not None:
+                    if type(rounds) is not int or not 1 <= rounds <= 30:
+                        raise Problem('Số vòng Swiss cần từ 1 đến 30.')
+                    changes['rounds'] = rounds
+            if not changes:
+                raise Problem('Không có thay đổi nào.')
+            db.execute(f"UPDATE tournaments SET {','.join(f'{k}=?' for k in changes)} WHERE id=?", (*changes.values(), tid))
+            self.audit(db, actor, 'tournament.updated', {'id': tid, **changes})
+
+    def cancel_tournament(self, tid, actor):
+        with self.connect(True) as db:
+            t = db.execute('SELECT * FROM tournaments WHERE id=?', (tid,)).fetchone()
+            if not t:
+                raise Problem('Không tìm thấy giải.', 404)
+            if t['status'] in ('completed', 'cancelled'):
+                raise Problem('Giải đã kết thúc hoặc đã hủy.', 409)
+            games = db.execute(f"SELECT m.id FROM matches m JOIN pairings p ON p.id=m.pairing_id WHERE p.tournament_id=? "
+                               f"AND m.status IN {UNFINISHED}", (tid,)).fetchall()
+            for game in games:
+                self.cancel_match(db, game['id'])
+            db.execute("UPDATE tournaments SET status='cancelled',auto_advance=0 WHERE id=?", (tid,))
+            self.audit(db, actor, 'tournament.cancelled', {'id': tid, 'games_cancelled': len(games)})
+            return {'games_cancelled': len(games)}
+
+    def admin_add_entry(self, tid, reference, actor):
+        """Enter a team by id, join code or exact name using its newest usable bot (also after the deadline)."""
+        reference = str(reference or '').strip()
+        if not reference:
+            raise Problem('Nhập mã đội hoặc tên đội.')
+        with self.connect(True) as db:
+            team = db.execute('SELECT * FROM teams WHERE id=? OR code=? OR name_key=?',
+                              (reference, reference.upper(), name_key(reference))).fetchone()
+            if not team or team['status'] == 'system':
+                raise Problem('Không tìm thấy đội.', 404)
+            sub = db.execute("SELECT id FROM submissions WHERE team_id=? AND status IN ('valid','queued','running') "
+                             "ORDER BY (status='valid') DESC,created DESC,rowid DESC LIMIT 1", (team['id'],)).fetchone()
+            if not sub:
+                raise Problem(f"Đội {team['name']} chưa có bot hợp lệ hoặc đang chờ kiểm tra.", 409)
+            self.join(team['id'], tid, sub['id'], actor, db, admin=True)
+            return {'team': team['name']}
+
+    def admin_remove_entry(self, tid, team, actor):
+        with self.connect(True) as db:
+            t = db.execute('SELECT status FROM tournaments WHERE id=?', (tid,)).fetchone()
+            if not t:
+                raise Problem('Không tìm thấy giải.', 404)
+            if t['status'] != 'open':
+                raise Problem('Giải đã khóa danh sách. Dùng “Truất quyền” để loại đội.', 409)
+            if not db.execute('DELETE FROM entries WHERE tournament_id=? AND team_id=?', (tid, team)).rowcount:
+                raise Problem('Đội không có trong giải.', 404)
+            self.audit(db, actor, 'entry.removed', {'tournament': tid, 'team': team})
 
     def set_auto_advance(self, tid, actor, value):
         with self.connect(True) as db:
@@ -1482,7 +1585,8 @@ class Store:
                 db.execute('UPDATE jobs SET status=?,token=NULL,error=? WHERE id=?',
                            (status, 'Runner mất kết nối; đã thu hồi lượt xử lý.', job['id']))
                 self.mark(db, job, status, 'Chờ runner khôi phục.')
-            row = db.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY priority,created,rowid LIMIT 1").fetchone()
+            row = db.execute(f"SELECT * FROM jobs WHERE status='queued' ORDER BY {self.EFFECTIVE},created,rowid LIMIT 1",
+                             (now(),)).fetchone()
             if not row:
                 return None
             token = uid()
@@ -1499,6 +1603,12 @@ class Store:
             db.execute('UPDATE submissions SET status=?,log=? WHERE id=?', (status, log, job['ref']))
         else:
             db.execute('UPDATE submissions SET status=? WHERE id=?', (status, job['ref']))
+        if job['kind'] == 'validate' and status in ('failed', 'queued'):
+            # Teams sharing this check follow the leader through an outage and its retry.
+            before, after = ('queued', 'failed') if status == 'failed' else ('failed', 'queued')
+            db.execute("UPDATE submissions SET status=?,log=? WHERE status=? AND NOT EXISTS (SELECT 1 FROM jobs j "
+                       "WHERE j.kind='validate' AND j.ref=submissions.id) AND hash=(SELECT hash FROM submissions "
+                       "WHERE id=?)", (after, (log or '')[:1000] if status == 'failed' else '', before, job['ref']))
 
     @staticmethod
     def owns(db, job):
@@ -1529,6 +1639,14 @@ class Store:
         progress = json.loads(row['progress']) if row['progress'] else {}
         return {'status': row['status'], 'moves': progress.get('moves') or [], 'thinking': progress.get('thinking'),
                 'left': progress.get('left'), 'position': position, 'winner': row['winner'], 'reason': row['reason']}
+
+    def timing(self):
+        """Average seconds per validation and per game over the last hour (None until there is data)."""
+        with self.connect() as db:
+            rows = db.execute("SELECT kind,AVG(finished-started) a FROM (SELECT kind,started,finished FROM jobs WHERE "
+                              "status='done' AND started IS NOT NULL AND finished>? ORDER BY finished DESC LIMIT 400) "
+                              "GROUP BY kind", (now() - 3600,)).fetchall()
+        return {row['kind']: row['a'] for row in rows}
 
     def live_matches(self, team):
         """Games of this team that are running or waiting, newest first."""
@@ -1570,8 +1688,13 @@ class Store:
             if not self.owns(db, job):
                 return False
             if job['kind'] == 'validate':
+                verdict = 'valid' if result['valid'] else 'rejected'
                 db.execute('UPDATE submissions SET status=?,log=?,checked=? WHERE id=?',
-                           ('valid' if result['valid'] else 'rejected', result['log'], ENGINE_KEY, job['ref']))
+                           (verdict, result['log'], ENGINE_KEY, job['ref']))
+                db.execute("UPDATE submissions SET status=?,log=?,checked=? WHERE status IN ('queued','failed') "
+                           "AND id!=? AND hash=(SELECT hash FROM submissions WHERE id=?) AND NOT EXISTS (SELECT 1 FROM "
+                           "jobs j WHERE j.kind='validate' AND j.ref=submissions.id)",
+                           (verdict, result['log'] + ' (Dùng chung kết quả của bản có cùng mã.)', ENGINE_KEY, job['ref'], job['ref']))
             else:
                 left = pieces_left(result['final_state']) if result.get('final_state') else {'p1': None, 'p2': None}
                 plies = len(result['moves']) if 'moves' in result else None
