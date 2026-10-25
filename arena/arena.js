@@ -367,7 +367,7 @@ async function renderRound() {
   const {items} = await api(`/tournaments/${selectedTournament}/rounds/${number}`);
   $('#round-view').innerHTML = items.length ? items.map(p => {
     const result = !p.b ? 'BYE' : p.forfeit ? `${p.forfeit === p.a ? escape(p.b_name) : escape(p.a_name)} thắng do đối thủ bị truất quyền`
-      : p.games.map((g, i) => `<button class="text-link" data-watch="${g.id}">Ván ${i+1}: ${escape(outcome(g))}</button>`).join(' · ');
+      : p.games.map((g, i) => `<button class="text-link" data-watch="${g.id}">${i === 2 ? 'Ván quyết định' : `Ván ${i+1}`}: ${escape(outcome(g))}</button>`).join(' · ');
     return `<div class="pairing ${[p.a,p.b].includes(team?.id)?'mine':''}"><strong>${teamLink(p.a, p.a_name)}</strong> <span class="red">×</span> <strong>${p.b ? teamLink(p.b, p.b_name) : '—'}</strong><p>${result}</p></div>`;
   }).join('') : '<div class="empty">Vòng này chưa có cặp đấu.</div>';
 }

@@ -1,4 +1,5 @@
 import concurrent.futures
+import itertools
 import hashlib
 import json
 import sqlite3
@@ -504,10 +505,13 @@ class Tournaments(Base):
         with self.store.connect() as db:
             byes = [p['a'] for p in db.execute('SELECT * FROM pairings WHERE tournament_id=? AND b IS NULL', (tid,))]
         self.assertEqual(sorted(seeds[t] for t in byes), [1, 2, 3])
-        # Draw every game: equal score and equal material, so the higher seed advances.
+        # Draw every game: the level pairs play a deciding game, which is drawn too, so equal score and equal material
+        # leave the higher seed to advance.
         for _ in range(3):
             self.finish_round(tid)
-            self.store.next_round(tid, 'admin')
+            if self.store.next_round(tid, 'admin').get('deciders'):
+                self.finish_round(tid)
+                self.store.next_round(tid, 'admin')
         with self.store.connect() as db:
             rows = self.store.standings(db, tid)
             status = db.execute('SELECT status FROM tournaments WHERE id=?', (tid,)).fetchone()[0]
@@ -1891,6 +1895,214 @@ class DeleteTeam(Base):
         self.assertEqual({t['name'] for t in self.client.get('/api/admin/teams').json['items']}, {'Ở lại'})
         self.assertEqual(self.post('/admin/teams/b0550000000000000000b055', {'action': 'delete'}).status_code, 409)
         self.assertEqual(self.post(f'/admin/teams/{a}', {'action': 'delete'}).status_code, 404)
+
+
+class Deciders(Base):
+    """Knockout pairs that finish level after two games play one more."""
+    serial = 0
+
+    def knockout(self, count=4, auto=False, **fields):
+        tid = self.tournament('knockout', auto=auto)
+        if fields:
+            with self.store.connect(True) as db:
+                for key, value in fields.items():
+                    db.execute(f'UPDATE tournaments SET {key}=? WHERE id=?', (value, tid))
+        Deciders.serial += 1
+        teams = self.entrants(tid, count, f'ko{Deciders.serial}')
+        self.close_deadline(tid)
+        self.store.freeze(tid, 'admin')
+        self.store.next_round(tid, 'admin')
+        return tid, teams
+
+    def owner(self, submission):
+        with self.store.connect() as db:
+            return db.execute('SELECT team_id FROM submissions WHERE id=?', (submission,)).fetchone()[0]
+
+    def pairs(self, tid, number):
+        with self.store.connect() as db:
+            rows = db.execute('SELECT * FROM pairings WHERE tournament_id=? AND round=? ORDER BY slot', (tid, number)).fetchall()
+            games = {r['id']: db.execute('SELECT * FROM matches WHERE pairing_id=? ORDER BY created,rowid', (r['id'],)).fetchall()
+                     for r in rows}
+        return rows, games
+
+    def test_a_pair_split_one_one_gets_a_third_game_and_the_bracket_waits(self):
+        tid, teams = self.knockout(4)
+        rows, games = self.pairs(tid, 1)
+        split, sweep = rows[0], rows[1]
+        # pair 0: each team wins the game in which it plays Đỏ (1-1). pair 1: the first listed team wins both.
+        self.finish_round(tid, lambda m: 'p2' if self.owner(m['p1']) in (split['a'], split['b']) else
+                          ('p1' if self.owner(m['p1']) == sweep['a'] else 'p2'))
+        made = self.store.next_round(tid, 'admin')
+        self.assertEqual(made, {'round': 1, 'deciders': 1})
+        rows, games = self.pairs(tid, 1)
+        self.assertEqual((len(games[split['id']]), len(games[sweep['id']])), (3, 2), 'only the level pair got a game')
+        decider = games[split['id']][2]
+        coin = int(split['id'][-4:], 16) % 2
+        self.assertEqual(self.owner(decider['p1']), split['a'] if coin == 0 else split['b'], 'colours drawn by the pair id')
+        self.assertEqual(self.store.next_round(tid, 'admin') if False else 0, 0)
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT round FROM tournaments WHERE id=?', (tid,)).fetchone()[0], 1)
+        with self.assertRaises(Problem):
+            self.store.next_round(tid, 'admin')                 # the decider is still unfinished
+        # The decider's winner goes through; here Xanh (the coin-flip winner of the draw) takes it.
+        winner = self.owner(decider['p1'])
+        self.finish_round(tid, lambda m: 'p1')
+        self.store.next_round(tid, 'admin')
+        rows2, _ = self.pairs(tid, 2)
+        self.assertEqual({rows2[0]['a'], rows2[0]['b']}, {winner, sweep['a']})
+
+    def test_auto_advance_creates_the_decider_and_continues_after_it(self):
+        tid, teams = self.knockout(4, auto=True)
+        for _ in range(4):                                      # exactly the round's own games: every pair splits 1-1
+            job = self.store.claim('test', 'samples')
+            self.assertTrue(self.store.finish(job, {'winner': 'p2', 'reason': 'goal'}))
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM matches WHERE status='queued'").fetchone()[0], 2, 'one decider per pair')
+            self.assertEqual(db.execute('SELECT round FROM tournaments WHERE id=?', (tid,)).fetchone()[0], 1)
+        self.finish_round(tid, lambda m: 'p1')
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT round FROM tournaments WHERE id=?', (tid,)).fetchone()[0], 2)
+        rows, _ = self.pairs(tid, 2)
+        self.assertEqual(len(rows), 1)
+
+    def test_a_drawn_decider_falls_back_to_pieces_then_seed_and_never_blocks(self):
+        tid, teams = self.knockout(2)
+        self.finish_round(tid, lambda m: 'draw')                # both games drawn: level
+        self.assertEqual(self.store.next_round(tid, 'admin')['deciders'], 1)
+        self.finish_round(tid, lambda m: 'draw')                # and the decider too
+        self.assertEqual(self.store.next_round(tid, 'admin'), {'completed': True})
+        with self.store.connect() as db:
+            rows = self.store.standings(db, tid)
+            seed1 = db.execute('SELECT team_id FROM entries WHERE tournament_id=? AND seed=1', (tid,)).fetchone()[0]
+        self.assertEqual((rows[0]['team_id'], rows[0]['rank'], rows[1]['rank']), (seed1, 1, 2))
+
+    def test_decider_final_uses_the_separate_final_map_and_random_gets_a_fresh_formation(self):
+        tid, teams = self.knockout(4, map='wall', final_map='block')
+        self.finish_round(tid, lambda m: 'p2')
+        self.store.next_round(tid, 'admin')                     # deciders for round 1: still the normal map
+        self.finish_round(tid, lambda m: 'p1')
+        self.store.next_round(tid, 'admin')                     # round 2 is the final
+        rows, games = self.pairs(tid, 2)
+        self.assertEqual({g['map'] for g in games[rows[0]['id']]}, {'block'})
+        self.finish_round(tid, lambda m: 'p2')                  # the final splits 1-1
+        self.store.next_round(tid, 'admin')
+        rows, games = self.pairs(tid, 2)
+        self.assertEqual([g['map'] for g in games[rows[0]['id']]], ['block'] * 3, 'the final decider also uses the final map')
+        one, _ = self.knockout(2, map='random')
+        rows, games = self.pairs(one, 1)
+        self.finish_round(one, lambda m: 'p2')
+        self.store.next_round(one, 'admin')
+        rows, games = self.pairs(one, 1)
+        maps = [g['map'] for g in games[rows[0]['id']]]
+        self.assertEqual(maps[0], maps[1])
+        self.assertNotEqual(maps[2], maps[0], 'the deciding game gets a new random formation')
+
+    def test_disqualifying_a_team_during_its_decider_forfeits_and_advances(self):
+        tid, teams = self.knockout(2)
+        self.finish_round(tid, lambda m: 'p2')
+        self.store.next_round(tid, 'admin')
+        rows, games = self.pairs(tid, 1)
+        self.store.disqualify(tid, rows[0]['a'], 'admin', 'test')
+        self.assertEqual(self.store.next_round(tid, 'admin'), {'completed': True})
+        with self.store.connect() as db:
+            standing = self.store.standings(db, tid)
+        self.assertEqual(standing[0]['team_id'], rows[0]['b'])
+
+    def test_swiss_and_round_robin_never_get_a_deciding_game(self):
+        for fmt in ('swiss', 'round_robin'):
+            tid = self.tournament(fmt, rounds=1)
+            self.entrants(tid, 2, fmt)
+            self.close_deadline(tid)
+            self.store.freeze(tid, 'admin')
+            self.store.next_round(tid, 'admin')
+            self.finish_round(tid, lambda m: 'p2')
+            with self.store.connect() as db:
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM matches m JOIN pairings p ON p.id=m.pairing_id '
+                                            'WHERE p.tournament_id=?', (tid,)).fetchone()[0], 2, fmt)
+
+    def test_a_full_random_knockout_always_finishes_with_one_champion(self):
+        import random
+        for seed in range(6):
+            rng = random.Random(seed)
+            count = rng.choice([3, 5, 6, 7, 8, 11, 16])
+            tid, teams = self.knockout(count, auto=bool(seed % 2))
+            for _ in range(12):
+                with self.store.connect() as db:
+                    status = db.execute('SELECT status FROM tournaments WHERE id=?', (tid,)).fetchone()[0]
+                if status == 'completed':
+                    break
+                self.finish_round(tid, lambda m: rng.choice(['p1', 'p2', 'p2', 'draw']))
+                if not bool(seed % 2):
+                    self.store.next_round(tid, 'admin')
+            with self.store.connect() as db:
+                self.assertEqual(db.execute('SELECT status FROM tournaments WHERE id=?', (tid,)).fetchone()[0], 'completed', (seed, count))
+                rows = [r for r in self.store.standings(db, tid) if r['rank']]
+                games = db.execute('SELECT COUNT(*) FROM matches m JOIN pairings p ON p.id=m.pairing_id WHERE p.tournament_id=? '
+                                   "AND m.status NOT IN ('done','cancelled')", (tid,)).fetchone()[0]
+            self.assertEqual(sum(1 for r in rows if r['rank'] == 1), 1, (seed, count, 'exactly one champion'))
+            self.assertEqual(len(rows), count)
+            self.assertEqual(games, 0)
+
+
+class PairingQuality(unittest.TestCase):
+    def play(self, n, rounds, seed):
+        import random
+        rng = random.Random(seed)
+        points, history, byes = {t: 0.0 for t in range(n)}, set(), {t: 0 for t in range(n)}
+        for _ in range(rounds):
+            ranked = sorted(points, key=lambda t: (-points[t], rng.random()))
+            standings = [{'team_id': t, 'points': points[t]} for t in ranked]
+            waiting = list(ranked)
+            if n % 2:
+                bye = min(reversed(standings), key=lambda r: (byes[r['team_id']], r['points']))['team_id']
+                waiting.remove(bye)
+                byes[bye] += 1
+                points[bye] += 1
+            for a, b in swiss_pairs([r for r in standings if r['team_id'] in waiting], history):
+                self.assertNotIn(frozenset((a, b)), history, f'rematch n={n} rounds={rounds} seed={seed}')
+                history.add(frozenset((a, b)))
+                outcome = rng.random()
+                points[a] += 1 if outcome < .45 else .5 if outcome < .6 else 0
+                points[b] += 1 if outcome >= .6 else .5 if outcome < .6 and outcome >= .45 else 0
+        return max(byes.values())
+
+    def test_small_fields_never_meet_twice_while_a_rematch_free_pairing_exists(self):
+        # Up to about half the round-robin length a greedy round-by-round pairing can always still avoid rematches.
+        for n, rounds in ((6, 3), (8, 4), (9, 4), (10, 5), (16, 8), (20, 10), (24, 10), (40, 10)):
+            for seed in range(8):
+                self.assertLessEqual(self.play(n, rounds, seed), 1 + n // 9, (n, rounds))
+
+    def test_when_no_rematch_free_pairing_exists_pairing_still_succeeds(self):
+        teams = [{'team_id': i, 'points': 0} for i in range(4)]
+        every = {frozenset(p) for p in itertools.combinations(range(4), 2)}
+        pairs = swiss_pairs(teams, every)
+        self.assertEqual(sorted(t for p in pairs for t in p), [0, 1, 2, 3])
+        self.assertEqual(swiss_pairs([], set()), [])
+
+    def test_large_field_stays_fast(self):
+        import time
+        teams = [{'team_id': i, 'points': i // 3} for i in range(1000)]
+        started = time.perf_counter()
+        pairs = swiss_pairs(teams, set())
+        self.assertLess(time.perf_counter() - started, 2)
+        self.assertEqual(len(pairs), 500)
+
+
+class SourceHygiene(Base):
+    def test_invisible_characters_from_pasted_code_are_cleaned_not_rejected(self):
+        clean = "def choose_move(o):\n    m = o['legalMoves'][0]\n    return {'from': m['from'], 'to': m['to']}\n"
+        dirty = '\ufeff' + clean.replace('    m', '\u00a0\u00a0\u00a0\u00a0m').replace('return', 're\u200bturn').replace('def ', 'def\u00a0')
+        self.assertNotEqual(dirty, clean)
+        self.assertEqual(self.store.clean_source(dirty), clean)
+        self.assertEqual(self.store.clean_source('\u202f' + clean), ' ' + clean)
+        for bad in ('', ' ' * 70000, 'x = 1\n', 'def choose_move(o):\x00 pass'):
+            with self.assertRaises(Problem):
+                self.store.clean_source(bad)
+        team, user = self.team('Dán từ web')
+        sid = self.store.submit(team, user, 'dan', dirty)
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT source FROM submissions WHERE id=?', (sid,)).fetchone()[0], clean)
+        compile(self.store.clean_source(dirty), 'bot.py', 'exec')
 
 
 class AdminMatches(Base):

@@ -56,6 +56,7 @@
             <label>Nguồn đội<select name="source" id="seed-source"><option value="">Đăng ký mở (thí sinh tự chọn bot)</option></select></label>
             <label id="seed-count-field" hidden>Số đội đi tiếp (top N của giải nguồn)<input name="seed_count" type="number" min="2" max="1024" value="16"></label>
             <label>Bản đồ (cách xếp quân ban đầu)<select name="map" id="map"><option value="standard">Chuẩn</option><option value="wall">Bức tường</option><option value="flank">Hai cánh</option><option value="block">Khối vuông</option><option value="random">Ngẫu nhiên (mỗi cặp một kiểu)</option></select></label>
+            <label>Bản đồ vòng chung kết<select name="final_map" id="final-map"><option value="">Giống các vòng khác</option><option value="standard">Chuẩn</option><option value="wall">Bức tường</option><option value="flank">Hai cánh</option><option value="block">Khối vuông</option><option value="random">Ngẫu nhiên (mỗi cặp một kiểu)</option></select></label>
             <label id="rounds-field">Số vòng Swiss<input name="rounds" type="number" min="1" max="30" value="7" required><small class="caption" id="rounds-hint"></small></label>
             <label id="deadline-field">Hạn đăng ký/chọn bot (giờ máy bạn)<input name="deadline" id="deadline" type="datetime-local" required></label>
             <label>Mô tả / thể lệ ngắn<textarea name="description" maxlength="500" rows="2"></textarea></label>
@@ -71,6 +72,7 @@
               <label>Tên giải<input name="name" minlength="3" maxlength="80"></label>
               <label>Mô tả<textarea name="description" maxlength="500" rows="2"></textarea></label>
               <label>Bản đồ cho các vòng mở tiếp theo<select name="map" id="edit-map"><option value="standard">Chuẩn</option><option value="wall">Bức tường</option><option value="flank">Hai cánh</option><option value="block">Khối vuông</option><option value="random">Ngẫu nhiên (mỗi cặp một kiểu)</option></select></label>
+              <label>Bản đồ vòng chung kết<select name="final_map" id="edit-final-map"><option value="">Giống các vòng khác</option><option value="standard">Chuẩn</option><option value="wall">Bức tường</option><option value="flank">Hai cánh</option><option value="block">Khối vuông</option><option value="random">Ngẫu nhiên (mỗi cặp một kiểu)</option></select></label>
               <label id="edit-deadline-field">Hạn đăng ký (giờ máy bạn)<input name="deadline" type="datetime-local"></label>
               <label id="edit-rounds-field">Số vòng Swiss<input name="rounds" type="number" min="1" max="30"></label>
               <div class="action-row"><button class="button primary">Lưu thay đổi</button><button type="button" class="button" id="close-now">Đóng đăng ký ngay</button><button type="button" class="button danger" id="cancel-tournament">Hủy giải</button></div>

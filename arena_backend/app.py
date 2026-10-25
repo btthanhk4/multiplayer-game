@@ -501,7 +501,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
     def tournament_list():
         with store.connect() as db:
             rows = db.execute('SELECT t.id,t.name,t.format,t.rounds,t.round,t.deadline,t.status,t.created,'
-                              't.auto_advance,t.description,t.seed_from,t.map,'
+                              't.auto_advance,t.description,t.seed_from,t.map,t.final_map,'
                               '(SELECT COUNT(*) FROM entries e WHERE e.tournament_id=t.id) entrants '
                               'FROM tournaments t ORDER BY t.created DESC LIMIT 100').fetchall()
         return [dict(r) for r in rows]
@@ -695,13 +695,15 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         tid = store.create_tournament(
             actor, text(data, 'name', 3, 80), data.get('format'), data.get('rounds', 5), data.get('deadline'),
             bool(data.get('auto_advance')), str(data.get('description') or '')[:500],
-            data.get('seed_from') or None, data.get('seed_count'), data.get('map') or 'standard')
+            data.get('seed_from') or None, data.get('seed_count'), data.get('map') or 'standard',
+            data.get('final_map') or None)
         return jsonify(id=tid), 201
 
     @app.post('/api/admin/tournaments/<tid>/update')
     def update_tournament(tid):
         actor, data = auth(True), body()
-        store.update_tournament(tid, actor, data.get('name'), data.get('description'), data.get('deadline'), data.get('rounds'), data.get('map'))
+        store.update_tournament(tid, actor, data.get('name'), data.get('description'), data.get('deadline'), data.get('rounds'), data.get('map'),
+                                data['final_map'] if 'final_map' in data else False)
         return jsonify(ok=True)
 
     @app.post('/api/admin/tournaments/<tid>/cancel')

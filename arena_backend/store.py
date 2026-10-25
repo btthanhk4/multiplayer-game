@@ -81,7 +81,7 @@ BADGES = [
 # Columns added after a table first shipped; CREATE TABLE IF NOT EXISTS cannot add them.
 ADDED_COLUMNS = {'matches': ['plies INTEGER', "map TEXT NOT NULL DEFAULT 'standard'"],
                  'ranked_series': ['a_rating INTEGER', 'b_rating INTEGER'],
-                 'tournaments': ["map TEXT NOT NULL DEFAULT 'standard'"]}
+                 'tournaments': ["map TEXT NOT NULL DEFAULT 'standard'", 'final_map TEXT']}
 
 SCHEMA = [
     '''CREATE TABLE IF NOT EXISTS teams (
@@ -105,7 +105,7 @@ SCHEMA = [
         deadline REAL NOT NULL, status TEXT NOT NULL DEFAULT 'open',
         rules_hash TEXT NOT NULL, config TEXT NOT NULL, created REAL NOT NULL,
         auto_advance INTEGER NOT NULL DEFAULT 0, seed_from TEXT, seed_count INTEGER,
-        description TEXT NOT NULL DEFAULT '', map TEXT NOT NULL DEFAULT 'standard')''',
+        description TEXT NOT NULL DEFAULT '', map TEXT NOT NULL DEFAULT 'standard', final_map TEXT)''',
     '''CREATE TABLE IF NOT EXISTS entries (
         tournament_id TEXT NOT NULL REFERENCES tournaments(id),
         team_id TEXT NOT NULL REFERENCES teams(id),
@@ -191,6 +191,11 @@ def now():
     return time.time()
 
 
+# Zero-width characters, BOM and soft hyphen vanish; non-breaking and wide spaces become ordinary spaces.
+INVISIBLE_IN_CODE = {**dict.fromkeys(map(ord, '\u200b\u200c\u200d\u2060\ufeff\u00ad'), None),
+                     **dict.fromkeys(map(ord, '\u00a0\u2007\u202f\u3000'), ' ')}
+
+
 def name_key(text):
     return unicodedata.normalize('NFC', ' '.join(str(text).split())).casefold()
 
@@ -217,13 +222,45 @@ def elo_tier(rating):
     return next(label for floor, label in ELO_TIERS if rating >= floor)
 
 
+def pair_without_rematches(teams, points, history, budget=60000):
+    """Exact search for a pairing with no repeat opponent, closest scores first; None when there is none (or the
+    search budget runs out). Used for small fields, where the greedy method can leave avoidable rematches."""
+    order = {team: index for index, team in enumerate(teams)}
+    nodes = 0
+
+    def cost(a, b):
+        return round(abs(points[a] - points[b]) * 1000) + abs(order[a] - order[b])
+
+    def search(free):
+        nonlocal nodes
+        if not free:
+            return []
+        nodes += 1
+        if nodes > budget:
+            return None
+        first, rest = free[0], free[1:]
+        for other in sorted((t for t in rest if frozenset((first, t)) not in history), key=lambda t: cost(first, t)):
+            result = search([t for t in rest if t != other])
+            if result is not None:
+                return [(first, other)] + result
+            if nodes > budget:
+                return None
+        return None
+    return search(list(teams))
+
+
 def swiss_pairs(standings, history, window=12):
     """Pair nearby scores, then remove repeat opponents with local pair swaps.
 
     Swaps are limited to a window of neighbouring pairs so a 1,000-team round
-    stays linear instead of quadratic while the write lock is held."""
+    stays linear instead of quadratic while the write lock is held. Fields of up to 40 teams are first tried with an
+    exact search, which finds a rematch-free pairing whenever one exists."""
     teams = [row['team_id'] for row in standings]
     points = {row['team_id']: row['points'] for row in standings}
+    if len(teams) <= 40:
+        exact = pair_without_rematches(teams, points, history)
+        if exact is not None:
+            return exact
     positions = {team: index for index, team in enumerate(teams)}
     pairs = [(teams[i], teams[i+1]) for i in range(0, len(teams) - 1, 2)]
 
@@ -257,16 +294,17 @@ def bracket_order(size):
     return order
 
 
-def pair_outcome(pair, games):
+def pair_outcome(pair, games, needs_decider=False):
+    """Result of a pair: two colour-swapped games, plus (knockout only) a third deciding game when they end level."""
     a, b = pair['a'], pair['b']
     if b is None:
         return {'complete': True, 'bye': True}
     if pair['forfeit']:
         return {'complete': True, 'forfeit': pair['forfeit']}
-    if len(games) != 2 or any(g['status'] != 'done' for g in games):
+    if len(games) < 2 or any(g['status'] != 'done' for g in games):
         return {'complete': False}
     scores, material = {a: 0.0, b: 0.0}, {a: 0, b: 0}
-    for g in games:
+    for g in games[:2]:
         first = g['owner1']
         second = b if first == a else a
         if g['winner'] == 'draw':
@@ -276,7 +314,15 @@ def pair_outcome(pair, games):
             scores[first if g['winner'] == 'p1' else second] += 1
         material[first] += g['p1_left'] or 0
         material[second] += g['p2_left'] or 0
-    return {'complete': True, 'scores': scores, 'material': material}
+    decider = None
+    if needs_decider and scores[a] == scores[b]:
+        if len(games) < 3:
+            return {'complete': False, 'needs_decider': True}
+        extra = games[2]
+        if extra['winner'] != 'draw':
+            first = extra['owner1']
+            decider = first if extra['winner'] == 'p1' else (b if first == a else a)
+    return {'complete': True, 'scores': scores, 'material': material, 'decider': decider}
 
 
 def knockout_winner(pair, outcome, seeds):
@@ -290,6 +336,8 @@ def knockout_winner(pair, outcome, seeds):
     scores, material = outcome['scores'], outcome['material']
     if scores[a] != scores[b]:
         return a if scores[a] > scores[b] else b
+    if outcome.get('decider'):
+        return outcome['decider']
     if material[a] != material[b]:
         return a if material[a] > material[b] else b
     return min((a, b), key=lambda team: (seeds.get(team) or math.inf, team))
@@ -716,6 +764,8 @@ class Store:
         if '\x00' in source:
             raise Problem('File Python chứa ký tự không hợp lệ.')
         source = source.replace('\r\n', '\n').replace('\r', '\n')
+        # Code copied from web pages, chats and Word often carries characters Python rejects but nobody can see.
+        source = source.translate(INVISIBLE_IN_CODE)
         if 'choose_move' not in source:
             raise Problem('Không thấy hàm choose_move(observation) trong mã.')
         return source
@@ -1220,10 +1270,11 @@ class Store:
     # ---- tournaments ----------------------------------------------------
 
     def create_tournament(self, actor, name, fmt, rounds=5, deadline=None, auto_advance=False,
-                          description='', seed_from=None, seed_count=None, map_choice='standard'):
+                          description='', seed_from=None, seed_count=None, map_choice='standard', final_map=None):
         if fmt not in ('swiss', 'round_robin', 'knockout'):
             raise Problem('Thể thức không hợp lệ.')
         map_choice = resolve_map(map_choice, 'x') if map_choice != 'random' else 'random'
+        final_map = (final_map if final_map == 'random' else resolve_map(final_map, 'x')) if final_map else None
         if type(rounds) is not int or not 1 <= rounds <= 30:
             raise Problem('Số vòng Swiss cần từ 1 đến 30.')
         tid = uid()
@@ -1238,9 +1289,9 @@ class Store:
                 if len(ranked) < 2:
                     raise Problem('Giải nguồn chưa có đủ hai đội được xếp hạng.', 409)
                 db.execute('INSERT INTO tournaments(id,name,format,rounds,deadline,status,rules_hash,config,created,'
-                           'auto_advance,seed_from,seed_count,description,map) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                           'auto_advance,seed_from,seed_count,description,map,final_map) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                            (tid, name, fmt, rounds, now(), 'open', RULES_HASH, json.dumps(LIMITS), now(),
-                            int(bool(auto_advance)), seed_from, seed_count, description, map_choice))
+                            int(bool(auto_advance)), seed_from, seed_count, description, map_choice, final_map))
                 for seed, row in enumerate(ranked, 1):
                     db.execute('INSERT INTO entries(tournament_id,team_id,submission_id,seed) VALUES(?,?,?,?)',
                                (tid, row['team_id'], row['submission_id'], seed))
@@ -1249,15 +1300,16 @@ class Store:
                 if type(deadline) not in (float, int) or not now()+60 <= deadline <= now()+86400*365:
                     raise Problem('Hạn đăng ký phải sau ít nhất một phút và trong một năm tới.')
                 db.execute('INSERT INTO tournaments(id,name,format,rounds,deadline,rules_hash,config,created,'
-                           'auto_advance,description,map) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                           'auto_advance,description,map,final_map) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
                            (tid, name, fmt, rounds, deadline, RULES_HASH, json.dumps(LIMITS), now(),
-                            int(bool(auto_advance)), description, map_choice))
+                            int(bool(auto_advance)), description, map_choice, final_map))
                 self.audit(db, actor, 'tournament.created', {'id': tid})
         if seed_from:
             self.freeze(tid, actor)
         return tid
 
-    def update_tournament(self, tid, actor, name=None, description=None, deadline=None, rounds=None, map_choice=None):
+    def update_tournament(self, tid, actor, name=None, description=None, deadline=None, rounds=None, map_choice=None,
+                          final_map=False):
         """Rename, re-describe, move the deadline or change the Swiss round count (open tournaments only).
         The map may also change between rounds: it applies to rounds opened afterwards, never to games already made."""
         with self.connect(True) as db:
@@ -1276,6 +1328,10 @@ class Store:
                 if t['status'] not in ('open', 'frozen', 'running'):
                     raise Problem('Giải đã kết thúc, không đổi bản đồ được.', 409)
                 changes['map'] = map_choice if map_choice == 'random' else resolve_map(map_choice, 'x')
+            if final_map is not False:        # None or '' clears the separate final-round map
+                if t['status'] not in ('open', 'frozen', 'running'):
+                    raise Problem('Giải đã kết thúc, không đổi bản đồ được.', 409)
+                changes['final_map'] = (final_map if final_map == 'random' else resolve_map(final_map, 'x')) if final_map else None
             if deadline is not None or rounds is not None:
                 if t['status'] != 'open':
                     raise Problem('Chỉ đổi hạn hoặc số vòng khi giải còn nhận đăng ký.', 409)
@@ -1419,7 +1475,7 @@ class Store:
         games = defaultdict(list)
         for g in db.execute('SELECT m.pairing_id,m.status,m.winner,m.p1_left,m.p2_left,s.team_id owner1 '
                             'FROM matches m JOIN pairings p ON p.id=m.pairing_id JOIN submissions s ON s.id=m.p1 '
-                            'WHERE p.tournament_id=?', (tid,)):
+                            'WHERE p.tournament_id=? ORDER BY m.created,m.rowid', (tid,)):
             games[g['pairing_id']].append(g)
         return games
 
@@ -1439,7 +1495,7 @@ class Store:
         seeds = {team: row['seed'] for team, row in stats.items()}
         for pair in pairs:
             a, b = pair['a'], pair['b']
-            outcome = pair_outcome(pair, games[pair['id']])
+            outcome = pair_outcome(pair, games[pair['id']], t['format'] == 'knockout')
             for team in (a, b):
                 if team in stats:
                     stats[team]['reached'] = max(stats[team]['reached'], pair['round'])
@@ -1528,6 +1584,10 @@ class Store:
         next_number = t['round'] + 1
         pairs = []
         if t['format'] == 'knockout':
+            if t['round'] >= 1:
+                made = self._create_deciders(db, t, sids)
+                if made:      # level pairs play one more game before the bracket can move on
+                    return {'round': t['round'], 'deciders': made}
             size = 2 ** t['rounds']
             if t['round'] == 0:
                 order = bracket_order(size)
@@ -1541,7 +1601,7 @@ class Store:
                 seeds = {e['team_id']: e['seed'] for e in entries}
                 winners = [None] * (size // 2 ** (t['round'] - 1) // 2)
                 for pair in previous:
-                    winner = knockout_winner(pair, pair_outcome(pair, games[pair['id']]), seeds)
+                    winner = knockout_winner(pair, pair_outcome(pair, games[pair['id']], True), seeds)
                     winners[pair['slot']] = winner if winner in active else None
             if t['round'] >= t['rounds'] or sum(w is not None for w in winners) <= 1:
                 return self._complete(db, tid, actor)
@@ -1587,13 +1647,38 @@ class Store:
             if b and not forfeit:
                 for first, second in ((a, b), (b, a)):
                     self.create_match(db, sids[first], sids[second], pairing=pid, kind='tournament',
-                                      map_name=resolve_map(t['map'], pid))
+                                      map_name=resolve_map(self.round_map_choice(t, next_number), pid))
         db.execute("UPDATE tournaments SET status='running',round=? WHERE id=?", (next_number, tid))
         self.audit(db, actor, 'round.created', {'id': tid, 'round': next_number, 'pairs': len(pairs)})
         if all(b is None or forfeit for _, _, b, forfeit in pairs):
             # Nothing to play (only byes or forfeits); keep moving when automatic.
             self.maybe_advance(db, tid)
         return {'round': next_number, 'pairs': len(pairs)}
+
+    @staticmethod
+    def round_map_choice(t, number):
+        """The map setting for a round: the final round may have its own map."""
+        final = t['final_map']
+        return final if final and number >= t['rounds'] else t['map']
+
+    def _create_deciders(self, db, t, sids):
+        """One extra game, colours drawn by the pair's id, for every pair of the current knockout round that ended level
+        after two games. A new random formation is used when the map is random."""
+        games = self.tournament_games(db, t['id'])
+        made = 0
+        for pair in db.execute('SELECT * FROM pairings WHERE tournament_id=? AND round=? ORDER BY slot',
+                               (t['id'], t['round'])).fetchall():
+            if not pair['b'] or pair['forfeit']:
+                continue
+            if not pair_outcome(pair, games[pair['id']], True).get('needs_decider'):
+                continue
+            first, second = (pair['a'], pair['b']) if int(pair['id'][-4:], 16) % 2 == 0 else (pair['b'], pair['a'])
+            self.create_match(db, sids[first], sids[second], pairing=pair['id'], kind='tournament',
+                              map_name=resolve_map(self.round_map_choice(t, t['round']), pair['id'][8:16]))
+            made += 1
+        if made:
+            self.audit(db, 'system', 'round.deciders', {'id': t['id'], 'round': t['round'], 'games': made})
+        return made
 
     def _complete(self, db, tid, actor):
         db.execute("UPDATE tournaments SET status='completed' WHERE id=?", (tid,))
@@ -1770,7 +1855,11 @@ class Store:
         """The other game of the same two-game pair, and whether this is game 1 or 2."""
         other = None
         if pairing:
-            other = db.execute('SELECT id,created FROM matches WHERE pairing_id=? AND id!=?', (pairing, mid)).fetchone()
+            games = [r['id'] for r in db.execute('SELECT id FROM matches WHERE pairing_id=? ORDER BY created,rowid', (pairing,))]
+            if mid not in games or len(games) < 2:
+                return None, None
+            at = games.index(mid)
+            return games[at - 1 if at else 1], at + 1       # a third game is the knockout decider
         elif kind == 'ranked':
             row = db.execute('SELECT first_match,second_match FROM ranked_series WHERE first_match=? OR second_match=?',
                              (mid, mid)).fetchone()
