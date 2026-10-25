@@ -7,7 +7,7 @@ import random
 import time
 
 BEATS = {'rock': 'scissors', 'paper': 'rock', 'scissors': 'paper'}   # Đấm > Kéo > Lá > Đấm
-GOALS = {'p1': (0, 8), 'p2': (8, 0)}                                   # ô đích của mỗi phe
+WALL = {'owner': None, 'type': 'wall'}                                # vật cản: không đi vào, không ăn được
 STEPS = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 WIN = 10_000
 
@@ -16,17 +16,32 @@ def other(side):
     return 'p2' if side == 'p1' else 'p1'
 
 
+def goal_of(board, side):
+    """Ô đích của `side`. Bàn 9×9 hay 8×8 đều theo công thức này."""
+    size = len(board)
+    return (0, size - 1) if side == 'p1' else (size - 1, 0)
+
+
+def with_walls(observation):
+    """Bản sao bàn cờ có đánh dấu vật cản (trong observation['board'] vật cản hiện là None)."""
+    board = [row[:] for row in observation['board']]
+    for r, c in observation.get('obstacles', []):
+        board[r][c] = WALL
+    return board
+
+
 def moves_of(board, side):
     """Mọi nước hợp lệ của `side` trên `board` dưới dạng (hàng, cột, hàng_mới, cột_mới)."""
     result = []
-    for r in range(9):
-        for c in range(9):
+    size = len(board)
+    for r in range(size):
+        for c in range(size):
             piece = board[r][c]
             if not piece or piece['owner'] != side:
                 continue
             for dr, dc in STEPS:
                 nr, nc = r + dr, c + dc
-                if 0 <= nr < 9 and 0 <= nc < 9:
+                if 0 <= nr < size and 0 <= nc < size:
                     target = board[nr][nc]
                     if target is None or (target['owner'] != side and BEATS[piece['type']] == target['type']):
                         result.append((r, c, nr, nc))
@@ -52,7 +67,7 @@ def counts(board, side):
 
 def won(board, side, move):
     """Nước `move` có thắng ngay không? (chạm ô đích, hoặc ăn nốt quân cuối của một loại)"""
-    if (move[2], move[3]) == GOALS[side]:
+    if (move[2], move[3]) == goal_of(board, side):
         return True
     return any(n == 0 for n in counts(after(board, move), other(side)).values())
 
@@ -64,16 +79,17 @@ def evaluate(board, side):
         mine = counts(board, who)
         score += sign * 100 * sum(mine.values())                 # nhiều quân là tốt
         score -= sign * 150 * sum(1 for n in mine.values() if n == 1)   # chỉ còn 1 quân của một loại là nguy hiểm
-        goal_r, goal_c = GOALS[who]
-        nearest = min((max(abs(r - goal_r), abs(c - goal_c)) for r in range(9) for c in range(9)
-                       if board[r][c] and board[r][c]['owner'] == who), default=9)
+        goal_r, goal_c = goal_of(board, who)
+        size = len(board)
+        nearest = min((max(abs(r - goal_r), abs(c - goal_c)) for r in range(size) for c in range(size)
+                       if board[r][c] and board[r][c]['owner'] == who), default=size)
         score -= sign * 10 * nearest                              # quân càng gần ô đích càng tốt
     return score
 
 
 def choose_move(observation):
     side = observation['mySide']
-    board = observation['board']
+    board = with_walls(observation)      # bàn 8×8 hay 9×9, có thể có vật cản
     started = time.perf_counter()
     best, best_score = None, -10 ** 9
     candidates = moves_of(board, side)

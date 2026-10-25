@@ -3,7 +3,7 @@ import {newGame, applyMove, legalMoves, adjudicated} from '../rules.js';
 let state = newGame();
 function snapshot() {
   const moves = [];
-  if (!state.winner) for (let r=0;r<9;r++) for (let c=0;c<9;c++) {
+  if (!state.winner) for (let r=0;r<state.board.length;r++) for (let c=0;c<state.board[r].length;c++) {
     if (state.board[r][c]?.owner === state.turn) for (const m of legalMoves(state.board,r,c)) {
       moves.push({from:[r,c],to:[m.row,m.col],capture:m.kind==='capture'});
     }

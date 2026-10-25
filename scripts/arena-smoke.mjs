@@ -48,6 +48,16 @@ async function auditLayout(page,tabs,label){
     }
   }
 }
+// Starts a practice pair, retrying while the team's previous pair is still queued or running (the server allows one at a time).
+async function practice(page){
+  for(let attempt=0;attempt<40;attempt++){
+    const response=page.waitForResponse(r=>r.url().includes('/api/practice'));
+    await page.locator('#practice-form button[type=submit]').click();
+    if((await response).status()!==409) return;
+    await page.waitForTimeout(1500);
+  }
+  throw new Error('practice pair never started');
+}
 async function newPage(width=1440){
   const context=await browser.newContext({viewport:{width,height:1000}});
   const page=await context.newPage();
@@ -143,7 +153,22 @@ try {
   await page.locator('#practice-map').selectOption('wall');
   await page.locator('#practice-form button[type=submit]').click();
   await page.locator('#watch-grid .replay-caption').filter({hasText:'Bản đồ Bức tường'}).waitFor({timeout:60000});
-  await page.locator('#watch-grid .watch-card [data-watch]').first().click();
+  // Obstacle and 8×8 maps: the warning shows, and replays draw the right board.
+  await page.locator('[role=tab][data-tab=lab]').click();
+  await page.locator('#practice-map').selectOption('river');
+  await page.locator('#practice-map-note').waitFor();
+  await practice(page);
+  await page.locator('#watch-grid .replay-caption').filter({hasText:'Bản đồ Dòng sông'}).first().waitFor({timeout:60000});
+  assert.equal(await page.locator('#watch-grid .mini-board .square.wall').count() % 7,0,'the river map shows its seven obstacle squares per board');
+  assert.ok(await page.locator('#watch-grid .mini-board .square.wall').count() >= 7);
+  while (await page.locator('#watch-grid .close-button').count()) await page.locator('#watch-grid .close-button').first().click();
+  await page.locator('[role=tab][data-tab=lab]').click();
+  await page.locator('#practice-map').selectOption('arena8');
+  await practice(page);
+  await page.locator('#watch-grid .replay-caption').filter({hasText:'Bản đồ Đấu trường 8×8'}).first().waitFor({timeout:60000});
+  assert.equal(await page.locator('#watch-grid .mini-board.n8').first().locator('.square').count(),64);
+  await page.locator('[role=tab][data-tab=lab]').click();
+  await page.locator('#practice-map').selectOption('standard');
   await page.locator('[role=tab][data-tab=competition]').click();
   await page.locator('#join-form button[type=submit]').click();
   await page.locator('#competition-info summary').filter({hasText:'Luật chơi của giải này'}).click();

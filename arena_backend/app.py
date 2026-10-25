@@ -16,7 +16,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory, g
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .store import Store, Problem, ROOT, RULES_HASH, LIMITS, TEAM_SIZE, SYSTEM_TEAM, MAPS, uid, now
+from .store import Store, Problem, ROOT, RULES_HASH, LIMITS, TEAM_SIZE, SYSTEM_TEAM, MAPS, GEOMETRY_MAPS, uid, now
 
 PUBLIC_FILES = {'rules.js', 'arena/arena.js', 'arena/admin.js', 'arena/common.js', 'arena/watch.js', 'arena/arena.css',
                 'arena/guide.html'}
@@ -245,7 +245,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
                          ('registration_open', 'submissions_open', 'ranked_open', 'practice_open', 'campaign_open',
                           'live_open', 'read_only')},
                 'avg_seconds': {k: round(v, 1) for k, v in store.timing().items()},
-                'maps': [{'id': i, 'name': n, 'blurb': b} for i, n, b in MAPS]}
+                'maps': [{'id': i, 'name': n, 'blurb': b, 'geometry': i in GEOMETRY_MAPS} for i, n, b in MAPS]}
 
     @app.get('/api/health')
     def health():

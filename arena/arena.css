@@ -402,3 +402,16 @@ label small{font-weight:400;color:var(--muted)}
 .stepper{flex-direction:column;gap:2px}.stepper li{flex:none;text-align:left;padding:6px 10px;border-bottom:0;border-left:4px solid var(--line)}
 .stepper li.done{border-left-color:var(--green)}.stepper li.current{border-left-color:var(--red)}
 }
+
+/* Maps: an 8×8 board and obstacle squares. */
+.mini-board.n8{grid-template-columns:repeat(8,minmax(0,1fr));grid-template-rows:repeat(8,minmax(0,1fr))}
+.square.wall{background:#6d7568;box-shadow:inset 0 0 0 2px #4f574b}
+.square.wall .block{width:62%;height:62%;background:repeating-linear-gradient(45deg,#8a9284 0 4px,#6d7568 4px 8px);border:1px solid #4f574b}
+.help.warn{background:#f3e6dc;border-left:3px solid var(--red);padding:10px 12px;color:#273a34}
+
+.map-previews{display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 12px}
+.map-preview{margin:0;width:150px}
+.map-preview .mini-board{border-width:1px}
+.map-preview .stone{font-size:8px;border-width:0}
+.map-preview .square small{display:none}
+.map-preview figcaption{font-size:11px;color:var(--muted);margin-top:4px;text-align:center}

@@ -1,5 +1,5 @@
 import {$, $$, escape, labels, formats, kinds, formatTime, badge, session, api, notice, action, options, countdown,
-  duration, poller, outcome, mapLabel, roundRulesHtml} from './common.js';
+  duration, poller, outcome, mapLabel, roundRulesHtml, GEOMETRY_MAPS, mapPreview} from './common.js';
 
 document.getElementById('boot-note')?.remove();   // reaching here means every module loaded
 let editingFor = '';
@@ -132,6 +132,9 @@ function syncTournamentForm() {
   $('#rounds-field').hidden = fmt !== 'swiss';
   $('#rounds-hint').textContent = 'Gợi ý: 7 vòng đủ chọn top 32 của 1.000 đội; 10–11 vòng để phân hạng toàn bộ.';
   $('#format-help').textContent = FORMAT_HELP[fmt];
+  const previews = [form.elements.map.value, form.elements.final_map.value].filter(Boolean);
+  $('#map-preview').innerHTML = [...new Set(previews)].map(mapPreview).join('');
+  $('#map-warning').hidden = ![form.elements.map.value, form.elements.final_map.value].some(m => GEOMETRY_MAPS.includes(m));
   const teams = Math.max(2, Number($('#plan-teams').value) || 2);
   const rounds = fmt === 'swiss' ? Number(form.elements.rounds.value) || 1 : fmt === 'knockout' ? Math.ceil(Math.log2(teams)) : teams % 2 ? teams : teams - 1;
   const games = fmt === 'swiss' ? Math.ceil(teams / 2) * 2 * rounds : fmt === 'knockout' ? (teams - 1) * 2 : teams * (teams - 1);

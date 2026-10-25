@@ -3,7 +3,7 @@ import random
 
 
 def choose_move(observation):
-    goal = [0, 8] if observation['mySide'] == 'p1' else [8, 0]
+    goal = observation['goal']          # ô đích của bạn; phụ thuộc kích thước bàn (8×8 hoặc 9×9)
 
     def score(move):
         distance = max(abs(move['to'][0] - goal[0]), abs(move['to'][1] - goal[1]))

@@ -991,21 +991,23 @@ class LocalArena(unittest.TestCase):
 
     def test_every_map_is_legal_symmetric_safe_and_identical_in_both_engines(self):
         local, referee = self.load_local(), Referee()
-        names = [*local.MAP_NAMES, 'random:0', 'random:1', 'random:ffffffff', 'random:deadbeef'] + [f'random:{n * 2654435761 % 2**32:x}' for n in range(1, 120)]
+        names = [*local.MAP_NAMES, 'random:0', 'random:1', 'random:ffffffff', 'random:deadbeef'] + [f'random:{n * 2654435761 % 2**32:x}' for n in range(1, 120)] + [f'chaos:{n * 2654435761 % 2**32:x}' for n in range(1, 120)]
         try:
             for name in names:
                 board = local.new_game(name)['board']
                 self.assertEqual(referee.call('new', map=name)['state']['board'], board, name)
+                size = len(board)
                 mine = {(r, c): p['type'] for r, row in enumerate(board) for c, p in enumerate(row) if p and p['owner'] == 'p1'}
                 theirs = {(r, c): p['type'] for r, row in enumerate(board) for c, p in enumerate(row) if p and p['owner'] == 'p2'}
                 self.assertEqual(len(mine), 9, name)
                 self.assertEqual(sorted(mine.values()), ['paper'] * 3 + ['rock'] * 3 + ['scissors'] * 3, name)
-                self.assertEqual({(8 - r, 8 - c): t for (r, c), t in mine.items()}, theirs, f'{name}: Đỏ là bản quay 180° của Xanh')
-                self.assertTrue(all(r >= 6 for r, _ in mine), f'{name}: Xanh ở hàng 6–8')
-                for goal in local.GOALS.values():
+                self.assertEqual({(size - 1 - r, size - 1 - c): t for (r, c), t in mine.items()}, theirs, f'{name}: Đỏ là bản quay 180° của Xanh')
+                self.assertTrue(all(r >= size - 3 for r, _ in mine), f'{name}: Xanh ở ba hàng cuối')
+                for side in ('p1', 'p2'):
+                    goal = local.goal_of(side, size)
                     self.assertIsNone(board[goal[0]][goal[1]], f'{name}: ô đích để trống')
                 gap = min(max(abs(a[0] - b[0]), abs(a[1] - b[1])) for a in mine for b in theirs)
-                self.assertGreaterEqual(gap, 4, f'{name}: không có ăn quân ngay từ nước đầu')
+                self.assertGreaterEqual(gap, 4 if size == 9 else 3, f'{name}: không có ăn quân ngay từ nước đầu')
                 self.assertTrue(local.legal_moves(local.new_game(name)))
             with self.assertRaises(ValueError):
                 local.new_game('khong-co')
@@ -1013,8 +1015,8 @@ class LocalArena(unittest.TestCase):
             self.assertFalse(referee.call('new', map='standard')['state']['board'] != local.new_game()['board'])
         finally:
             referee.close()
-        self.assertEqual(len({str(local.new_game(n)['board']) for n in names[:4]}), 4, 'the named maps differ')
-        self.assertGreater(len({str(local.new_game(n)['board']) for n in names[4:]}), 100, 'random maps vary with the seed')
+        self.assertEqual(len({str(local.new_game(n)['board']) for n in names[:len(local.MAP_NAMES)]}), len(local.MAP_NAMES), 'the named maps differ')
+        self.assertGreater(len({str(local.new_game(n)['board']) for n in names[len(local.MAP_NAMES):]}), 200, 'random and chaos maps vary with the seed')
 
     def test_a_stalled_game_is_decided_by_material_then_advancement(self):
         local, referee = self.load_local(), Referee()
@@ -1646,7 +1648,14 @@ class MapsAndAdjudication(Base):
     # Fails the game (a technical loss) unless it is told the right map and the board really is that map.
     EXPECT = ("EXPECTED = {expected!r}\n"
               "def choose_move(o):\n"
-              "    assert o['map'] == EXPECTED or (EXPECTED == 'random' and o['map'].startswith('random:')), o['map']\n"
+              "    assert o['map'] == EXPECTED or o['map'].split(':')[0] == EXPECTED.split(':')[0] in ('random', 'chaos'), o['map']\n"
+              "    n = o['size']\n"
+              "    assert len(o['board']) == n and all(len(row) == n for row in o['board']), 'board is size x size'\n"
+              "    assert o['goal'] == ([0, n - 1] if o['mySide'] == 'p1' else [n - 1, 0]), o['goal']\n"
+              "    assert o['opponentGoal'] != o['goal']\n"
+              "    for r, c in o['obstacles']:\n"
+              "        assert o['board'][r][c] is None and [r, c] != o['goal']\n"
+              "        assert not any(m['to'] == [r, c] for m in o['legalMoves']), 'never a legal move into an obstacle'\n"
               "    m = o['legalMoves'][0]\n"
               "    return {{'from': m['from'], 'to': m['to']}}\n")
 
@@ -1668,7 +1677,8 @@ class MapsAndAdjudication(Base):
         return row, json.loads(row['replay'])
 
     def test_bots_are_told_the_map_and_it_is_recorded_in_the_replay(self):
-        for name in ('standard', 'wall', 'flank', 'block', 'random:1a2b3c4d'):
+        for name in ('standard', 'wall', 'flank', 'block', 'random:1a2b3c4d', 'arena8', 'pillars', 'river', 'maze8',
+                     'chaos:1a2b3c4d', 'chaos:7', 'chaos:ff00ff00'):
             row, replay = self.play_one(self.EXPECT.format(expected=name), self.EXPECT.format(expected=name), name)
             self.assertEqual(row['status'], 'done')
             self.assertFalse(row['reason'].startswith('technical'), (name, row['reason']))
@@ -1678,7 +1688,7 @@ class MapsAndAdjudication(Base):
         local = self.load_local()
         first, last = local.Player('first', local.bot_first, None), local.Player('last', lambda o: {
             'from': o['legalMoves'][-1]['from'], 'to': o['legalMoves'][-1]['to']}, None)
-        for name in ('standard', 'wall', 'flank', 'block'):
+        for name in ('standard', 'wall', 'flank', 'block', 'arena8', 'pillars', 'river', 'maze8', 'chaos:1', 'chaos:2', 'chaos:9'):
             row, replay = self.play_one(self.FIRST_MOVE, self.LAST_MOVE, name)
             winner, reason, plies, *_ = local.play(first, last, 1, False, name)
             self.assertEqual((row['winner'], row['reason']), (winner, reason), name)
@@ -1700,7 +1710,7 @@ class MapsAndAdjudication(Base):
         import re
         from arena_backend.store import MAP_IDS
         local = self.load_local()
-        self.assertEqual(MAP_IDS, {*local.MAP_NAMES, 'random'})
+        self.assertEqual(MAP_IDS, {*local.MAP_NAMES, 'random', 'chaos'})
         for page, select in (('arena/index.html', 'practice-map'), ('arena/admin.html', 'map'), ('arena/admin.html', 'edit-map')):
             html = (ROOT / page).read_text(encoding='utf-8')
             tag = re.search(rf'<select[^>]*id="{select}"[^>]*>(.*?)</select>', html, re.S)
@@ -1723,7 +1733,9 @@ class MapsAndAdjudication(Base):
         self.client.post('/api/register', json={'username': 'mapper', 'name': 'Mapper', 'password': 'test-only-password-123',
                                                 'invite': 'test-invite'}, headers={'Origin': 'http://localhost:8080'})
         health = self.client.get('/api/health').json
-        self.assertEqual([m['id'] for m in health['maps']], ['standard', 'wall', 'flank', 'block', 'random'])
+        self.assertEqual([m['id'] for m in health['maps']], ['standard', 'wall', 'flank', 'block', 'arena8', 'pillars', 'river',
+                                                             'maze8', 'random', 'chaos'])
+        self.assertEqual({m['id'] for m in health['maps'] if m['geometry']}, {'arena8', 'pillars', 'river', 'maze8', 'chaos'})
 
     def test_tournament_map_applies_per_round_and_can_change_between_rounds(self):
         tid = self.tournament('swiss', rounds=3)
@@ -2130,6 +2142,125 @@ class Paging(Base):
         self.finish_round(tid)
         done = self.client.get(f'/api/tournaments/{tid}').json
         self.assertEqual(done['top'], [], 'the podium only exists once the tournament is completed')
+
+
+class Geometry(Base):
+    """8×8 boards and obstacle maps."""
+
+    def local(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('local_arena', ROOT / 'sdk/local_arena.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    @staticmethod
+    def encode(board):
+        return '/'.join(' '.join('#' if c and c['type'] == 'wall' else c['owner'][1] + c['type'][0] if c else '.' for c in row)
+                        for row in board)
+
+    def test_referee_and_local_tool_build_the_same_board_and_moves_for_every_kind_of_map(self):
+        local = self.local()
+        names = list(local.MAP_NAMES) + [f'{kind}:{seed:x}' for kind in ('random', 'chaos') for seed in range(1, 41)]
+        referee = Referee()
+        try:
+            for name in names:
+                packet = referee.call('new', map=name)
+                mine = local.new_game(name)
+                self.assertEqual(self.encode(packet['state']['board']), self.encode(mine['board']), name)
+                theirs = {(tuple(m['from']), tuple(m['to']), m['capture']) for m in packet['legalMoves']}
+                ours = {(tuple(m['from']), tuple(m['to']), m['capture']) for m in local.legal_moves(mine)}
+                self.assertEqual(theirs, ours, name)
+        finally:
+            referee.close()
+
+    def test_obstacles_never_appear_as_moves_or_pieces_in_what_bots_see(self):
+        local = self.local()
+        referee = Referee()
+        try:
+            from arena_backend.runner import observation
+            for name in ('river', 'pillars', 'maze8', 'chaos:5', 'chaos:6', 'arena8', 'standard'):
+                packet = referee.call('new', map=name)
+                obs = observation(packet, 1, None, name)
+                walls = {tuple(w) for w in obs['obstacles']}
+                self.assertEqual(obs['size'], len(obs['board']), name)
+                self.assertEqual(walls, {(r, c) for r, row in enumerate(packet['state']['board']) for c, cell in enumerate(row)
+                                         if cell and cell['type'] == 'wall'})
+                for r, c in walls:
+                    self.assertIsNone(obs['board'][r][c], name)
+                self.assertTrue(all(tuple(m['to']) not in walls for m in obs['legalMoves']), name)
+                self.assertEqual(obs['goal'], [0, obs['size'] - 1])
+                self.assertEqual(obs['opponentGoal'], [obs['size'] - 1, 0])
+                json.dumps(obs)
+                theirs = local.observation(local.new_game(name), 1, 60.0, name)
+                for key in ('size', 'obstacles', 'goal', 'opponentGoal', 'board'):
+                    self.assertEqual(obs[key], theirs[key], (name, key))
+        finally:
+            referee.close()
+
+    def test_the_example_bots_play_every_new_map_without_a_technical_loss(self):
+        local = self.local()
+        for name in ('arena8', 'pillars', 'river', 'maze8', 'chaos:3', 'chaos:4', 'chaos:11'):
+            for example in ('hunter', 'guardian', 'template'):
+                bot = local.Player(*local.load_bot(str(ROOT / f'sdk/examples/{example}.py')))
+                for first, second in ((bot, local.Player('random', local.bot_random, None)),
+                                      (local.Player('random', local.bot_random, None), bot)):
+                    winner, reason, *_ = local.play(first, second, 7, False, name)
+                    self.assertFalse(str(reason).startswith('technical'), (name, example, reason))
+
+    def test_a_bot_that_assumes_nine_by_nine_loses_technically_on_a_small_board(self):
+        local = self.local()
+        legacy = "def choose_move(o):\n    return {'from': o['legalMoves'][0]['from'], 'to': [8, 8]}\n"
+        path = Path(tempfile.mkdtemp()) / 'legacy.py'
+        path.write_text(legacy, encoding='utf-8')
+        winner, reason, *_ = local.play(local.Player('legacy', None, path), local.Player('first', local.bot_first, None),
+                                        1, False, 'arena8')
+        self.assertEqual(winner, 'p2')
+        self.assertTrue(reason.startswith('technical'))
+
+    def test_seeded_maps_get_a_fresh_board_per_pair(self):
+        from arena_backend.store import resolve_map, map_setting
+        self.assertEqual(resolve_map('chaos', 'abcdef0123'), 'chaos:abcdef01')
+        self.assertEqual(resolve_map('river', 'abc'), 'river')
+        for bad in ('chaos:1', 'moon', 'Chaos'):
+            with self.assertRaises(Problem):
+                map_setting(bad)
+        tid = self.tournament('swiss', rounds=2)
+        self.entrants(tid, 4, 'geo')
+        self.close_deadline(tid)
+        self.store.freeze(tid, 'admin')
+        self.store.update_tournament(tid, 'admin', map_choice='chaos')
+        self.store.next_round(tid, 'admin')
+        with self.store.connect() as db:
+            rows = db.execute('SELECT p.id pid,m.map FROM matches m JOIN pairings p ON p.id=m.pairing_id').fetchall()
+        by_pair = {}
+        for r in rows:
+            by_pair.setdefault(r['pid'], set()).add(r['map'])
+        self.assertTrue(all(len(v) == 1 and next(iter(v)).startswith('chaos:') for v in by_pair.values()))
+        self.assertEqual(len({next(iter(v)) for v in by_pair.values()}), 2, 'each pair has its own board')
+
+    def test_a_one_round_knockout_is_its_own_final_and_its_decider_stays_on_the_final_map(self):
+        tid = self.tournament('knockout')
+        with self.store.connect(True) as db:
+            db.execute("UPDATE tournaments SET map='arena8', final_map='river' WHERE id=?", (tid,))
+        self.entrants(tid, 2, 'fin')
+        self.close_deadline(tid)
+        self.store.freeze(tid, 'admin')
+        self.store.next_round(tid, 'admin')
+        self.finish_round(tid, lambda m: 'p2')
+        self.assertEqual(self.store.next_round(tid, 'admin')['deciders'], 1)
+        with self.store.connect() as db:
+            maps = [r['map'] for r in db.execute('SELECT map FROM matches ORDER BY created,rowid')]
+        self.assertEqual(maps, ['river'] * 3)
+
+    def test_guide_describes_every_map_and_the_new_observation_fields(self):
+        from arena_backend.store import MAPS
+        guide = (ROOT / 'arena/guide.html').read_text(encoding='utf-8')
+        for _, label, _ in MAPS:
+            self.assertIn(label, guide, label)
+        plain = guide.replace('<code>', '').replace('</code>', '')
+        for field in ("'size'", "'obstacles'", "'goal'", "'opponentGoal'"):
+            self.assertIn(field, plain, field)
 
 
 class AdminMatches(Base):

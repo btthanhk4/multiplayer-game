@@ -273,7 +273,14 @@ class Executor:
 
 def observation(packet, seed, time_left=None, map_name='standard'):
     state = packet['state']
-    return {'protocol_version': LIMITS['protocol'], 'ruleset_hash': RULES_HASH, 'map': map_name, 'board': state['board'],
+    size = len(state['board'])
+    # Obstacles are listed in `obstacles` and show as None in `board`, so a bot that only reads `legalMoves` never notices them.
+    obstacles = [[r, c] for r, line in enumerate(state['board']) for c, cell in enumerate(line) if cell and cell['type'] == 'wall']
+    board = [[None if cell and cell['type'] == 'wall' else cell for cell in line] for line in state['board']]
+    goals = {'p1': [0, size - 1], 'p2': [size - 1, 0]}
+    return {'protocol_version': LIMITS['protocol'], 'ruleset_hash': RULES_HASH, 'map': map_name, 'size': size,
+            'obstacles': obstacles, 'board': board, 'goal': goals[state['turn']],
+            'opponentGoal': goals['p2' if state['turn'] == 'p1' else 'p1'],
             'mySide': state['turn'], 'turn': state['turn'], 'legalMoves': packet['legalMoves'],
             'ply': state['revision'], 'quietPly': state['quietPly'],
             'repetitions': state['repetitions'], 'seed': seed,

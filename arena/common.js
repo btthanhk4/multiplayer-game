@@ -1,4 +1,4 @@
-import {newGame, applyMove, squareName, pieceCounts} from '../rules.js';
+import {newGame, applyMove, squareName, pieceCounts, makeBoard} from '../rules.js';
 
 export const $ = selector => document.querySelector(selector);
 export const $$ = selector => [...document.querySelectorAll(selector)];
@@ -94,15 +94,24 @@ export function poller(work, interval) {
 }
 
 export function board(state, {flip = false} = {}) {
-  // Flipping turns the board 180 degrees so the viewer's own side is at the bottom.
-  const order = flip ? [8,7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7,8];
-  return `<div class="mini-board${flip ? ' flipped' : ''}" role="img" aria-label="Bàn cờ 9 nhân 9, ${state.revision} nước">${order.flatMap((r, i) => order.map((c, j) => {
-    const p = state.board[r][c];
-    const goal=r===0&&c===8?'goal-blue':r===8&&c===0?'goal-red':'';
+  // Flipping turns the board 180 degrees so the viewer's own side is at the bottom. The board may be 8×8 or 9×9.
+  const n = state.board.length;
+  const order = Array.from({length: n}, (_, i) => flip ? n - 1 - i : i);
+  return `<div class="mini-board n${n}${flip ? ' flipped' : ''}" role="img" aria-label="Bàn cờ ${n} nhân ${n}, ${state.revision} nước">${order.flatMap((r, i) => order.map((c, j) => {
+    const p = state.board[r][c], wall = p?.type === 'wall';
+    const goal=r===0&&c===n-1?'goal-blue':r===n-1&&c===0?'goal-red':'';
     const last=state.lastMove&&[state.lastMove.from,state.lastMove.to].some(x=>x[0]===r&&x[1]===c);
-    const labels=`${j===0&&!goal?`<small class="rank">${9-r}</small>`:''}${i===8?`<small class="file">${'abcdefghi'[c]}</small>`:''}`;
-    return `<div class="square ${(r+c)%2?'dark':''} ${goal} ${last?'last':''}" title="${squareName(r,c)}${p?` · ${p.owner==='p1'?'Xanh':'Đỏ'} · ${{rock:'Đấm',paper:'Lá',scissors:'Kéo'}[p.type]}`:''}">${p?`<span class="stone ${p.owner}">${{rock:'Đ',paper:'L',scissors:'K'}[p.type]}</span>`:goal?`<small>${squareName(r,c)}</small>`:''}${labels}</div>`;
+    const labels=`${j===0&&!goal?`<small class="rank">${n-r}</small>`:''}${i===n-1?`<small class="file">${'abcdefghi'[c]}</small>`:''}`;
+    if (wall) return `<div class="square wall" title="${squareName(r,c,n)} · Vật cản"><span class="block"></span></div>`;
+    return `<div class="square ${(r+c)%2?'dark':''} ${goal} ${last?'last':''}" title="${squareName(r,c,n)}${p?` · ${p.owner==='p1'?'Xanh':'Đỏ'} · ${{rock:'Đấm',paper:'Lá',scissors:'Kéo'}[p.type]}`:''}">${p?`<span class="stone ${p.owner}">${{rock:'Đ',paper:'L',scissors:'K'}[p.type]}</span>`:goal?`<small>${squareName(r,c,n)}</small>`:''}${labels}</div>`;
   })).join('')}</div>`;
+}
+
+// A small picture of a map for the pickers. Seeded maps show one example board; every pair gets its own.
+export function mapPreview(map) {
+  const sample = map === 'random' ? 'random:1a2b3c4d' : map === 'chaos' ? 'chaos:7' : map;
+  const example = sample !== map ? ' (ví dụ)' : '';
+  return `<figure class="map-preview">${board({board: makeBoard(sample), revision: 0, lastMove: null})}<figcaption>${escape(mapLabel(map))}${example}</figcaption></figure>`;
 }
 
 // Moves travel as [row, col, row, col]; the side is whoever is to move in the previous state.
@@ -115,7 +124,9 @@ export function extendStates(states, compact) {
 }
 export const compactMoves = moves => moves.map(m => [...m.from, ...m.to]);
 
-export const MAP_LABELS = {standard: 'Chuẩn', wall: 'Bức tường', flank: 'Hai cánh', block: 'Khối vuông', random: 'Ngẫu nhiên'};
+export const MAP_LABELS = {standard: 'Chuẩn', wall: 'Bức tường', flank: 'Hai cánh', block: 'Khối vuông', arena8: 'Đấu trường 8×8', pillars: 'Bốn trụ', river: 'Dòng sông', maze8: 'Mê cung 8×8', random: 'Ngẫu nhiên', chaos: 'Hỗn loạn'};
+export const MAP_DETAIL = {arena8: 'bàn 8×8, hai bên chạm trán sớm', pillars: 'bàn 9×9 có bốn trụ đá quanh tâm', river: 'bàn 9×9 có tường ngang giữa bàn, chỉ qua được hai cây cầu ở cột d và f', maze8: 'bàn 8×8 có bốn vật cản xếp chéo ở giữa', random: 'mỗi cặp một cách xếp quân ngẫu nhiên, hai ván của cặp giống nhau', chaos: 'mỗi cặp một bàn 8×8 hoặc 9×9 với quân và vật cản đặt ngẫu nhiên (đối xứng); hai ván của cặp giống nhau'};
+export const GEOMETRY_MAPS = ['arena8', 'pillars', 'river', 'maze8', 'chaos'];   // size or obstacles differ from open 9×9
 export const mapLabel = map => MAP_LABELS[String(map || 'standard').split(':')[0]] || 'Chuẩn';
 
 const stalls = {quiet: '80 nửa lượt không ăn quân', repetition: 'Lặp thế ba lần', ply_limit: 'Đủ 400 nửa lượt', no_legal_moves: 'Không còn nước đi'};
@@ -202,8 +213,9 @@ export function roundRules(t) {
     `Mỗi cặp đấu hai ván đổi màu (mỗi đội được cầm cả Xanh lẫn Đỏ). Thắng ván 1 điểm, hòa 0,5, thua 0; tổng hai ván cao hơn thì thắng cặp.`,
     `Mỗi nước tối đa ${t.config.turn_seconds} giây, mỗi bot có quỹ ${t.config.game_seconds} giây cho cả ván; quá giờ, đi sai luật hoặc bot lỗi là thua ván.`,
     `Ván quá ${t.config.max_plies || 400} nửa lượt hoặc hết nước đi hợp lệ không hòa ngay: xử theo số quân còn lại, rồi quân nào gần ô đích hơn; vẫn bằng nhau mới hòa.`,
-    `Bản đồ ${mapLabel(t.map)}${t.map === 'random' ? ': mỗi cặp một cách xếp quân ngẫu nhiên, hai ván của cặp giống nhau' : ''}.`,
+    `Bản đồ ${mapLabel(t.map)}${MAP_DETAIL[t.map] ? `: ${MAP_DETAIL[t.map]}` : ''}.`,
   ];
+  if ([t.map, t.final_map].some(m => GEOMETRY_MAPS.includes(m))) everyGame.push('Bản đồ này có bàn 8×8 hoặc vật cản (ô đặc, không đi vào được). Bot cần đọc <code>observation["size"]</code>, <code>["goal"]</code> và <code>["obstacles"]</code> thay vì giả định bàn 9×9 — xem Sổ tay mục 2.6.');
   const byFormat = {
     swiss: [
       `Mỗi vòng hệ thống ghép các đội gần điểm nhau, tránh gặp lại đối thủ cũ. Vòng sau khó hơn vì đối thủ mạnh hơn.`,

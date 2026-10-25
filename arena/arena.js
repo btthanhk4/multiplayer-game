@@ -1,5 +1,5 @@
 import {$, $$, escape, labels, formats, kinds, formatTime, badge, session, api, notice, action, options, countdown,
-  poller, outcome, teamLink, starText, ago, sparkline, celebrate, mapLabel, roundRulesHtml} from './common.js';
+  poller, outcome, teamLink, starText, ago, sparkline, celebrate, mapLabel, roundRulesHtml, GEOMETRY_MAPS, mapPreview} from './common.js';
 import {createWatch} from './watch.js';
 
 document.getElementById('boot-note')?.remove();   // reaching here means every module loaded
@@ -485,6 +485,9 @@ document.addEventListener('click', event => {
 document.addEventListener('keydown', watch.onKey);
 $('#competition-select').addEventListener('change', event => { selectedTournament = event.target.value; standingsLimit = 100; action(null, renderCompetition); });
 $('#round-select').addEventListener('change', () => action(null, renderRound));
+const showPracticeMap = () => { const map = $('#practice-map').value; $('#practice-map-note').hidden = !GEOMETRY_MAPS.includes(map); $('#practice-map-preview').innerHTML = mapPreview(map); };
+$('#practice-map').addEventListener('change', showPracticeMap);
+showPracticeMap();
 document.addEventListener('toggle', event => { if (event.target.dataset?.rules) ruleState.set(event.target.dataset.rules, event.target.open); }, true);
 let standingsTimer;
 $('#standings-search').addEventListener('input', () => { clearTimeout(standingsTimer); standingsLimit = 100; standingsTimer = setTimeout(() => action(null, renderCompetition), 300); });

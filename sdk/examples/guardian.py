@@ -5,7 +5,7 @@ import random
 def choose_move(observation):
     board, side = observation['board'], observation['mySide']
     beats = {'rock': 'scissors', 'scissors': 'paper', 'paper': 'rock'}
-    goal = [0, 8] if side == 'p1' else [8, 0]
+    goal, size = observation['goal'], observation['size']
 
     def score(move):
         r, c = move['to']
@@ -15,7 +15,7 @@ def choose_move(observation):
         threats = 0
         for dr in (-1, 0, 1):
             for dc in (-1, 0, 1):
-                if 0 <= r+dr < 9 and 0 <= c+dc < 9:
+                if 0 <= r+dr < size and 0 <= c+dc < size:
                     enemy = board[r+dr][c+dc]
                     if enemy and enemy['owner'] != side and beats[enemy['type']] == piece['type']:
                         threats += 1

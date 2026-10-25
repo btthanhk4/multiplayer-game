@@ -42,7 +42,7 @@
       <section id="luat">
         <h2>2. Luật chơi</h2>
         <h3>2.1. Bàn cờ và quân</h3>
-        <p>Bàn cờ <b>9 × 9</b>, hai phe: <b>Xanh</b> (<code>p1</code>, đi trước) và <b>Đỏ</b> (<code>p2</code>). Mỗi phe có <b>9 quân</b>: ba <b>Đấm</b> (<code>rock</code>), ba <b>Lá</b> (<code>paper</code>) và ba <b>Kéo</b> (<code>scissors</code>). Chữ cái viết tắt: Đ = Đấm, L = Lá, K = Kéo.</p>
+        <p>Bàn cờ thường là <b>9 × 9</b> (một số bản đồ ở mục 2.6 dùng <b>8 × 8</b> và có thêm <b>vật cản</b>), hai phe: <b>Xanh</b> (<code>p1</code>, đi trước) và <b>Đỏ</b> (<code>p2</code>). Mỗi phe có <b>9 quân</b>: ba <b>Đấm</b> (<code>rock</code>), ba <b>Lá</b> (<code>paper</code>) và ba <b>Kéo</b> (<code>scissors</code>). Chữ cái viết tắt: Đ = Đấm, L = Lá, K = Kéo.</p>
         <p>Thế cờ ban đầu (chữ thường = Xanh, chữ hoa = Đỏ; hàng 9 ở trên cùng):</p>
 <pre class="board">    a b c d e f g h i
  9  · · · · · · Đ L ·  9
@@ -91,20 +91,70 @@
         <p>Khi đó ván <b>không hòa ngay</b> mà được xử theo thứ tự:</p>
         <ol>
           <li>Bên còn <b>nhiều quân hơn</b> (tổng cả ba loại) thắng.</li>
-          <li>Bằng quân: bên có quân <b>gần ô đích của mình hơn</b> thắng (khoảng cách tính theo 8 hướng, giống <code>distance_to_goal</code> ở mục 3).</li>
+          <li>Bằng quân: bên có quân <b>gần ô đích của mình hơn</b> thắng (khoảng cách là số nước đi 8 hướng, <b>đi vòng vật cản</b> nếu có; bàn không vật cản thì giống <code>distance_to_goal</code> ở mục 3).</li>
           <li>Vẫn bằng cả hai: ván hòa.</li>
         </ol>
         <p>Lý do hiện trên replay, ví dụ <i>80 nửa lượt không ăn quân · xử thắng vì nhiều quân hơn</i>. Hệ quả cho chiến thuật: <b>ăn hơn một quân rồi giữ vững là cách thắng</b>, còn bên đang thua phải tấn công thay vì chờ hòa. Bot đang bằng quân nên đưa quân tiến gần ô đích hơn đối thủ. Công cụ <code>local_arena.py</code> dùng đúng luật xử ván này.</p>
         <h3>2.6. Bản đồ</h3>
-        <p>"Bản đồ" chỉ đổi <b>cách xếp quân lúc đầu</b>. Luật đi, bàn cờ 9 × 9 và hai ô đích <b>không đổi</b>; mỗi phe vẫn có 9 quân (ba mỗi loại) và Đỏ luôn là bản quay 180° của Xanh. Mọi cách xếp nằm trong ba hàng cuối của mỗi phe, nên hai bên cách nhau ít nhất 4 hàng và không thể ăn quân ngay nước đầu.</p>
-        <table class="small-table"><thead><tr><th><code>observation['map']</code></th><th>Tên</th><th>Mô tả</th></tr></thead><tbody>
-          <tr><td><code>standard</code></td><td>Chuẩn</td><td>Cách xếp gốc ở mục 2.1. Đấu xếp hạng và chiến dịch dùng bản đồ này.</td></tr>
-          <tr><td><code>wall</code></td><td>Bức tường</td><td>Hai hàng liền nhau dọc đáy bàn cờ.</td></tr>
-          <tr><td><code>flank</code></td><td>Hai cánh</td><td>Quân chia thành hai cụm ở hai bên.</td></tr>
-          <tr><td><code>block</code></td><td>Khối vuông</td><td>Ba hàng ba quân xếp thành một khối.</td></tr>
-          <tr><td><code>random:xxxxxxxx</code></td><td>Ngẫu nhiên</td><td>Mỗi cặp đấu một cách xếp khác nhau (xác định theo mã sau dấu hai chấm); cả hai ván của cặp dùng chung.</td></tr>
+        <p>"Bản đồ" quyết định <b>cách xếp quân lúc đầu</b> và, với vài bản đồ, cả <b>kích thước bàn cờ</b> (8 × 8) lẫn <b>vật cản</b>. <b>Luật đi quân không đổi.</b> Mỗi phe vẫn có 9 quân (ba mỗi loại), mỗi bản đồ <b>đối xứng quay 180°</b> (quân và vật cản) nên hai bên luôn công bằng, hai ô đích lúc đầu để trống, và không thể ăn quân ngay nước đầu.</p>
+        <p><b>Vật cản</b> là ô đặc: không quân nào đi vào được, không ăn được và không bị ăn; nó đứng yên cả ván. Trong <code>observation['board']</code> ô vật cản hiện là <code>None</code> (giống ô trống) nhưng <b>không bao giờ nằm trong <code>legalMoves</code></b>, và được liệt kê riêng ở <code>observation['obstacles']</code>. Ô đích luôn nằm ngoài vật cản và mọi ô còn lại của bàn cờ đều nối liền nhau, nên luôn có đường tới đích.</p>
+        <table class="small-table"><thead><tr><th><code>observation['map']</code></th><th>Tên</th><th>Bàn</th><th>Mô tả</th></tr></thead><tbody>
+          <tr><td><code>standard</code></td><td>Chuẩn</td><td>9×9</td><td>Cách xếp gốc ở mục 2.1. Đấu xếp hạng và chiến dịch dùng bản đồ này.</td></tr>
+          <tr><td><code>wall</code></td><td>Bức tường</td><td>9×9</td><td>Hai hàng liền nhau dọc đáy bàn cờ.</td></tr>
+          <tr><td><code>flank</code></td><td>Hai cánh</td><td>9×9</td><td>Quân chia thành hai cụm ở hai bên.</td></tr>
+          <tr><td><code>block</code></td><td>Khối vuông</td><td>9×9</td><td>Ba hàng ba quân xếp thành một khối.</td></tr>
+          <tr><td><code>arena8</code></td><td>Đấu trường 8×8</td><td>8×8</td><td>Bàn nhỏ, hai bên chỉ cách nhau hai hàng trống nên chạm trán sớm; ô đích gần hơn.</td></tr>
+          <tr><td><code>pillars</code></td><td>Bốn trụ</td><td>9×9</td><td>Bốn trụ đá quanh tâm bàn cờ, buộc quân đi vòng hoặc dùng trụ làm chỗ nấp.</td></tr>
+          <tr><td><code>river</code></td><td>Dòng sông</td><td>9×9</td><td>Một bức tường ngang giữa bàn, chỉ chừa hai cây cầu ở cột d và f: trận đánh dồn về hai cửa ải.</td></tr>
+          <tr><td><code>maze8</code></td><td>Mê cung 8×8</td><td>8×8</td><td>Bàn nhỏ có bốn vật cản xếp chéo ở giữa.</td></tr>
+          <tr><td><code>random:xxxxxxxx</code></td><td>Ngẫu nhiên</td><td>9×9</td><td>Mỗi cặp đấu một cách xếp khác nhau (xác định theo mã sau dấu hai chấm); cả hai ván của cặp dùng chung.</td></tr>
+          <tr><td><code>chaos:xxxxxxxx</code></td><td>Hỗn loạn</td><td>8×8 hoặc 9×9</td><td>Mỗi cặp đấu một bàn khác nhau: kích thước, cách xếp quân và 2–4 cặp vật cản đều ngẫu nhiên (đối xứng); cả hai ván của cặp dùng chung.</td></tr>
         </table>
-        <p>Ban tổ chức chọn bản đồ cho từng giải và có thể đổi giữa các vòng (ví dụ vòng trong dùng bản đồ khác vòng loại). Bản đồ luôn được công bố trước và hiện trong thông tin giải. Bạn thử bot trên bản đồ khác ở ô <i>Bản đồ</i> của mục Đấu tập hoặc bằng <code>python local_arena.py bot.py --map wall</code>. <b>Đừng viết cứng vị trí quân ban đầu</b>: hãy đọc <code>observation['board']</code> mỗi lượt.</p>
+        <p>Bốn bản đồ cố định mới (chữ thường = Xanh, chữ hoa = Đỏ, <code>#</code> = vật cản):</p>
+<pre class="board">    a b c d e f g h
+ 8  · · · · · Đ L ·  8
+ 7  · · · · L L K Đ  7
+ 6  · · · · · K Đ K  6
+ 5  · · · · · · · ·  5
+ 4  · · · · · · · ·  4
+ 3  k đ k · · · · ·  3
+ 2  đ k l l · · · ·  2
+ 1  · l đ · · · · ·  1
+    a b c d e f g h      chữ thường = Xanh (p1), chữ hoa = Đỏ (p2), # = vật cản</pre>
+<pre class="board">    a b c d e f g h i
+ 9  · · · · · · Đ L ·  9
+ 8  · · · · · L L K Đ  8
+ 7  · · · · · · K Đ K  7
+ 6  · · · # · # · · ·  6
+ 5  · · · · · · · · ·  5
+ 4  · · · # · # · · ·  4
+ 3  k đ k · · · · · ·  3
+ 2  đ k l l · · · · ·  2
+ 1  · l đ · · · · · ·  1
+    a b c d e f g h i      chữ thường = Xanh (p1), chữ hoa = Đỏ (p2), # = vật cản</pre>
+<pre class="board">    a b c d e f g h i
+ 9  · · · · · · Đ L ·  9
+ 8  · · · · · L L K Đ  8
+ 7  · · · · · · K Đ K  7
+ 6  · · · · · · · · ·  6
+ 5  # # # · # · # # #  5
+ 4  · · · · · · · · ·  4
+ 3  k đ k · · · · · ·  3
+ 2  đ k l l · · · · ·  2
+ 1  · l đ · · · · · ·  1
+    a b c d e f g h i      chữ thường = Xanh (p1), chữ hoa = Đỏ (p2), # = vật cản</pre>
+<pre class="board">    a b c d e f g h
+ 8  · · · · · Đ L ·  8
+ 7  · · · · L L K Đ  7
+ 6  · · · · · K Đ K  6
+ 5  · · # · # · · ·  5
+ 4  · · · # · # · ·  4
+ 3  k đ k · · · · ·  3
+ 2  đ k l l · · · ·  2
+ 1  · l đ · · · · ·  1
+    a b c d e f g h      chữ thường = Xanh (p1), chữ hoa = Đỏ (p2), # = vật cản</pre>
+        <p class="callout warn"><b>Viết bot chạy được mọi bản đồ.</b> Bàn 8 × 8 và vật cản làm hỏng các bot viết cứng bàn 9 × 9. Đừng viết <code>range(9)</code>, đừng viết cứng ô đích <code>[0, 8]</code> / <code>[8, 0]</code>. Hãy dùng <code>observation['size']</code> (cạnh bàn), <code>observation['goal']</code> (ô đích của bạn), <code>observation['obstacles']</code> (danh sách vật cản) và ưu tiên <code>legalMoves</code>. Bot đi vào ô vật cản, ra ngoài bàn hoặc gây lỗi chỉ số sẽ <b>thua kỹ thuật</b>. Ban tổ chức luôn công bố bản đồ trước; hãy thử bot ở ô <i>Bản đồ</i> của mục Đấu tập.</p>
+        <p>Ban tổ chức chọn bản đồ cho từng giải và có thể đổi giữa các vòng (ví dụ vòng trong dùng bản đồ khác vòng loại). Bản đồ luôn được công bố trước và hiện trong thông tin giải. Bạn thử bot trên bản đồ khác ở ô <i>Bản đồ</i> của mục Đấu tập hoặc bằng <code>python local_arena.py bot.py --map river</code> (hoặc <code>arena8</code>, <code>pillars</code>, <code>maze8</code>, <code>chaos</code>…). <b>Đừng viết cứng vị trí quân ban đầu</b>: hãy đọc <code>observation['board']</code> mỗi lượt.</p>
         <h3>2.7. Ví dụ</h3>
         <p>Xanh có quân Đấm ở <code>[3,3]</code> và Đỏ có quân Kéo ở <code>[2,4]</code> (hai ô chéo nhau). Đấm ăn Kéo nên Xanh được đi <code>[3,3] → [2,4]</code> và ăn quân Kéo; trong <code>legalMoves</code> nước này có <code>"capture": true</code>. Ngược lại, nếu quân Đỏ là Lá thì Đấm <i>không</i> ăn được Lá, và nước đi vào ô đó <b>không</b> nằm trong <code>legalMoves</code>.</p>
       </section>
@@ -114,13 +164,13 @@
         <p>Mọi tọa độ là cặp <b><code>[hàng, cột]</code></b>, đếm từ 0:</p>
         <ul>
           <li><b>Hàng 0 là hàng trên cùng</b> (hàng 9 theo tên ô), hàng 8 là hàng dưới cùng (hàng 1).</li>
-          <li><b>Cột 0 là cột bên trái</b> (cột a), cột 8 là cột bên phải (cột i).</li>
-          <li>Ô <b>a1 = <code>[8, 0]</code></b>, ô <b>i9 = <code>[0, 8]</code></b>, ô <b>e5 = <code>[4, 4]</code></b>. Công thức: hàng = 9 − số hàng, cột = vị trí chữ cái (a = 0).</li>
+          <li><b>Cột 0 là cột bên trái</b> (cột a), cột cuối là cột bên phải (cột i trên bàn 9×9, cột h trên bàn 8×8).</li>
+          <li>Ô <b>a1 = <code>[8, 0]</code></b>, ô <b>i9 = <code>[0, 8]</code></b>, ô <b>e5 = <code>[4, 4]</code></b>. Công thức: hàng = <code>size</code> − số hàng, cột = vị trí chữ cái (a = 0). Trên bàn 8×8, a1 = <code>[7, 0]</code> và h8 = <code>[0, 7]</code>.</li>
         </ul>
-        <p>Vì vậy <b>Xanh (p1) tiến lên và sang phải</b> (hàng giảm, cột tăng) tới <code>[0, 8]</code>; <b>Đỏ (p2) tiến xuống và sang trái</b> (hàng tăng, cột giảm) tới <code>[8, 0]</code>. Bot luôn nhận <code>mySide</code> để biết mình là phe nào; <b>đừng giả định mình luôn là Xanh</b>, vì các ván đổi màu.</p>
-<pre>GOAL = [0, 8] if observation['mySide'] == 'p1' else [8, 0]
+        <p>Vì vậy <b>Xanh (p1) tiến lên và sang phải</b> (hàng giảm, cột tăng) tới <code>[0, size − 1]</code>; <b>Đỏ (p2) tiến xuống và sang trái</b> (hàng tăng, cột giảm) tới <code>[size − 1, 0]</code> (trên bàn 9×9: <code>[0, 8]</code> và <code>[8, 0]</code>). Bot luôn nhận <code>mySide</code> để biết mình là phe nào; <b>đừng giả định mình luôn là Xanh</b>, vì các ván đổi màu.</p>
+<pre>GOAL = observation['goal']             # ô đích của bạn: [0, size-1] nếu là Xanh, [size-1, 0] nếu là Đỏ
 
-def distance_to_goal(square):          # số nước đi (8 hướng) tới ô đích
+def distance_to_goal(square):          # số nước đi (8 hướng) tới ô đích, bỏ qua vật cản
     return max(abs(square[0] - GOAL[0]), abs(square[1] - GOAL[1]))</pre>
       </section>
 
@@ -151,14 +201,17 @@ def choose_move(observation):
         <h2>5. Dữ liệu bot nhận được</h2>
         <p><code>observation</code> là một <code>dict</code> mới cho mỗi lượt (sửa nó không ảnh hưởng gì tới ván đấu). Mọi giá trị dưới đây có thể dùng trực tiếp.</p>
         <table><thead><tr><th>Khóa</th><th>Kiểu</th><th>Ý nghĩa</th></tr></thead><tbody>
-          <tr><td><code>board</code></td><td>list 9×9</td><td>Thế cờ. <code>board[hàng][cột]</code> là <code>None</code> (ô trống) hoặc <code>{'owner': 'p1'|'p2', 'type': 'rock'|'paper'|'scissors'}</code>.</td></tr>
+          <tr><td><code>board</code></td><td>list <code>size</code>×<code>size</code></td><td>Thế cờ (8×8 hoặc 9×9). <code>board[hàng][cột]</code> là <code>None</code> (ô trống hoặc vật cản) hoặc <code>{'owner': 'p1'|'p2', 'type': 'rock'|'paper'|'scissors'}</code>.</td></tr>
+          <tr><td><code>size</code></td><td>int</td><td>Cạnh của bàn cờ: <code>9</code> hoặc <code>8</code>. Hàng và cột hợp lệ là <code>0 … size−1</code>.</td></tr>
+          <tr><td><code>goal</code>, <code>opponentGoal</code></td><td>[hàng, cột]</td><td>Ô đích của bạn và của đối thủ. Chạm <code>goal</code> là thắng ngay. Bạn là Xanh: <code>[0, size−1]</code>; là Đỏ: <code>[size−1, 0]</code>.</td></tr>
+          <tr><td><code>obstacles</code></td><td>list</td><td>Các ô vật cản <code>[[hàng, cột], …]</code> (rỗng ở bản đồ không vật cản). Trong <code>board</code> chúng là <code>None</code> nhưng không bao giờ có trong <code>legalMoves</code>.</td></tr>
           <tr><td><code>mySide</code></td><td>str</td><td>Phe của bạn: <code>'p1'</code> (Xanh) hoặc <code>'p2'</code> (Đỏ).</td></tr>
           <tr><td><code>turn</code></td><td>str</td><td>Phe đang đến lượt. Khi hàm được gọi, luôn bằng <code>mySide</code>.</td></tr>
           <tr><td><code>legalMoves</code></td><td>list</td><td>Mọi nước hợp lệ của bạn. Mỗi phần tử: <code>{'from': [r, c], 'to': [r, c], 'capture': True|False}</code>. Không bao giờ rỗng khi hàm được gọi.</td></tr>
-          <tr><td><code>map</code></td><td>str</td><td>Bản đồ của ván: <code>standard</code>, <code>wall</code>, <code>flank</code>, <code>block</code> hoặc <code>random:xxxxxxxx</code> (mục 2.6).</td></tr>
+          <tr><td><code>map</code></td><td>str</td><td>Bản đồ của ván: <code>standard</code>, <code>wall</code>, <code>flank</code>, <code>block</code>, <code>arena8</code>, <code>pillars</code>, <code>river</code>, <code>maze8</code>, <code>random:xxxxxxxx</code> hoặc <code>chaos:xxxxxxxx</code> (mục 2.6).</td></tr>
           <tr><td><code>ply</code></td><td>int</td><td>Số nửa lượt đã đi (0 ở nước đầu của Xanh).</td></tr>
           <tr><td><code>quietPly</code></td><td>int</td><td>Số nửa lượt liên tiếp không ai ăn quân. Chạm 80 thì ván được xử (mục 2.5).</td></tr>
-          <tr><td><code>repetitions</code></td><td>dict</td><td>Số lần mỗi thế cờ đã xuất hiện kể từ lần ăn quân gần nhất. Khóa có dạng <code>'p1:' + 9 hàng nối bằng '/'</code> (xem bên dưới). Đủ 3 lần thì ván được xử (mục 2.5).</td></tr>
+          <tr><td><code>repetitions</code></td><td>dict</td><td>Số lần mỗi thế cờ đã xuất hiện kể từ lần ăn quân gần nhất. Khóa có dạng <code>'p1:' + các hàng nối bằng '/'</code> (xem bên dưới). Đủ 3 lần thì ván được xử (mục 2.5).</td></tr>
           <tr><td><code>timeLeft</code></td><td>float</td><td>Số giây suy nghĩ còn lại của bot trong cả ván (bắt đầu 60).</td></tr>
           <tr><td><code>turnLimit</code></td><td>float</td><td>Giới hạn mỗi nước: 3 giây.</td></tr>
           <tr><td><code>maxPly</code></td><td>int</td><td>Số nửa lượt tối đa của ván trong Arena: 400.</td></tr>
@@ -167,6 +220,7 @@ def choose_move(observation):
         </tbody></table>
         <h3>5.1. Ví dụ rút gọn</h3>
 <pre>{
+  'map': 'river', 'size': 9, 'goal': [0, 8], 'opponentGoal': [8, 0], 'obstacles': [[4, 0], [4, 1], [4, 2], ...],
   'mySide': 'p1', 'turn': 'p1', 'ply': 0, 'quietPly': 0,
   'timeLeft': 60.0, 'turnLimit': 3, 'maxPly': 400,
   'board': [ [None, None, ..., {'owner': 'p2', 'type': 'paper'}, None],   # hàng 0 (trên cùng)
@@ -177,11 +231,13 @@ def choose_move(observation):
   'repetitions': {'p1:......p2rp2p./.....p2pp2p...': 1}
 }</pre>
         <h3>5.2. Khóa của <code>repetitions</code></h3>
-        <p>Khóa là <code>bên_đến_lượt + ':' + 9 hàng nối bằng '/'</code>; mỗi ô là <code>.</code> (trống) hoặc chủ sở hữu + chữ cái đầu của loại quân (<code>p1r</code>, <code>p2s</code>…). Hàm tạo khóa của một thế cờ bất kỳ:</p>
-<pre>def position_key(board, turn):
+        <p>Khóa là <code>bên_đến_lượt + ':' + các hàng nối bằng '/'</code>; mỗi ô là <code>.</code> (trống), <code>#</code> (vật cản) hoặc chủ sở hữu + chữ cái đầu của loại quân (<code>p1r</code>, <code>p2s</code>…). Hàm tạo khóa của một thế cờ bất kỳ:</p>
+<pre>def position_key(board, turn, obstacles=()):
+    walls = {tuple(w) for w in obstacles}          # observation['obstacles']
     rows = []
-    for line in board:
-        rows.append(''.join(p['owner'] + p['type'][0] if p else '.' for p in line))
+    for r, line in enumerate(board):
+        rows.append(''.join('#' if (r, c) in walls else p['owner'] + p['type'][0] if p else '.'
+                            for c, p in enumerate(line)))
     return turn + ':' + '/'.join(rows)</pre>
         <p>Dùng để tránh nước đưa thế cờ tới lần lặp thứ 3 khi bạn đang dẫn trước (hoặc cố tình lặp khi đang bị thua):</p>
 <pre>after_board = after(board, move)                 # hàm của bạn, xem mục 6
@@ -194,23 +250,35 @@ if seen &gt;= 2:    # đi nước này thì ván được xử theo quân và đ
         <h2>6. Hàm trợ giúp thường dùng</h2>
         <p>Để nhìn trước nước đi, bạn cần tự mô phỏng. Các hàm dưới đây (đều có sẵn trong <a href="../sdk/examples/template.py">template.py</a>) là nền tảng cho gần như mọi chiến thuật.</p>
 <pre>BEATS = {'rock': 'scissors', 'paper': 'rock', 'scissors': 'paper'}   # loại quân → loại bị nó ăn
-GOALS = {'p1': (0, 8), 'p2': (8, 0)}
 STEPS = [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]
+WALL = {'owner': None, 'type': 'wall'}          # vật cản: không đi vào, không ăn được
 
 def other(side):
     return 'p2' if side == 'p1' else 'p1'
 
+def goal_of(board, side):
+    size = len(board)                           # bàn 9×9 hoặc 8×8
+    return (0, size - 1) if side == 'p1' else (size - 1, 0)
+
+def with_walls(observation):
+    """Bản sao bàn cờ có đánh dấu vật cản (trong observation['board'] chúng là None)."""
+    board = [row[:] for row in observation['board']]
+    for r, c in observation['obstacles']:
+        board[r][c] = WALL
+    return board
+
 def moves_of(board, side):
     """Mọi nước hợp lệ của `side` trên `board`: (hàng, cột, hàng_mới, cột_mới)."""
     result = []
-    for r in range(9):
-        for c in range(9):
+    size = len(board)
+    for r in range(size):
+        for c in range(size):
             piece = board[r][c]
             if not piece or piece['owner'] != side:
                 continue
             for dr, dc in STEPS:
                 nr, nc = r + dr, c + dc
-                if 0 &lt;= nr &lt; 9 and 0 &lt;= nc &lt; 9:
+                if 0 &lt;= nr &lt; size and 0 &lt;= nc &lt; size:
                     target = board[nr][nc]
                     if target is None or (target['owner'] != side and BEATS[piece['type']] == target['type']):
                         result.append((r, c, nr, nc))
@@ -230,10 +298,11 @@ def counts(board, side):
             if piece and piece['owner'] == side:
                 total[piece['type']] += 1
     return total</pre>
+        <p><b>Vật cản:</b> hãy gọi <code>board = with_walls(observation)</code> một lần ở đầu <code>choose_move</code> rồi mô phỏng trên <code>board</code> đó: ô vật cản là một "quân" không thuộc phe nào nên <code>moves_of</code> tự động không đi vào và không ăn nó, đúng như luật.</p>
         <p><b>Lưu ý quan trọng:</b> <code>copy = [row[:] for row in board]</code> sao chép từng hàng. Nếu bạn viết <code>copy = board</code> hoặc <code>board[:]</code>, hai bản cờ dùng chung các hàng và việc mô phỏng sẽ làm hỏng bàn cờ gốc. Các ô là <code>dict</code> nhưng bạn không sửa chúng, chỉ di chuyển tham chiếu, nên không cần sao chép sâu (<code>deepcopy</code> quá chậm).</p>
         <h3>6.1. Nước này có thắng ngay không?</h3>
 <pre>def wins_now(board, side, move):
-    if (move[2], move[3]) == GOALS[side]:                    # chạm ô đích
+    if (move[2], move[3]) == goal_of(board, side):           # chạm ô đích
         return True
     after_board = after(board, move)
     return any(n == 0 for n in counts(after_board, other(side)).values())   # ăn nốt một loại</pre>
@@ -244,7 +313,7 @@ def threatened(board, r, c):
     me = board[r][c]
     for dr, dc in STEPS:
         nr, nc = r + dr, c + dc
-        if 0 &lt;= nr &lt; 9 and 0 &lt;= nc &lt; 9:
+        if 0 &lt;= nr &lt; len(board) and 0 &lt;= nc &lt; len(board):
             enemy = board[nr][nc]
             if enemy and enemy['owner'] != me['owner'] and enemy['type'] == PREDATOR[me['type']]:
                 return True

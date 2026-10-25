@@ -20,16 +20,25 @@ LIMITS = {'protocol': 2, 'turn_seconds': 3, 'game_seconds': 60, 'init_seconds': 
           'memory_mib': 256, 'source_bytes': 65536, 'output_bytes': 4096,
           'max_plies': 400, 'no_legal_moves': 'adjudicate', 'ply_limit': 'adjudicate'}
 ENGINE_KEY = hashlib.sha256((RULES_HASH + json.dumps(LIMITS, sort_keys=True)).encode()).hexdigest()
-# Starting formations ("bản đồ"). Rules, goals and board size never change; ids match rules.js. `random` gives every
-# pair its own symmetric formation (both games of the pair share it).
+# Maps: how the pieces start and, for some, the board size and the obstacles. Movement rules never change and every map is
+# symmetric under a 180° turn; ids match rules.js. `random` and `chaos` give every pair its own board (both games of
+# the pair share it). Maps with `geometry` change the board size or add obstacles, so a bot must read `size`, `goal`
+# and `obstacles` from the observation instead of assuming a 9×9 board.
 MAPS = [
-    ('standard', 'Chuẩn', 'Cách xếp quân gốc.'),
-    ('wall', 'Bức tường', 'Hai hàng liền nhau dọc đáy bàn cờ.'),
-    ('flank', 'Hai cánh', 'Quân chia thành hai cụm ở hai bên.'),
-    ('block', 'Khối vuông', 'Ba hàng ba quân xếp thành một khối.'),
-    ('random', 'Ngẫu nhiên', 'Mỗi cặp đấu một cách xếp khác nhau, đối xứng hai bên.'),
+    ('standard', 'Chuẩn', 'Cách xếp quân gốc, bàn 9×9.'),
+    ('wall', 'Bức tường', 'Hai hàng liền nhau dọc đáy bàn cờ, bàn 9×9.'),
+    ('flank', 'Hai cánh', 'Quân chia thành hai cụm ở hai bên, bàn 9×9.'),
+    ('block', 'Khối vuông', 'Ba hàng ba quân xếp thành một khối, bàn 9×9.'),
+    ('arena8', 'Đấu trường 8×8', 'Bàn nhỏ 8×8, hai bên chạm trán sớm.'),
+    ('pillars', 'Bốn trụ', 'Bàn 9×9 có bốn trụ đá quanh tâm bàn cờ.'),
+    ('river', 'Dòng sông', 'Bàn 9×9 có bức tường ngang giữa bàn, chỉ còn hai cây cầu để qua.'),
+    ('maze8', 'Mê cung 8×8', 'Bàn 8×8 có bốn vật cản xếp chéo ở giữa.'),
+    ('random', 'Ngẫu nhiên', 'Mỗi cặp đấu một cách xếp quân khác nhau, bàn 9×9, đối xứng hai bên.'),
+    ('chaos', 'Hỗn loạn', 'Mỗi cặp đấu một bàn khác nhau: 8×8 hoặc 9×9, quân và vật cản đặt ngẫu nhiên, đối xứng.'),
 ]
 MAP_IDS = {item[0] for item in MAPS}
+SEEDED_MAPS = {'random', 'chaos'}               # concrete id is `<name>:<seed>` per pair of games
+GEOMETRY_MAPS = {'arena8', 'pillars', 'river', 'maze8', 'chaos'}   # board size or obstacles differ from 9×9 open
 SCHEMA_VERSION = 3
 PRIORITY = {'validate': 0, 'tournament': 1, 'ranked': 2, 'campaign': 3, 'friendly': 3, 'practice': 3}
 TEAM_SIZE = int(os.getenv('ARENA_TEAM_SIZE', '4'))
@@ -210,12 +219,20 @@ def team_code():
     return ''.join(secrets.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(8))
 
 
+def map_setting(choice):
+    """A map as stored on a tournament: the plain id (a seeded map stays `random`/`chaos` until a pair is made)."""
+    choice = choice or 'standard'
+    if choice not in MAP_IDS:
+        raise Problem('Bản đồ không tồn tại.')
+    return choice
+
+
 def resolve_map(choice, seed=None):
     """Concrete map id for one pair of games: `random` becomes `random:<seed>` so both games share a formation."""
     choice = choice or 'standard'
     if choice not in MAP_IDS:
         raise Problem('Bản đồ không tồn tại.')
-    return f'random:{(seed or uid())[:8]}' if choice == 'random' else choice
+    return f'{choice}:{(seed or uid())[:8]}' if choice in SEEDED_MAPS else choice
 
 
 def elo_tier(rating):
@@ -347,7 +364,7 @@ def pieces_left(state):
     counts = {'p1': 0, 'p2': 0}
     for line in state['board']:
         for piece in line:
-            if piece:
+            if piece and piece['owner']:
                 counts[piece['owner']] += 1
     return counts
 
@@ -1273,8 +1290,8 @@ class Store:
                           description='', seed_from=None, seed_count=None, map_choice='standard', final_map=None):
         if fmt not in ('swiss', 'round_robin', 'knockout'):
             raise Problem('Thể thức không hợp lệ.')
-        map_choice = resolve_map(map_choice, 'x') if map_choice != 'random' else 'random'
-        final_map = (final_map if final_map == 'random' else resolve_map(final_map, 'x')) if final_map else None
+        map_choice = map_setting(map_choice)
+        final_map = map_setting(final_map) if final_map else None
         if type(rounds) is not int or not 1 <= rounds <= 30:
             raise Problem('Số vòng Swiss cần từ 1 đến 30.')
         tid = uid()
@@ -1327,11 +1344,11 @@ class Store:
             if map_choice is not None:
                 if t['status'] not in ('open', 'frozen', 'running'):
                     raise Problem('Giải đã kết thúc, không đổi bản đồ được.', 409)
-                changes['map'] = map_choice if map_choice == 'random' else resolve_map(map_choice, 'x')
+                changes['map'] = map_setting(map_choice)
             if final_map is not False:        # None or '' clears the separate final-round map
                 if t['status'] not in ('open', 'frozen', 'running'):
                     raise Problem('Giải đã kết thúc, không đổi bản đồ được.', 409)
-                changes['final_map'] = (final_map if final_map == 'random' else resolve_map(final_map, 'x')) if final_map else None
+                changes['final_map'] = map_setting(final_map) if final_map else None
             if deadline is not None or rounds is not None:
                 if t['status'] != 'open':
                     raise Problem('Chỉ đổi hạn hoặc số vòng khi giải còn nhận đăng ký.', 409)
