@@ -1,5 +1,5 @@
 import {$, $$, escape, labels, formats, kinds, formatTime, badge, session, api, notice, action, options, countdown,
-  duration, poller} from './common.js';
+  duration, poller, outcome} from './common.js';
 
 let me = null, tab = 'dashboard', tournaments = [], adminTournament = '', detail = null, importRows = [];
 
@@ -160,6 +160,13 @@ async function renderBots() {
     : '<div class="empty">Không có bài nộp phù hợp.</div>';
 }
 
+async function renderMatches() {
+  const params = new URLSearchParams({q: $('#match-search').value, status: $('#match-status').value, kind: $('#match-kind').value});
+  const {items} = await api(`/admin/matches?${params}`);
+  $('#match-admin-list').innerHTML = items.length ? items.map(m => `<div class="job"><div>${badge(m.status)} <strong>${escape(m.team1)}</strong> × <strong>${escape(m.team2)}</strong> · ${escape(kinds[m.kind] || m.kind)}<p>${escape(m.bot1)} / ${escape(m.bot2)} · ${formatTime(m.created)}${m.status === 'done' ? ` · ${escape(outcome(m))}` : ''}${m.error ? ` · ${escape(m.error)}` : ''} · <small>${escape(m.id)}</small></p></div>${!m.pairing_id && ['queued','running','failed'].includes(m.status) ? `<button class="button" data-cancel-match="${m.id}">Hủy ván</button>` : ''}</div>`).join('')
+    : '<p class="caption">Không có ván phù hợp.</p>';
+}
+
 async function renderJobs() {
   const {items} = await api(`/admin/jobs?status=${$('#job-status').value}`);
   $('#job-list').innerHTML = items.length ? items.map(j => `<div class="job"><div>${badge(j.status)} ${j.kind === 'game' ? 'Ván đấu' : 'Kiểm tra bot'} · ưu tiên ${j.priority} · lần ${j.attempts}<p>${escape(j.error || `Tạo ${formatTime(j.created)}${j.started ? ` · bắt đầu ${formatTime(j.started)}` : ''}${j.finished && j.started ? ` · ${duration(j.finished - j.started)}` : ''}`)}</p></div>${j.status === 'failed' ? `<button class="button" data-retry="${j.id}">Thử lại</button>` : ''}</div>`).join('')
@@ -178,6 +185,7 @@ async function refresh() {
   if (tab === 'import') { await loadTournaments(); await renderImportHistory(); }
   if (tab === 'people') await Promise.all([renderTeams(), renderUsers()]);
   if (tab === 'bots') await renderBots();
+  if (tab === 'matches') await renderMatches();
   if (tab === 'queue') await renderJobs();
   if (tab === 'log') await renderAudit();
 }
@@ -189,6 +197,8 @@ document.addEventListener('click', event => {
   const button = event.target.closest('button'); if (!button) return;
   if (button.dataset.tab) setTab(button.dataset.tab);
   if (button.dataset.close) $(`#${button.dataset.close}`).close();
+  if (button.dataset.cancelMatch) action(button, async () => { if (!confirm('Hủy ván này?')) return; await api(`/admin/matches/${button.dataset.cancelMatch}`, {action: 'cancel'}); notice('Đã hủy ván.'); await renderMatches(); });
+  if (button.dataset.cancelQueue) action(button, async () => { if (!confirm('Hủy mọi ván đang chờ thuộc loại này?')) return; const r = await api('/admin/matches-cancel-queued', {kind: button.dataset.cancelQueue}); notice(`Đã hủy ${r.cancelled} ván đang chờ.`); await renderMatches(); });
   if (button.dataset.retry) action(button, async () => { await api(`/admin/jobs/${button.dataset.retry}/retry`, {}); notice('Đã đưa job trở lại hàng đợi.'); await renderJobs(); });
   if (button.dataset.dq) action(button, async () => {
     const reason = prompt('Lý do truất quyền (ghi vào nhật ký):'); if (reason === null) return;
@@ -253,10 +263,11 @@ $('#import-form').addEventListener('submit', event => { event.preventDefault(); 
 $('#import-filter').addEventListener('change', renderImportRows);
 
 let searchTimer;
-for (const [input, work] of [['#team-search', renderTeams], ['#user-search', renderUsers], ['#bot-search', renderBots]]) {
+for (const [input, work] of [['#team-search', renderTeams], ['#user-search', renderUsers], ['#bot-search', renderBots], ['#match-search', renderMatches]]) {
   $(input).addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => action(null, work), 300); });
 }
 $('#bot-status').addEventListener('change', () => action(null, renderBots));
+for (const id of ['#match-status', '#match-kind']) $(id).addEventListener('change', () => action(null, renderMatches));
 $('#job-status').addEventListener('change', () => action(null, renderJobs));
 $('#retry-all').addEventListener('click', event => action(event.target, async () => { const r = await api('/admin/jobs/retry-failed', {}); notice(`Đã đưa ${r.count} job lỗi trở lại hàng đợi.`); await renderJobs(); }));
 

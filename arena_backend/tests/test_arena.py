@@ -860,6 +860,65 @@ class Campaign(Base):
         self.assertEqual({m['team2_id'] for m in matches} | {m['team1_id'] for m in matches}, {team, SYSTEM_TEAM})
 
 
+class AdminMatches(Base):
+    def admin_client(self):
+        self.register('boss_admin')
+        with self.store.connect(True) as db:
+            db.execute("UPDATE users SET role='admin' WHERE username='boss_admin'")
+
+    def test_list_filter_and_cancel_only_standalone_games(self):
+        (a, ua), (b, _) = self.team('Alpha'), self.team('Beta')
+        sa, sb = self.valid(a), self.valid(b)
+        with self.store.connect(True) as db:
+            practice = self.store.create_match(db, sa, sb, ua)
+        tid = self.tournament()
+        with self.store.connect(True) as db:
+            pid = uid()
+            db.execute('INSERT INTO pairings(id,tournament_id,round,slot,a,b) VALUES(?,?,1,0,?,?)', (pid, tid, a, b))
+            ranked_game = self.store.create_match(db, sa, sb, pairing=pid, kind='tournament')
+        self.assertEqual(self.client.get('/api/admin/matches').status_code, 401)
+        self.admin_client()
+        items = self.client.get('/api/admin/matches').json['items']
+        self.assertEqual({m['id'] for m in items}, {practice, ranked_game})
+        self.assertEqual([m['id'] for m in self.client.get('/api/admin/matches?kind=practice').json['items']], [practice])
+        self.assertEqual(len(self.client.get('/api/admin/matches?q=Alpha&status=queued').json['items']), 2)
+        self.assertEqual(self.post(f'/admin/matches/{ranked_game}', {'action': 'cancel'}).status_code, 409)
+        self.assertEqual(self.post(f'/admin/matches/{practice}', {'action': 'cancel'}).status_code, 200)
+        self.assertEqual(self.post(f'/admin/matches/{practice}', {'action': 'cancel'}).status_code, 409)
+        self.assertEqual(self.post('/admin/matches/nope', {'action': 'cancel'}).status_code, 404)
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT status FROM matches WHERE id=?', (practice,)).fetchone()[0], 'cancelled')
+
+    def test_clear_queue_cancels_waiting_games_and_their_series(self):
+        (a, _), (b, _) = self.team('Một'), self.team('Hai')
+        sa, sb = self.valid(a), self.valid(b)
+        self.store.join_ranked(a, sa)
+        series = self.store.join_ranked(b, sb)['series_id']
+        self.admin_client()
+        self.assertEqual(self.post('/admin/matches-cancel-queued', {'kind': 'tournament'}).status_code, 400)
+        self.assertEqual(self.post('/admin/matches-cancel-queued', {'kind': 'ranked'}).json['cancelled'], 2)
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT status FROM ranked_series WHERE id=?', (series,)).fetchone()[0], 'cancelled')
+
+
+class OpenRegistration(unittest.TestCase):
+    def test_public_origin_needs_invite_or_explicit_open_registration(self):
+        import os
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(RuntimeError):
+                create_app(directory, origin='https://arena.example.org', registration_code='', bosses=False)
+            with mock.patch.dict(os.environ, {'ARENA_OPEN_REGISTRATION': '1'}):
+                app = create_app(directory, origin='https://arena.example.org', registration_code='', bosses=False)
+                client = app.test_client()
+                self.assertFalse(client.get('/api/health').json['registration_invite'])
+                result = client.post('/api/register', json={'username': 'newbie', 'name': 'Tân sinh viên',
+                                                            'password': 'test-only-password-123'},
+                                     headers={'Origin': 'https://arena.example.org'})
+                self.assertEqual(result.status_code, 200, result.json)
+            app.extensions['store'].close()
+
+
 class Social(Base):
     def series(self, a, sa, b, sb, a_wins, final_state=None, moves=30):
         self.store.join_ranked(a, sa)

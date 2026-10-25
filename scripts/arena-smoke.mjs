@@ -123,6 +123,11 @@ try {
   await admin.goto(base+'/arena/admin');
   await admin.locator('#stats .stat').first().waitFor();
   await admin.screenshot({path:'artifacts/admin-dashboard.png',fullPage:true});
+  await admin.locator('[role=tab][data-tab=matches]').click();
+  await admin.locator('#match-admin-list .job').first().waitFor();
+  await admin.locator('#match-kind').selectOption('campaign');
+  await admin.locator('#match-admin-list .job').filter({hasText:'Chiến dịch'}).first().waitFor();
+  await admin.screenshot({path:'artifacts/admin-matches.png',fullPage:true});
   await admin.locator('[role=tab][data-tab=events]').click();
   await admin.locator('#tournament-form [name=name]').fill('Giải trình duyệt');
   await admin.locator('#tournament-form button.primary').click();

@@ -1428,6 +1428,30 @@ class Store:
         Store.settle_ranked(db, mid)
         Store.settle_campaign(db, mid)
 
+    def admin_cancel_match(self, mid, actor):
+        with self.connect(True) as db:
+            match = db.execute('SELECT status,pairing_id FROM matches WHERE id=?', (mid,)).fetchone()
+            if not match:
+                raise Problem('Không tìm thấy ván.', 404)
+            if match['pairing_id']:
+                raise Problem('Ván của giải đấu không hủy lẻ được. Dùng Truất quyền ở tab Giải đấu.', 409)
+            if match['status'] not in ('queued', 'running', 'failed'):
+                raise Problem('Chỉ hủy được ván đang chờ, đang chạy hoặc lỗi.', 409)
+            self.cancel_match(db, mid)
+            self.audit(db, actor, 'match.cancelled', {'id': mid})
+            return {'ok': True}
+
+    def admin_cancel_queued(self, actor, kind):
+        """Clear a backlog of waiting non-tournament games, e.g. when the grader is overloaded."""
+        if kind not in ('practice', 'friendly', 'campaign', 'ranked'):
+            raise Problem('Chọn loại ván: practice, friendly, campaign hoặc ranked.')
+        with self.connect(True) as db:
+            ids = [r['id'] for r in db.execute("SELECT id FROM matches WHERE kind=? AND status='queued'", (kind,))]
+            for mid in ids:
+                self.cancel_match(db, mid)
+            self.audit(db, actor, 'match.cancelled_queue', {'kind': kind, 'count': len(ids)})
+            return len(ids)
+
     def set_team_status(self, team, actor, status, note=''):
         if status not in ('active', 'disqualified'):
             raise Problem('Trạng thái đội không hợp lệ.')

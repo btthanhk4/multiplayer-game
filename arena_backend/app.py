@@ -84,8 +84,8 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
     if not local and parsed.scheme != 'https':
         raise RuntimeError('Public deployment requires HTTPS through Cloudflare/reverse proxy.')
     code = registration_code if registration_code is not None else os.getenv('ARENA_REGISTRATION_CODE', '')
-    if not local and not code:
-        raise RuntimeError('Set ARENA_REGISTRATION_CODE before opening public registrations.')
+    if not local and not code and os.getenv('ARENA_OPEN_REGISTRATION') != '1':
+        raise RuntimeError('Set ARENA_REGISTRATION_CODE, or ARENA_OPEN_REGISTRATION=1 to let anyone register.')
     app.extensions['store'] = store
     if bosses:
         store.ensure_bosses()
@@ -700,6 +700,41 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         if action == 'remove_from_team':
             store.leave_team(user, actor)
         return jsonify(result)
+
+    @app.get('/api/admin/matches')
+    def admin_matches():
+        auth(True)
+        where, args = [], []
+        for column, key in (('m.status', 'status'), ('m.kind', 'kind')):
+            if request.args.get(key):
+                where.append(f'{column}=?')
+                args.append(request.args[key])
+        q = request.args.get('q', '').strip()
+        if q:
+            where.append('(t1.name LIKE ? OR t2.name LIKE ? OR m.id LIKE ?)')
+            args += [f'%{q}%'] * 3
+        with store.connect() as db:
+            rows = db.execute(
+                'SELECT m.id,m.status,m.kind,m.winner,m.reason,m.plies,m.created,m.pairing_id,s1.name bot1,s2.name bot2,'
+                't1.name team1,t2.name team2,j.attempts,j.error FROM matches m '
+                'JOIN submissions s1 ON s1.id=m.p1 JOIN submissions s2 ON s2.id=m.p2 '
+                'JOIN teams t1 ON t1.id=s1.team_id JOIN teams t2 ON t2.id=s2.team_id '
+                "LEFT JOIN jobs j ON j.kind='game' AND j.ref=m.id "
+                + ('WHERE ' + ' AND '.join(where) + ' ' if where else '')
+                + 'ORDER BY m.created DESC LIMIT 50 OFFSET ?', (*args, page()*50)).fetchall()
+        return jsonify(items=[dict(r) for r in rows])
+
+    @app.post('/api/admin/matches/<mid>')
+    def admin_match(mid):
+        actor = auth(True)
+        if body().get('action') != 'cancel':
+            raise Problem('Thao tác không hợp lệ.')
+        return jsonify(store.admin_cancel_match(mid, actor))
+
+    @app.post('/api/admin/matches-cancel-queued')
+    def admin_cancel_queued():
+        actor, data = auth(True), body()
+        return jsonify(cancelled=store.admin_cancel_queued(actor, str(data.get('kind') or '')))
 
     @app.get('/api/admin/submissions')
     def admin_submissions():

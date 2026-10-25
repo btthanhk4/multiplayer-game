@@ -10,6 +10,8 @@
 - **Tạo động lực (V3)**: chiến dịch 5 boss mạnh dần (bot trong `sdk/examples` và `sdk/bosses`, tự đăng ký và được kiểm tra khi API khởi động), bảng vàng chiến dịch, 17 huy hiệu, bảng tin trực tiếp (lật kèo, thắng trắng, hạ boss, vô địch), hồ sơ công khai của đội kèm đồ thị Elo, giao hữu với đội bất kỳ, bục trao giải, replay có link chia sẻ (`/#watch=<id>`), tua nhanh và phóng to, cùng pháo hoa khi đội thắng.
 - SQLite WAL, kết nối dùng lại theo luồng, cache 2–3 giây cho dữ liệu công khai, và giới hạn tần suất phù hợp với việc cả trường dùng chung một IP NAT.
 
+**Đăng ký mở**: mặc định server public đòi `ARENA_REGISTRATION_CODE`. Muốn ai có link cũng tự tạo tài khoản được, để trống mã đó và đặt `ARENA_OPEN_REGISTRATION=1`. Giới hạn tần suất vẫn áp dụng; admin có thể tắt đăng ký ở tab Tổng quan. Tab *Trận đấu* của admin lọc/hủy ván và xóa hàng chờ đấu tập/giao hữu/chiến dịch khi máy chấm quá tải.
+
 ## 1. Chạy thử trên máy phát triển
 
 ```powershell

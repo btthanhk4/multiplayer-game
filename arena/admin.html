@@ -24,8 +24,9 @@
         <button role="tab" aria-selected="false" data-tab="import">03 <span>Nhập Google Form</span></button>
         <button role="tab" aria-selected="false" data-tab="people">04 <span>Đội & tài khoản</span></button>
         <button role="tab" aria-selected="false" data-tab="bots">05 <span>Bài nộp</span></button>
-        <button role="tab" aria-selected="false" data-tab="queue">06 <span>Hàng đợi</span></button>
-        <button role="tab" aria-selected="false" data-tab="log">07 <span>Nhật ký</span></button>
+        <button role="tab" aria-selected="false" data-tab="matches">06 <span>Trận đấu</span></button>
+        <button role="tab" aria-selected="false" data-tab="queue">07 <span>Hàng đợi</span></button>
+        <button role="tab" aria-selected="false" data-tab="log">08 <span>Nhật ký</span></button>
       </div>
       <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 
@@ -102,6 +103,16 @@
         <div class="standings-tools"><label>Tìm (đội, tên bot, hash)<input id="bot-search" type="search"></label><label>Trạng thái<select id="bot-status"><option value="">Tất cả</option><option value="queued">Đang chờ</option><option value="running">Đang chạy</option><option value="valid">Hợp lệ</option><option value="rejected">Cần sửa</option><option value="failed">Lỗi hạ tầng</option></select></label></div>
         <div id="bot-list" class="submission-list"></div>
         <p class="caption">“Trùng mã với N đội” giúp phát hiện sao chép; bot mẫu nguyên bản thường trùng nhiều và là bình thường.</p>
+      </section>
+
+      <section id="matches" class="view" role="tabpanel" hidden>
+        <div class="section-heading"><div><p class="eyebrow">QUẢN LÝ VÁN ĐẤU</p><h2>Trận đấu</h2></div></div>
+        <div class="standings-tools"><label>Tìm đội hoặc mã ván<input id="match-search" type="search"></label>
+          <label>Trạng thái<select id="match-status"><option value="">Tất cả</option><option value="queued">Đang chờ</option><option value="running">Đang chạy</option><option value="failed">Lỗi hạ tầng</option><option value="done">Đã xong</option><option value="cancelled">Đã hủy</option></select></label>
+          <label>Loại<select id="match-kind"><option value="">Tất cả</option><option value="tournament">Giải đấu</option><option value="ranked">Xếp hạng</option><option value="campaign">Chiến dịch</option><option value="friendly">Giao hữu</option><option value="practice">Đấu tập</option></select></label></div>
+        <div class="action-row"><button class="button" data-cancel-queue="practice">Xóa hàng chờ đấu tập</button><button class="button" data-cancel-queue="friendly">Xóa hàng chờ giao hữu</button><button class="button" data-cancel-queue="campaign">Xóa hàng chờ chiến dịch</button></div>
+        <div id="match-admin-list" class="job-list"></div>
+        <p class="caption">Ván giải đấu không hủy lẻ được (dùng Truất quyền). Xóa hàng chờ chỉ hủy ván chưa chạy, và hủy luôn cặp xếp hạng/lượt boss tương ứng.</p>
       </section>
 
       <section id="queue" class="view" role="tabpanel" hidden>
