@@ -1,5 +1,5 @@
 import {$, $$, escape, labels, formats, kinds, formatTime, badge, session, api, notice, action, options, countdown,
-  duration, poller, outcome, mapLabel} from './common.js';
+  duration, poller, outcome, mapLabel, roundRulesHtml} from './common.js';
 
 document.getElementById('boot-note')?.remove();   // reaching here means every module loaded
 let editingFor = '';
@@ -77,10 +77,12 @@ async function loadTournaments() {
 async function renderEvents() {
   await loadTournaments();
   if (!adminTournament) { $('#tournament-state').textContent = 'Tạo giải đầu tiên ở bên trái.'; $('#entry-body').innerHTML = ''; return; }
-  detail = await api(`/tournaments/${adminTournament}`);
-  const t = detail.tournament, active = detail.standings.filter(s => s.entry_status === 'active').length;
-  const pending = detail.standings.filter(s => ['queued','running'].includes(s.bot_status)).length;
-  $('#tournament-state').innerHTML = `${badge(t.status)} ${escape(formats[t.format])} · Vòng ${t.round}/${t.rounds} · Bản đồ ${mapLabel(t.map)}${t.final_map ? ` (chung kết: ${mapLabel(t.final_map)})` : ''} · ${detail.standings.length} đăng ký${t.status !== 'open' ? ` · ${active} đang thi` : ''}${pending && t.status === 'open' ? ` · <strong>${pending} bot đang chờ kiểm tra</strong>` : ''}<br>${t.status === 'open' ? `Hạn: ${formatTime(t.deadline)} (${countdown(t.deadline)})` : `${detail.unfinished} ván chưa xong`}`;
+  detail = await api(`/tournaments/${adminTournament}?limit=300&q=${encodeURIComponent($('#entry-search').value.trim())}`);
+  const t = detail.tournament, active = detail.active;
+  const pending = detail.pending;
+  $('#tournament-state').innerHTML = `${badge(t.status)} ${escape(formats[t.format])} · Vòng ${t.round}/${t.rounds} · Bản đồ ${mapLabel(t.map)}${t.final_map ? ` (chung kết: ${mapLabel(t.final_map)})` : ''} · ${detail.count} đăng ký${t.status !== 'open' ? ` · ${active} đang thi` : ''}${pending && t.status === 'open' ? ` · <strong>${pending} bot đang chờ kiểm tra</strong>` : ''}<br>${t.status === 'open' ? `Hạn: ${formatTime(t.deadline)} (${countdown(t.deadline)})` : `${detail.unfinished} ván chưa xong`}`;
+  const rulesHtml = roundRulesHtml(t), rulesBox = $('#admin-rules');
+  if (rulesBox.dataset.html !== rulesHtml) { rulesBox.dataset.html = rulesHtml; rulesBox.innerHTML = `<details class="more"><summary>Luật từng vòng (thí sinh cũng thấy nội dung này)</summary>${rulesHtml}</details>`; }
   $('#freeze-button').disabled = $('#force-freeze').disabled = t.status !== 'open' || t.deadline > Date.now()/1000;
   $('#next-round-button').disabled = !['frozen','running'].includes(t.status) || detail.unfinished > 0;
   $('#auto-toggle').checked = Boolean(t.auto_advance);
@@ -107,15 +109,14 @@ async function renderEvents() {
 async function renderAdminRound() {
   const number = $('#admin-round').value;
   if (!number || !adminTournament) { $('#admin-round-view').innerHTML = '<p class="caption">Vòng đầu tiên sẽ hiện sau khi bấm “Mở vòng”.</p>'; return; }
-  const {items} = await api(`/tournaments/${adminTournament}/rounds/${number}`);
-  $('#admin-round-view').innerHTML = items.map(p => `<div class="job"><div><strong>${escape(p.a_name)}</strong> × <strong>${escape(p.b_name || '—')}</strong><p>${!p.b ? 'BYE' : p.forfeit ? `Xử thắng: ${escape(p.forfeit === p.a ? p.b_name : p.a_name)} (đối thủ bị truất quyền)` : p.games.map((g, i) => `${i === 2 ? 'Ván quyết định' : `Ván ${i + 1}`}: ${escape(g.status === 'done' ? outcome(g) : labels[g.status] || g.status)}`).join(' · ')}</p></div></div>`).join('') || '<p class="caption">Vòng này chưa có cặp đấu.</p>';
+  const {items, total} = await api(`/tournaments/${adminTournament}/rounds/${number}?limit=300`);
+  $('#admin-round-view').innerHTML = items.map(p => `<div class="job"><div><strong>${escape(p.a_name)}</strong> × <strong>${escape(p.b_name || '—')}</strong><p>${!p.b ? 'BYE' : p.forfeit ? `Xử thắng: ${escape(p.forfeit === p.a ? p.b_name : p.a_name)} (đối thủ bị truất quyền)` : p.games.map((g, i) => `${i === 2 ? 'Ván quyết định' : `Ván ${i + 1}`}: ${escape(g.status === 'done' ? outcome(g) : labels[g.status] || g.status)}`).join(' · ')}</p></div></div>`).join('') + (total > items.length ? `<p class="caption">Hiển thị ${items.length}/${total} cặp.</p>` : '') || '<p class="caption">Vòng này chưa có cặp đấu.</p>';
 }
 
 function renderEntries() {
   if (!detail) return;
-  const query = $('#entry-search').value.trim().toLowerCase();
   const running = ['frozen','running'].includes(detail.tournament.status);
-  const rows = detail.standings.filter(s => !query || s.name.toLowerCase().includes(query) || s.bot.toLowerCase().includes(query)).slice(0, 300);
+  const rows = detail.standings;
   $('#entry-body').innerHTML = rows.length ? rows.map(s => `<tr><td class="rank">${s.rank ?? '—'}</td><td>${escape(s.name)}<small>${escape(s.bot)} · ${escape(labels[s.bot_status] || s.bot_status)}</small></td><td>${escape(s.tier)}</td><td>${s.points}</td><td>${s.wins}/${s.draws}/${s.losses}</td><td>${running && s.entry_status === 'active' ? `<button class="text-link danger" data-dq="${s.team_id}">Truất quyền</button>` : detail.tournament.status === 'open' ? `<button class="text-link danger" data-remove-entry="${s.team_id}">Xóa khỏi giải</button>` : ''}</td></tr>`).join('')
     : '<tr><td colspan="6">Chưa có đội đăng ký.</td></tr>';
 }
@@ -264,7 +265,8 @@ $('#add-entry').addEventListener('submit', event => { event.preventDefault(); ac
   event.target.reset(); notice(`Đã thêm đội ${r.team} vào giải.`); await renderEvents(); }); });
 $('#admin-round').addEventListener('change', () => action(null, renderAdminRound));
 $('#admin-tournament').addEventListener('change', event => { adminTournament = event.target.value; action(null, renderEvents); });
-$('#entry-search').addEventListener('input', renderEntries);
+let entryTimer;
+$('#entry-search').addEventListener('input', () => { clearTimeout(entryTimer); entryTimer = setTimeout(() => action(null, renderEvents), 300); });
 $('#freeze-button').addEventListener('click', event => action(event.target, async () => { const r = await api(`/admin/tournaments/${adminTournament}/freeze`, {}); notice(`Đã khóa: ${r.accepted} đội thi đấu, ${r.excluded} bị loại do bot không hợp lệ.`); await renderEvents(); }));
 $('#force-freeze').addEventListener('click', event => action(event.target, async () => { if (!confirm('Loại mọi đội có bot còn đang chờ kiểm tra?')) return; const r = await api(`/admin/tournaments/${adminTournament}/freeze`, {force: true}); notice(`Đã khóa: ${r.accepted} đội thi đấu, ${r.excluded} bị loại.`); await renderEvents(); }));
 $('#next-round-button').addEventListener('click', event => action(event.target, async () => { const r = await api(`/admin/tournaments/${adminTournament}/next`, {}); notice(r.completed ? 'Giải đã hoàn tất. Tải bảng điểm CSV để công bố.' : r.deciders ? `Có ${r.deciders} cặp hòa 1–1: đã tạo ván quyết định. Khi chúng xong, bấm “Mở vòng” lần nữa.` : `Đã mở vòng ${r.round} với ${r.pairs} cặp.`); await renderEvents(); }));

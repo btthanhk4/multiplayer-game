@@ -525,8 +525,30 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
     def tournament(tid):
         data = dict(cache.get(f'tournament:{tid}', 3, lambda: tournament_data(tid)))
         team = g.user['team_id'] if g.user else None
-        data['mine'] = next((s for s in data['standings'] if s['team_id'] == team), None)
+        everyone = data['standings']
+        data['mine'] = next((s for s in everyone if s['team_id'] == team), None)
+        data['count'] = len(everyone)
+        data['active'] = sum(1 for s in everyone if s['entry_status'] == 'active')
+        data['pending'] = sum(1 for s in everyone if s['bot_status'] in ('queued', 'running'))
+        data['top'] = [s for s in everyone if s['rank'] and s['rank'] <= 3] if data['tournament']['status'] == 'completed' else []
+        rows = search_rows(everyone, ('name', 'bot'))
+        data['total'] = len(rows)
+        offset, limit = paging(100, 5000)
+        data['standings'] = rows[offset:offset + limit]
         return jsonify(data)
+
+    def paging(default, ceiling):
+        """?offset=&limit= with sane bounds, so a thousand-team table is never sent whole by accident."""
+        def number(name, fallback):
+            try:
+                return max(0, int(request.args.get(name, fallback)))
+            except ValueError:
+                return fallback
+        return number('offset', 0), min(max(1, number('limit', default)), ceiling)
+
+    def search_rows(rows, keys):
+        query = request.args.get('q', '').strip().lower()[:60]
+        return [r for r in rows if any(query in str(r[key] or '').lower() for key in keys)] if query else rows
 
     def round_data(tid, number):
         with store.connect() as db:
@@ -542,7 +564,12 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
 
     @app.get('/api/tournaments/<tid>/rounds/<int:number>')
     def tournament_round(tid, number):
-        return jsonify(items=cache.get(f'round:{tid}:{number}', 3, lambda: round_data(tid, number)))
+        everyone = cache.get(f'round:{tid}:{number}', 3, lambda: round_data(tid, number))
+        team = g.user['team_id'] if g.user else None
+        rows = search_rows(everyone, ('a_name', 'b_name'))
+        offset, limit = paging(100, 2000)
+        return jsonify(items=rows[offset:offset + limit], total=len(rows), count=len(everyone),
+                       mine=next((p for p in everyone if team and team in (p['a'], p['b'])), None))
 
     @app.post('/api/tournaments/<tid>/join')
     def join(tid):

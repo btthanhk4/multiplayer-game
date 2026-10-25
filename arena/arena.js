@@ -1,10 +1,11 @@
 import {$, $$, escape, labels, formats, kinds, formatTime, badge, session, api, notice, action, options, countdown,
-  poller, outcome, teamLink, starText, ago, sparkline, celebrate, mapLabel} from './common.js';
+  poller, outcome, teamLink, starText, ago, sparkline, celebrate, mapLabel, roundRulesHtml} from './common.js';
 import {createWatch} from './watch.js';
 
 document.getElementById('boot-note')?.remove();   // reaching here means every module loaded
 
 let me = null, team = null, health = null, tab = 'overview', register = false;
+const ruleState = new Map();
 let tournaments = [], submissions = [], selectedTournament = '', competition = null, standingsLimit = 100, ranked = null;
 let campaign = null, badges = null, selectedLevel = null, profile = null;
 const DRAFT = 'ottv2-draft';
@@ -324,11 +325,11 @@ async function renderCompetition() {
     $('#competition-info').innerHTML = '<div class="empty">Chưa có giải đấu.</div>';
     $('#join-form').hidden = true; $('#standings-body').innerHTML = ''; $('#round-view').hidden = true; return;
   }
-  const id = selectedTournament, result = await api(`/tournaments/${id}`);
+  const id = selectedTournament, result = await api(`/tournaments/${id}?limit=${standingsLimit}&q=${encodeURIComponent($('#standings-search').value.trim())}`);
   if (id !== selectedTournament) return;
   competition = result;
   const t = result.tournament;
-  $('#competition-info').innerHTML = `<div class="tournament-head"><p>${badge(t.status)} <strong>${escape(t.name)}</strong></p><p class="caption">${escape(formats[t.format])} · Vòng ${t.round}/${t.rounds}${result.unfinished ? ` · ${result.unfinished} ván đang chờ/chạy` : ''}${t.status === 'open' ? ` · Hạn chọn bot ${formatTime(t.deadline)} (${countdown(t.deadline)})` : ''}<br>Bản đồ: <strong>${escape(mapLabel(t.map))}</strong> · Luật cố định: ${escape(t.rules_hash.slice(0,12))} · ${t.config.turn_seconds}s/lượt · quỹ ${t.config.game_seconds}s/ván · Hai ván đổi màu mỗi cặp.</p>${t.description ? `<p>${escape(t.description)}</p>` : ''}</div>${podium(result)}`;
+  $('#competition-info').innerHTML = `<div class="tournament-head"><p>${badge(t.status)} <strong>${escape(t.name)}</strong></p><p class="caption">${escape(formats[t.format])} · Vòng ${t.round}/${t.rounds}${result.unfinished ? ` · ${result.unfinished} ván đang chờ/chạy` : ''}${t.status === 'open' ? ` · Hạn chọn bot ${formatTime(t.deadline)} (${countdown(t.deadline)})` : ''}<br>Bản đồ: <strong>${escape(mapLabel(t.map))}</strong> · Luật cố định: ${escape(t.rules_hash.slice(0,12))} · ${t.config.turn_seconds}s/lượt · quỹ ${t.config.game_seconds}s/ván · Hai ván đổi màu mỗi cặp.</p>${t.description ? `<p>${escape(t.description)}</p>` : ''}<details class="more" ${ruleState.get(t.id) ? 'open' : ''} data-rules="${escape(t.id)}"><summary>Luật chơi của giải này, từng vòng</summary>${roundRulesHtml(t)}</details></div>${podium(result)}`;
   const open = t.status === 'open' && t.deadline > Date.now()/1000 && !t.seed_from;
   $('#join-form').hidden = !open || !me;
   const mine = result.mine;
@@ -345,31 +346,32 @@ async function renderCompetition() {
 
 function podium(result) {
   if (result.tournament.status !== 'completed') return '';
-  const top = result.standings.filter(s => s.rank && s.rank <= 3);
+  const top = result.top || [];
   if (!top.length) return '';
   return `<div class="podium" aria-label="Bục trao giải">${[2, 1, 3].map(rank => top.filter(s => s.rank === rank)).map((rows, i) => rows.length ? `<div class="step step-${[2, 1, 3][i]}"><span>${['🥈','🥇','🥉'][i]}</span>${rows.map(s => `<strong>${teamLink(s.team_id, s.name)}</strong>`).join('')}<small>Hạng ${[2, 1, 3][i]}</small></div>` : '').join('')}</div>`;
 }
 
 function renderStandings() {
   if (!competition) return;
-  const query = $('#standings-search').value.trim().toLowerCase();
-  const rows = competition.standings.filter(s => !query || s.name.toLowerCase().includes(query) || s.bot.toLowerCase().includes(query));
+  const rows = competition.standings;
   const ko = competition.tournament.format === 'knockout';
-  $('#standings-body').innerHTML = rows.length ? rows.slice(0, standingsLimit).map(s => `<tr class="${s.team_id===team?.id?'mine':''}"><td class="rank">${s.rank ?? '—'}</td><td>${teamLink(s.team_id, s.name)}<small>${escape(s.bot)}${s.seed ? ` · hạt giống ${s.seed}` : ''}</small></td><td>${escape(s.tier)}</td><td><strong>${ko ? (s.eliminated ? `Dừng ở vòng ${s.eliminated}` : s.reached ? `Đang ở vòng ${s.reached}` : '—') : s.points}</strong></td><td>${s.wins} / ${s.draws} / ${s.losses}${s.byes?` · ${s.byes} BYE`:''}</td><td>${s.buchholz}</td><td>${s.game_points}</td></tr>`).join('')
-    : '<tr><td colspan="7">Chưa có đội đăng ký.</td></tr>';
-  $('#standings-more').hidden = rows.length <= standingsLimit;
+  $('#standings-body').innerHTML = rows.length ? rows.map(s => `<tr class="${s.team_id===team?.id?'mine':''}"><td class="rank">${s.rank ?? '—'}</td><td>${teamLink(s.team_id, s.name)}<small>${escape(s.bot)}${s.seed ? ` · hạt giống ${s.seed}` : ''}</small></td><td>${escape(s.tier)}</td><td><strong>${ko ? (s.eliminated ? `Dừng ở vòng ${s.eliminated}` : s.reached ? `Đang ở vòng ${s.reached}` : '—') : s.points}</strong></td><td>${s.wins} / ${s.draws} / ${s.losses}${s.byes?` · ${s.byes} BYE`:''}</td><td>${s.buchholz}</td><td>${s.game_points}</td></tr>`).join('')
+    : `<tr><td colspan="7">${$('#standings-search').value.trim() ? 'Không có đội nào khớp.' : 'Chưa có đội đăng ký.'}</td></tr>`;
+  $('#standings-more').hidden = competition.total <= rows.length;
+  $('#standings-count').textContent = competition.total > rows.length ? `Hiển thị ${rows.length}/${competition.total} đội` : `${competition.total} đội`;
 }
 
 async function renderRound() {
   const number = $('#round-select').value;
   $('#round-view').hidden = !number;
   if (!number) return;
-  const {items} = await api(`/tournaments/${selectedTournament}/rounds/${number}`);
-  $('#round-view').innerHTML = items.length ? items.map(p => {
+  const {items, total, mine} = await api(`/tournaments/${selectedTournament}/rounds/${number}?limit=100`);
+  const card = p => {
     const result = !p.b ? 'BYE' : p.forfeit ? `${p.forfeit === p.a ? escape(p.b_name) : escape(p.a_name)} thắng do đối thủ bị truất quyền`
       : p.games.map((g, i) => `<button class="text-link" data-watch="${g.id}">${i === 2 ? 'Ván quyết định' : `Ván ${i+1}`}: ${escape(outcome(g))}</button>`).join(' · ');
     return `<div class="pairing ${[p.a,p.b].includes(team?.id)?'mine':''}"><strong>${teamLink(p.a, p.a_name)}</strong> <span class="red">×</span> <strong>${p.b ? teamLink(p.b, p.b_name) : '—'}</strong><p>${result}</p></div>`;
-  }).join('') : '<div class="empty">Vòng này chưa có cặp đấu.</div>';
+  };
+  $('#round-view').innerHTML = items.length ? (mine ? `<p class="eyebrow">CẶP CỦA ĐỘI BẠN</p>${card(mine)}` : '') + items.map(card).join('') + (total > items.length ? `<p class="caption">Hiển thị ${items.length}/${total} cặp — dùng ô “Tìm đội” để lọc.</p>` : '') : '<div class="empty">Vòng này chưa có cặp đấu.</div>';
 }
 
 // ---- team profiles ------------------------------------------------------
@@ -481,9 +483,11 @@ document.addEventListener('click', event => {
 document.addEventListener('keydown', watch.onKey);
 $('#competition-select').addEventListener('change', event => { selectedTournament = event.target.value; standingsLimit = 100; action(null, renderCompetition); });
 $('#round-select').addEventListener('change', () => action(null, renderRound));
-$('#standings-search').addEventListener('input', renderStandings);
+document.addEventListener('toggle', event => { if (event.target.dataset?.rules) ruleState.set(event.target.dataset.rules, event.target.open); }, true);
+let standingsTimer;
+$('#standings-search').addEventListener('input', () => { clearTimeout(standingsTimer); standingsLimit = 100; standingsTimer = setTimeout(() => action(null, renderCompetition), 300); });
 $('#show-detail').addEventListener('change', event => $('#standings-table').classList.toggle('compact', !event.target.checked));
-$('#standings-more').addEventListener('click', () => { standingsLimit += 200; renderStandings(); });
+$('#standings-more').addEventListener('click', () => { standingsLimit += 200; action(null, renderCompetition); });
 for (const id of ['#match-filter', '#match-kind']) $(id).addEventListener('change', () => action(null, watch.directory));
 let directoryTimer;
 $('#match-search').addEventListener('input', () => { clearTimeout(directoryTimer); directoryTimer = setTimeout(() => action(null, watch.directory), 300); });

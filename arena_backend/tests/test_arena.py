@@ -2105,6 +2105,33 @@ class SourceHygiene(Base):
         compile(self.store.clean_source(dirty), 'bot.py', 'exec')
 
 
+class Paging(Base):
+    def test_standings_and_round_lists_are_paged_searchable_and_keep_my_row(self):
+        tid = self.tournament('swiss', rounds=1)
+        self.entrants(tid, 7, 'pg')
+        self.close_deadline(tid)
+        self.store.freeze(tid, 'admin')
+        self.store.next_round(tid, 'admin')
+        self.register('nguoi_xem')
+        first = self.client.get(f'/api/tournaments/{tid}?limit=3').json
+        self.assertEqual((len(first['standings']), first['total'], first['count'], first['active']), (3, 7, 7, 7))
+        second = self.client.get(f'/api/tournaments/{tid}?limit=3&offset=3').json
+        self.assertEqual(len({s['team_id'] for s in first['standings'] + second['standings']}), 6)
+        found = self.client.get(f'/api/tournaments/{tid}?q=PG 4').json
+        self.assertEqual((found['total'], found['standings'][0]['name']), (1, 'pg 4'))
+        for bad in ('limit=abc', 'limit=-5', 'offset=zzz', 'limit=999999'):
+            self.assertEqual(self.client.get(f'/api/tournaments/{tid}?{bad}').status_code, 200, bad)
+        self.assertEqual(len(self.client.get(f'/api/tournaments/{tid}?limit=0').json['standings']), 1, 'limit is at least one')
+        rounds = self.client.get(f'/api/tournaments/{tid}/rounds/1?limit=2').json
+        self.assertEqual((len(rounds['items']), rounds['total'], rounds['count']), (2, 4, 4))
+        self.assertIsNone(rounds['mine'])
+        one = self.client.get(f'/api/tournaments/{tid}/rounds/1?q=pg 2').json
+        self.assertTrue(all('pg 2' in (p['a_name'] + (p['b_name'] or '')) for p in one['items']))
+        self.finish_round(tid)
+        done = self.client.get(f'/api/tournaments/{tid}').json
+        self.assertEqual(done['top'], [], 'the podium only exists once the tournament is completed')
+
+
 class AdminMatches(Base):
     def admin_client(self):
         self.register('boss_admin')

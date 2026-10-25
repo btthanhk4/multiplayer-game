@@ -192,3 +192,47 @@ export function celebrate(message) {
   clearTimeout(celebrateTimer);
   celebrateTimer = setTimeout(() => { host.classList.remove('on'); host.replaceChildren(); }, 4200);
 }
+
+// Plain-language rules of every round of a tournament, built from its settings, so players know what applies when.
+export function roundRules(t) {
+  const knockout = t.format === 'knockout', frozen = t.status !== 'open';
+  const total = knockout && !frozen ? null : t.rounds;
+  const finalMap = t.final_map || t.map;
+  const everyGame = [
+    `Mỗi cặp đấu hai ván đổi màu (mỗi đội được cầm cả Xanh lẫn Đỏ). Thắng ván 1 điểm, hòa 0,5, thua 0; tổng hai ván cao hơn thì thắng cặp.`,
+    `Mỗi nước tối đa ${t.config.turn_seconds} giây, mỗi bot có quỹ ${t.config.game_seconds} giây cho cả ván; quá giờ, đi sai luật hoặc bot lỗi là thua ván.`,
+    `Ván quá ${t.config.max_plies || 400} nửa lượt hoặc hết nước đi hợp lệ không hòa ngay: xử theo số quân còn lại, rồi quân nào gần ô đích hơn; vẫn bằng nhau mới hòa.`,
+    `Bản đồ ${mapLabel(t.map)}${t.map === 'random' ? ': mỗi cặp một cách xếp quân ngẫu nhiên, hai ván của cặp giống nhau' : ''}.`,
+  ];
+  const byFormat = {
+    swiss: [
+      `Mỗi vòng hệ thống ghép các đội gần điểm nhau, tránh gặp lại đối thủ cũ. Vòng sau khó hơn vì đối thủ mạnh hơn.`,
+      `Số đội lẻ thì một đội nhận BYE (1 điểm, không phải đấu); không ai nhận BYE hai lần nếu còn cách khác.`,
+      `Sau ${t.rounds} vòng xếp hạng theo điểm, rồi Buchholz (tổng điểm các đối thủ đã gặp), rồi điểm ván, rồi hạt giống.`,
+    ],
+    round_robin: [
+      `Mỗi đội gặp mọi đội còn lại đúng một lần; xếp hạng theo tổng điểm, rồi Buchholz, rồi điểm ván.`,
+    ],
+    knockout: [
+      `Thua cặp là bị loại. Hạt giống cao (Elo lúc khóa danh sách) được xếp tránh gặp nhau sớm; số đội lẻ thì hạt giống cao nhất nhận BYE và đi thẳng vào vòng sau.`,
+      `Hòa 1–1 sau hai ván: đấu thêm <b>ván quyết định</b>. Màu được bốc thăm công bằng theo mã cặp${t.map === 'random' ? '; bản đồ ngẫu nhiên có cách xếp quân mới' : ''}. Ván quyết định cũng hòa thì xét số quân còn lại, rồi hạt giống cao hơn đi tiếp.`,
+      `Đội bị truất quyền thua cặp ngay, đối thủ đi tiếp.`,
+    ],
+  }[t.format];
+  const rounds = [];
+  if (total) for (let n = 1; n <= total; n++) {
+    const last = n === total, map = last ? finalMap : t.map;
+    rounds.push({title: `Vòng ${n}${last && total > 1 ? ' — Chung kết' : ''}`, map,
+      note: last && t.final_map ? `Vòng cuối đổi sang bản đồ ${mapLabel(t.final_map)}${knockout ? ' (cả ván quyết định nếu có)' : ''}.` : ''});
+  }
+  return {everyGame, byFormat, rounds, pending: knockout && !frozen,
+    seeded: t.seed_from ? 'Đây là vòng trong: chỉ các đội đứng đầu giải trước được vào, hạt giống theo thứ hạng giải đó.' : ''};
+}
+
+export function roundRulesHtml(t) {
+  const r = roundRules(t);
+  return `<div class="round-rules"><h4>Luật áp dụng cho mọi vòng</h4><ul>${r.everyGame.map(x => `<li>${x}</li>`).join('')}</ul>
+    <h4>${escape(formats[t.format])}</h4><ul>${r.byFormat.map(x => `<li>${x}</li>`).join('')}${r.seeded ? `<li>${escape(r.seeded)}</li>` : ''}</ul>
+    <h4>Từng vòng</h4>${r.pending ? '<p class="caption">Số vòng được tính theo số đội khi ban tổ chức khóa danh sách (ví dụ 16 đội: 4 vòng, vòng cuối là chung kết).</p>' : ''}
+    <ul>${r.rounds.map(x => `<li><strong>${escape(x.title)}</strong>: bản đồ ${escape(mapLabel(x.map))}${x.note ? ` — ${escape(x.note)}` : ''}</li>`).join('')}</ul></div>`;
+}

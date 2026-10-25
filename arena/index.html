@@ -107,6 +107,7 @@
       <div class="standings-tools"><label>Tìm đội<input id="standings-search" type="search" placeholder="Tên đội hoặc bot"></label><label>Xem vòng<select id="round-select"></select></label><label class="switch"><input type="checkbox" id="show-detail"> Hiện Buchholz và điểm ván</label></div>
       <div id="round-view" class="round-view" hidden></div>
       <div class="table-scroll"><table id="standings-table" class="compact"><thead><tr><th>HẠNG</th><th>ĐỘI / BOT</th><th>XẾP LOẠI</th><th>ĐIỂM</th><th>T / H / B</th><th>BUCHHOLZ</th><th>ĐIỂM VÁN</th></tr></thead><tbody id="standings-body"></tbody></table></div>
+      <p id="standings-count" class="caption" aria-live="polite"></p>
       <button class="button more-button" id="standings-more" hidden>Hiện thêm</button>
       <details class="more"><summary>Cách tính điểm và xếp loại</summary><p class="caption">Thắng cặp 1 điểm, hòa 0,5; ván hết thế được xử theo quân còn lại rồi độ tiến gần ô đích; đồng điểm xét Buchholz rồi điểm ván. Loại trực tiếp: hòa cặp xét số quân còn lại rồi hạt giống. Xếp loại: 10% đầu Xuất sắc, 20% kế Giỏi, 30% kế Khá, còn lại Đạt.</p></details>
     </section>

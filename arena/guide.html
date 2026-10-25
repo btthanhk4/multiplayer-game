@@ -374,11 +374,19 @@ python local_arena.py bot.py --trace --games 1     # in từng nước và bàn 
         <ul>
           <li><b>Swiss:</b> mỗi vòng ghép các đội gần điểm nhau, tránh gặp lại. Thắng cặp 1 điểm, hòa 0,5, thua 0. Số đội lẻ thì một đội nhận BYE (1 điểm). Đồng điểm xét Buchholz (tổng điểm đối thủ đã gặp) rồi điểm ván.</li>
           <li><b>Vòng tròn:</b> mỗi cặp gặp nhau đúng một lần.</li>
-          <li><b>Loại trực tiếp:</b> thua là bị loại; hòa cặp thì đội còn nhiều quân hơn sau hai ván đi tiếp, rồi đến hạt giống cao hơn.</li>
+          <li><b>Loại trực tiếp:</b> thua là bị loại; hòa 1–1 thì đấu thêm một ván quyết định (xem 12.6).</li>
           <li><b>Xếp loại</b> theo hạng cuối: 10% đầu <i>Xuất sắc</i>, 20% kế <i>Giỏi</i>, 30% kế <i>Khá</i>, còn lại <i>Đạt</i>; đội không ghi điểm nào là <i>Chưa đạt</i>.</li>
           <li>Đội vi phạm có thể bị truất quyền: các ván chưa đấu được xử thắng cho đối thủ.</li>
         </ul>
-        <h3>12.6. Huy hiệu</h3>
+        <h3>12.6. Luật đặc biệt ở các vòng trong</h3>
+        <ul>
+          <li><b>Ván quyết định:</b> ở loại trực tiếp, nếu hai ván hòa 1–1 thì đấu thêm một ván nữa. Màu quân được bốc thăm theo mã cặp (không ai chọn được); nếu bản đồ là “Ngẫu nhiên” thì ván này có cách xếp quân mới. Ván này cũng hòa thì đội còn nhiều quân hơn đi tiếp, rồi đến hạt giống cao hơn. Swiss và vòng tròn không có ván quyết định.</li>
+          <li><b>Bản đồ vòng chung kết:</b> ban tổ chức có thể đặt một bản đồ riêng cho vòng cuối (và ván quyết định của nó). Các vòng trước dùng bản đồ chung của giải. Bản đồ của từng vòng được ghi ngay trên trang Giải đấu, mục “Luật chơi của giải này, từng vòng”.</li>
+          <li><b>Vòng trong lấy từ top N:</b> giải có thể chỉ nhận các đội đứng đầu một giải trước; hạt giống theo thứ hạng giải đó, bot được giữ nguyên.</li>
+          <li><b>Hết thế:</b> ván quá 400 nửa lượt hoặc bên nào hết nước đi hợp lệ được xử theo số quân, rồi quân gần ô đích hơn, nên rất hiếm khi hòa.</li>
+          <li><b>Xếp cặp:</b> Swiss ghép các đội gần điểm và (với giải nhỏ) bảo đảm không gặp lại nhau nếu còn cách ghép; loại trực tiếp xếp hạt giống theo Elo và cho hạt giống cao nhận BYE.</li>
+        </ul>
+        <h3>12.7. Huy hiệu</h3>
         <p>Có 17 huy hiệu cho cả đội, ví dụ <i>Khai bút</i> (bot hợp lệ đầu tiên), <i>Về đích</i>, <i>Càn quét</i> (ăn hết một loại), <i>Chớp nhoáng</i> (thắng trong 40 nửa lượt), <i>Toàn vẹn</i> (thắng không mất quân), <i>Lật kèo</i> (thắng đội hơn 100 Elo), <i>Hạ trùm cuối</i>… Thắng kỹ thuật và ván đấu tập không được tính.</p>
       </section>
 

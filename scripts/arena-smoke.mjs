@@ -118,6 +118,8 @@ try {
   await page.locator('#watch-grid .watch-card [data-watch]').first().click();
   await page.locator('[role=tab][data-tab=competition]').click();
   await page.locator('#join-form button[type=submit]').click();
+  await page.locator('#competition-info summary').filter({hasText:'Luật chơi của giải này'}).click();
+  await page.locator('#competition-info .round-rules').getByText('Vòng 1').first().waitFor();
   await page.locator('#entry-status').filter({hasText:'Đội đã chọn'}).waitFor();
   await page.locator('[role=tab][data-tab=overview]').click();
   await page.locator('#next-step .progress-dots li.done').nth(3).waitFor();
