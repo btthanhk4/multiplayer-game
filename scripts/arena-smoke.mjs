@@ -285,6 +285,8 @@ try {
   await admin.locator('#admin-tournament').getByRole('option',{name:/Giải trình duyệt/}).waitFor({state:'attached'});
   assert.equal(await admin.locator('#freeze-button').isDisabled(),true);
   await admin.locator('#tournament-state').filter({hasText:'Bản đồ Hai cánh'}).waitFor();
+  await admin.locator('#next-action').filter({hasText:'Đang nhận đăng ký'}).waitFor();
+  await admin.locator('#edit-details summary').click();
   await admin.locator('#tournament-edit [name=map]').selectOption('block');
   await admin.locator('#tournament-edit [name=name]').fill('Giải đã đổi tên');
   await admin.locator('#tournament-edit button.primary').click();
@@ -292,6 +294,7 @@ try {
   admin.once('dialog',dialog=>dialog.accept());
   await admin.locator('#close-now').click();
   await admin.locator('#freeze-button:not([disabled])').waitFor({timeout:15000});
+  await admin.locator('#add-entry-details summary').click();
   await admin.locator('#add-entry [name=team]').fill('Không có đội này');
   await admin.locator('#add-entry button').click();
   await admin.locator('#notice.error').waitFor();

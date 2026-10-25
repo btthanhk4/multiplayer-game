@@ -49,35 +49,70 @@
       </section>
 
       <section id="events" class="view" role="tabpanel" hidden>
+        <details class="paper-card howto" id="howto" open>
+          <summary>Hướng dẫn tổ chức một giải đấu <span class="caption">(đọc 1 phút, có thể thu gọn)</span></summary>
+          <ol class="howto-steps">
+            <li><b>Tạo giải.</b> Điền form “Mở giải” bên dưới: tên, thể thức, bản đồ và hạn đăng ký. Có thể bấm một <i>mẫu có sẵn</i> để điền nhanh.</li>
+            <li><b>Thí sinh đăng ký.</b> Đến hạn, mỗi đội giữ một bot đã chọn. Bạn chỉ cần chờ; có thể đăng thông báo ở tab Cài đặt.</li>
+            <li><b>Khóa danh sách.</b> Sau hạn, bấm <i>Khóa danh sách</i>: bot hợp lệ được đóng băng và xếp hạt giống theo Elo. Bot lỗi bị loại, không ảnh hưởng đội khác.</li>
+            <li><b>Mở vòng.</b> Bấm <i>Mở vòng</i> để ghép cặp và xếp hai ván mỗi cặp vào hàng chấm. Bật <i>Tự mở vòng</i> thì hệ thống tự sang vòng sau khi mọi ván xong.</li>
+            <li><b>Hoàn tất.</b> Sau vòng cuối, bấm <i>Hoàn tất</i> (hoặc để tự động). Tải bảng điểm CSV để công bố.</li>
+          </ol>
+          <p class="tip"><b>Gợi ý cho ~1.000 tân sinh viên:</b> (1) giải <i>Swiss 7 vòng</i> làm vòng loại, bản đồ Ngẫu nhiên; (2) khi xong, tạo giải <i>Loại trực tiếp</i> với nguồn “Top N của giải Swiss” (N = 16 hoặc 32), bản đồ chung kết Chuẩn. Trước mỗi vòng lớn nên tắt đấu xếp hạng và đấu tập ở tab Cài đặt để máy chấm dành cho giải.</p>
+          <div class="action-row"><button class="button" type="button" data-preset="qualifier">Mẫu: vòng loại Swiss cho đông người</button><button class="button" type="button" data-preset="final">Mẫu: chung kết loại trực tiếp từ top N</button></div>
+        </details>
         <div class="admin-layout">
           <form method="post" action="/arena/enable-javascript" id="tournament-form" class="paper-card"><p class="eyebrow">TẠO GIẢI / VÒNG MỚI</p><h3>Mở giải</h3>
-            <label>Tên giải<input name="name" required minlength="3" maxlength="80" placeholder="OTTv2 · Vòng loại tân sinh viên"></label>
-            <label>Thể thức<select name="format" id="format"><option value="swiss">Swiss theo điểm · tối đa 2.000 đội</option><option value="round_robin">Vòng tròn · tối đa 32 đội</option><option value="knockout">Loại trực tiếp · tối đa 1.024 đội</option></select></label>
-            <label>Nguồn đội<select name="source" id="seed-source"><option value="">Đăng ký mở (thí sinh tự chọn bot)</option></select></label>
-            <label id="seed-count-field" hidden>Số đội đi tiếp (top N của giải nguồn)<input name="seed_count" type="number" min="2" max="1024" value="16"></label>
-            <label>Bản đồ (cách xếp quân ban đầu)<select name="map" id="map"><option value="standard">Chuẩn</option><option value="wall">Bức tường</option><option value="flank">Hai cánh</option><option value="block">Khối vuông</option><option value="random">Ngẫu nhiên (mỗi cặp một kiểu)</option></select></label>
-            <label>Bản đồ vòng chung kết<select name="final_map" id="final-map"><option value="">Giống các vòng khác</option><option value="standard">Chuẩn</option><option value="wall">Bức tường</option><option value="flank">Hai cánh</option><option value="block">Khối vuông</option><option value="random">Ngẫu nhiên (mỗi cặp một kiểu)</option></select></label>
-            <label id="rounds-field">Số vòng Swiss<input name="rounds" type="number" min="1" max="30" value="7" required><small class="caption" id="rounds-hint"></small></label>
-            <label id="deadline-field">Hạn đăng ký/chọn bot (giờ máy bạn)<input name="deadline" id="deadline" type="datetime-local" required></label>
-            <label>Mô tả / thể lệ ngắn<textarea name="description" maxlength="500" rows="2"></textarea></label>
+            <fieldset class="group"><legend>1 · Thông tin</legend>
+              <label>Tên giải<input name="name" required minlength="3" maxlength="80" placeholder="OTTv2 · Vòng loại tân sinh viên"></label>
+              <label>Mô tả / thể lệ ngắn <small>(thí sinh thấy dòng này)</small><textarea name="description" maxlength="500" rows="2" placeholder="Ví dụ: Mỗi đội chọn 1 bot trước 23:59. Bot lỗi sẽ bị loại."></textarea></label>
+            </fieldset>
+            <fieldset class="group"><legend>2 · Thể thức</legend>
+              <label>Thể thức<select name="format" id="format"><option value="swiss">Swiss theo điểm · tối đa 2.000 đội</option><option value="round_robin">Vòng tròn · tối đa 32 đội</option><option value="knockout">Loại trực tiếp · tối đa 1.024 đội</option></select></label>
+              <p class="help" id="format-help"></p>
+              <label id="rounds-field">Số vòng Swiss<input name="rounds" type="number" min="1" max="30" value="7" required><small class="caption" id="rounds-hint"></small></label>
+              <label>Dự kiến số đội <small>(chỉ để tính gợi ý, không lưu)</small><input id="plan-teams" type="number" min="2" max="2000" value="1000"></label>
+              <p class="help plan" id="plan-preview" aria-live="polite"></p>
+            </fieldset>
+            <fieldset class="group"><legend>3 · Đội tham gia</legend>
+              <label>Nguồn đội<select name="source" id="seed-source"><option value="">Đăng ký mở — thí sinh tự chọn bot</option></select></label>
+              <label id="seed-count-field" hidden>Số đội đi tiếp (top N của giải nguồn)<input name="seed_count" type="number" min="2" max="1024" value="16"></label>
+              <p class="help">Đăng ký mở: thí sinh tự chọn bot trước hạn. Chọn một giải đã hoàn tất để lấy top N đội của giải đó vào vòng trong (danh sách tự khóa, không cần hạn đăng ký).</p>
+              <label id="deadline-field">Hạn đăng ký/chọn bot <small>(giờ máy bạn)</small><input name="deadline" id="deadline" type="datetime-local" required></label>
+            </fieldset>
+            <fieldset class="group"><legend>4 · Bản đồ</legend>
+              <label>Bản đồ các vòng<select name="map" id="map"><option value="standard">Chuẩn — quân xếp theo luật gốc</option><option value="wall">Bức tường — quân dàn thành hàng ngang</option><option value="flank">Hai cánh — quân dồn về hai bên</option><option value="block">Khối vuông — quân tụ thành khối</option><option value="random">Ngẫu nhiên — mỗi cặp một thế trận mới</option></select></label>
+              <label>Bản đồ vòng chung kết <small>(không bắt buộc)</small><select name="final_map" id="final-map"><option value="">Giống các vòng khác</option><option value="standard">Chuẩn — quân xếp theo luật gốc</option><option value="wall">Bức tường — quân dàn thành hàng ngang</option><option value="flank">Hai cánh — quân dồn về hai bên</option><option value="block">Khối vuông — quân tụ thành khối</option><option value="random">Ngẫu nhiên — mỗi cặp một thế trận mới</option></select></label>
+              <p class="help">Bản đồ chỉ đổi cách xếp quân ban đầu; luật đi quân không đổi. Vòng chung kết nên dùng bản đồ <i>Chuẩn</i> cho công bằng, hoặc <i>Ngẫu nhiên</i> để kịch tính.</p>
+            </fieldset>
             <label class="switch"><input type="checkbox" name="auto_advance" checked> Tự mở vòng tiếp khi mọi ván xong</label>
             <button class="button primary">Tạo giải</button>
           </form>
           <div>
-            <div class="paper-card"><p class="eyebrow">ĐIỀU KHIỂN</p><h3>Giải đấu</h3><label>Chọn giải<select id="admin-tournament"></select></label><div id="tournament-state" class="caption"></div><div id="admin-rules"></div>
-              <div class="action-row"><button id="freeze-button" class="button">Khóa danh sách</button><button id="force-freeze" class="button">Khóa bắt buộc</button><button id="next-round-button" class="button primary">Mở vòng / Hoàn tất</button></div>
-              <div class="action-row"><label class="switch"><input type="checkbox" id="auto-toggle"> Tự mở vòng</label><button id="export-button" class="button">Tải bảng điểm CSV</button></div>
-              <p class="caption">Khóa chỉ được sau hạn. “Khóa bắt buộc” loại các bot còn chờ kiểm tra. Vòng mới mở khi mọi ván của vòng trước đã xong (job lỗi cần thử lại trước).</p></div>
-            <form method="post" action="/arena/enable-javascript" id="tournament-edit" class="paper-card"><p class="eyebrow">CHỈNH GIẢI ĐANG CHỌN</p><h3>Sửa thông tin và hạn</h3>
+            <div class="paper-card"><p class="eyebrow">ĐIỀU KHIỂN</p><h3>Giải đấu</h3><label>Chọn giải<select id="admin-tournament"></select></label>
+              <ol class="stepper" id="stepper" aria-label="Tiến trình giải"><li data-step="1">Tạo giải</li><li data-step="2">Đăng ký</li><li data-step="3">Khóa danh sách</li><li data-step="4">Thi đấu</li><li data-step="5">Hoàn tất</li></ol>
+              <div id="next-action" class="next-action" role="status"></div>
+              <div id="tournament-state" class="caption"></div><div id="admin-rules"></div>
+              <div class="action-grid">
+                <div><button id="freeze-button" class="button">Khóa danh sách</button><small>Sau hạn đăng ký: đóng băng bot và xếp hạt giống.</small></div>
+                <div><button id="force-freeze" class="button">Khóa bắt buộc</button><small>Khóa ngay, loại các bot còn chờ kiểm tra.</small></div>
+                <div><button id="next-round-button" class="button primary">Mở vòng / Hoàn tất</button><small id="next-hint">Ghép cặp vòng kế tiếp khi mọi ván đã xong.</small></div>
+                <div><button id="export-button" class="button">Tải bảng điểm CSV</button><small>Xuất hạng, xếp loại, điểm của mọi đội.</small></div>
+              </div>
+              <label class="switch"><input type="checkbox" id="auto-toggle"> Tự mở vòng khi mọi ván xong</label>
+            </div>
+            <details class="paper-card fold" id="edit-details"><summary>Chỉnh sửa giải đang chọn</summary>
+            <form method="post" action="/arena/enable-javascript" id="tournament-edit"><p class="caption">Đổi tên, mô tả, bản đồ cho các vòng chưa mở, hạn hoặc số vòng (hạn và số vòng chỉ đổi được khi còn nhận đăng ký).</p>
               <label>Tên giải<input name="name" minlength="3" maxlength="80"></label>
               <label>Mô tả<textarea name="description" maxlength="500" rows="2"></textarea></label>
-              <label>Bản đồ cho các vòng mở tiếp theo<select name="map" id="edit-map"><option value="standard">Chuẩn</option><option value="wall">Bức tường</option><option value="flank">Hai cánh</option><option value="block">Khối vuông</option><option value="random">Ngẫu nhiên (mỗi cặp một kiểu)</option></select></label>
-              <label>Bản đồ vòng chung kết<select name="final_map" id="edit-final-map"><option value="">Giống các vòng khác</option><option value="standard">Chuẩn</option><option value="wall">Bức tường</option><option value="flank">Hai cánh</option><option value="block">Khối vuông</option><option value="random">Ngẫu nhiên (mỗi cặp một kiểu)</option></select></label>
+              <label>Bản đồ cho các vòng mở tiếp theo<select name="map" id="edit-map"><option value="standard">Chuẩn — quân xếp theo luật gốc</option><option value="wall">Bức tường — quân dàn thành hàng ngang</option><option value="flank">Hai cánh — quân dồn về hai bên</option><option value="block">Khối vuông — quân tụ thành khối</option><option value="random">Ngẫu nhiên — mỗi cặp một thế trận mới</option></select></label>
+              <label>Bản đồ vòng chung kết<select name="final_map" id="edit-final-map"><option value="">Giống các vòng khác</option><option value="standard">Chuẩn — quân xếp theo luật gốc</option><option value="wall">Bức tường — quân dàn thành hàng ngang</option><option value="flank">Hai cánh — quân dồn về hai bên</option><option value="block">Khối vuông — quân tụ thành khối</option><option value="random">Ngẫu nhiên — mỗi cặp một thế trận mới</option></select></label>
               <label id="edit-deadline-field">Hạn đăng ký (giờ máy bạn)<input name="deadline" type="datetime-local"></label>
               <label id="edit-rounds-field">Số vòng Swiss<input name="rounds" type="number" min="1" max="30"></label>
               <div class="action-row"><button class="button primary">Lưu thay đổi</button><button type="button" class="button" id="close-now">Đóng đăng ký ngay</button><button type="button" class="button danger" id="cancel-tournament">Hủy giải</button></div>
-              <p class="caption">Hạn và số vòng chỉ đổi được khi giải còn nhận đăng ký. “Đóng đăng ký ngay” đưa hạn về hiện tại để bấm Khóa danh sách. Hủy giải sẽ hủy mọi ván chưa xong.</p></form>
-            <form method="post" action="/arena/enable-javascript" id="add-entry" class="paper-card"><p class="eyebrow">THÊM ĐỘI THỦ CÔNG</p><label>Mã đội hoặc tên đội<input name="team" required maxlength="60" placeholder="K7QF2M9A hoặc Kéo Thần Tốc"></label><button class="button">Thêm vào giải bằng bot mới nhất</button><p class="caption">Dùng cho đội lỡ hạn hoặc nộp qua kênh khác. Chỉ trước khi khóa danh sách.</p></form>
+              <p class="caption">“Đóng đăng ký ngay” đưa hạn về hiện tại để bạn bấm Khóa danh sách. Hủy giải sẽ hủy mọi ván chưa xong và không mở lại được.</p></form></details>
+            <details class="paper-card fold" id="add-entry-details"><summary>Thêm đội thủ công</summary>
+            <form method="post" action="/arena/enable-javascript" id="add-entry"><label>Mã đội hoặc tên đội<input name="team" required maxlength="60" placeholder="K7QF2M9A hoặc Kéo Thần Tốc"></label><button class="button">Thêm vào giải bằng bot mới nhất</button><p class="caption">Dùng cho đội lỡ hạn. Chỉ trước khi khóa danh sách, với bot hợp lệ mới nhất của đội.</p></form></details>
             <div class="paper-card"><p class="eyebrow">CÁC CẶP ĐẤU</p><label>Vòng<select id="admin-round"></select></label><div id="admin-round-view" class="job-list"></div></div>
             <div class="paper-card"><p class="eyebrow">BẢNG ĐIỂM</p><label>Tìm đội<input id="entry-search" type="search"></label><div class="table-scroll"><table><thead><tr><th>HẠNG</th><th>ĐỘI / BOT</th><th>XẾP LOẠI</th><th>ĐIỂM</th><th>T/H/B</th><th></th></tr></thead><tbody id="entry-body"></tbody></table></div></div>
           </div>
