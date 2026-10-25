@@ -34,18 +34,36 @@ Kết quả `scripts/arena-load.py` trên một laptop Windows, khi client và s
 | 1.000 dashboard mở, mỗi tab refresh ~15 giây | ~330 req/s, p95 < 20 ms, 0 lỗi |
 | Vòng Swiss 1.000 đội: ghép cặp + bảng điểm | < 2 giây |
 
-**Máy chấm là nút cổ chai thật sự.** Mỗi ván cần 2 sandbox gVisor (khởi động ~1–2 giây) cộng thời gian bot suy nghĩ. Một ván thường mất 10–30 giây, tối đa 2 × 60 giây suy nghĩ cộng chi phí khởi động. Một vòng Swiss 1.000 đội có 1.000 ván:
+**Máy chấm là nút cổ chai thật sự.** Số liệu dưới đây đo bằng `scripts/arena-load.py --storm` trên server thật của sự kiện (12 lõi dùng chung với Jenkins, Docker + gVisor, `--slots 8`), trong một container tạm với database tạm. Kịch bản: 1.000 người đăng ký, mỗi người một đội nộp bot **khác nhau cùng lúc**, rồi cả 1.000 đội cùng bấm tìm đối thủ xếp hạng. Bot là bot Thợ săn (ván ngắn, vài chục nước).
 
-| Luồng chấm | Ván trung bình 20 s | Ván trung bình 40 s |
-|---|---|---|
-| 8 (`--slots 8`, máy 8–12 lõi) | ~42 phút/vòng | ~83 phút/vòng |
-| 16 (2 máy runner × 8) | ~21 phút/vòng | ~42 phút/vòng |
+| Bước | Kết quả |
+|---|---|
+| 1.000 lượt đăng ký | 19 giây, 0 lỗi |
+| 1.000 bot khác nhau nộp cùng lúc | 10 giây; API p95 ≈ 1,2 giây |
+| Mọi bot được kiểm tra xong | trung bình 91 giây, **tối đa 171 giây** |
+| 1.000 bot mẫu trùng nhau (kiểm tra một lần, dùng chung) | tối đa 11 giây |
+| 1.000 đội cùng ghép trận (500 cặp = 1.000 ván) | ghép xong sau 8 giây; có kết quả trung bình 103 giây, **tối đa 191 giây** |
+| Tải API trong lúc chấm (mỗi đội hỏi lại mỗi vài giây) | p95 < 1,3 giây, 0 lỗi |
 
-Chiến dịch boss và giao hữu cũng tốn máy chấm: mỗi lượt là 2 ván, ưu tiên ngang đấu tập (sau giải và xếp hạng). Mỗi đội chỉ có một lượt boss và một lượt giao hữu chạy cùng lúc, và có giới hạn 30 lượt boss/giờ (`ARENA_RATE_CAMPAIGN_TEAM`). Nếu 1.000 đội cùng leo tháp, hàng đợi có thể dài vài giờ; khi đó hãy tắt *Mở chiến dịch boss* hoặc tăng `--slots`. Boss 5 nghĩ tới ~0,6 giây mỗi nước, nên ván với boss 5 dài hơn ván thường.
+Trần thật là tốc độ **khởi động container của Docker** (khoảng 6 việc chấm mỗi giây): đo riêng bằng `scripts/arena-bench.py`, 6 luồng cho 5,4 bot/giây và 4,3 ván/giây, còn 12 luồng chỉ nhanh hơn khoảng 18% (6,4 và 5,2). Vì vậy đừng đặt `--slots` quá số lõi trống; 8 là hợp lý khi máy còn chạy việc khác.
+
+Bot thật nghĩ lâu hơn bot mẫu: mỗi ván dài tới 2 phút ở trường hợp xấu nhất (quỹ 60 giây suy nghĩ mỗi bên). Khi đó thông lượng giảm theo, xấp xỉ `số luồng ÷ thời gian trung bình của một ván`. Ví dụ ván trung bình 20 giây với 8 luồng cho khoảng 0,4 ván/giây: 1.000 ván hết khoảng 42 phút. Trang admin hiện "Ước tính xong" theo thời gian chấm thực tế của giờ gần nhất; sinh viên cũng thấy ước tính chờ của riêng mình.
+
+**Chống tắc nghẽn (đã bật sẵn):**
+
+- **Thứ tự chấm:** kiểm tra bot luôn đầu tiên; sau đó giải đấu, xếp hạng, rồi chiến dịch/giao hữu/đấu tập. Một ván chờ càng lâu càng được đẩy lên (mỗi 5 phút lên một bậc, tối đa 1,5 bậc), nên ván chiến dịch và đấu tập không bị bỏ đói khi xếp hạng đông.
+- **Giới hạn hàng chờ:** khi đã có `ARENA_QUEUE_CAP_RANKED` (mặc định 4.000) ván xếp hạng hoặc `ARENA_QUEUE_CAP_LOW` (mặc định 2.000) ván đấu tập/giao hữu/chiến dịch đang chờ, yêu cầu mới bị từ chối kèm thông báo "máy chấm đang quá tải, thử lại sau ít phút". Ván của giải đấu không bao giờ bị từ chối.
+- **Nộp trùng mã:** nhiều đội nộp cùng một bot mới trong lúc đang kiểm tra thì chỉ kiểm tra một lần; các đội còn lại nhận chung kết quả (kể cả khi phải thử lại sau sự cố).
+- **Xem trực tiếp là phần phụ:** mỗi người xem tối đa 2 bàn, cập nhật 2–3 giây một lần. Máy chấm tự ngừng ghi tiến độ từng nước khi hàng chờ trên 150 việc. Admin có công tắc *Cho xem ván trực tiếp* ở tab Tổng quan.
+- **Bản phát lại gọn:** mỗi ván lưu danh sách nước đi, không lưu lịch sử trùng lặp (giảm khoảng 12 KB mỗi ván).
+
+Khi hàng chờ vẫn quá dài: (1) tắt *Mở đấu xếp hạng* hoặc *Mở chiến dịch boss*; (2) ở tab *Trận đấu* bấm "Xóa hàng chờ" cho đấu tập/giao hữu/chiến dịch; (3) tăng `--slots` nếu còn lõi trống; (4) dành riêng máy chấm cho giải bằng cách tắt mọi chế độ luyện tập khi một vòng giải đang chạy.
+
+Chiến dịch boss và giao hữu cũng tốn máy chấm: mỗi lượt là 2 ván, ưu tiên ngang đấu tập (sau giải và xếp hạng, nhưng được đẩy lên khi chờ lâu). Mỗi đội chỉ có một lượt boss và một lượt giao hữu chạy cùng lúc, và có giới hạn 30 lượt boss/giờ (`ARENA_RATE_CAMPAIGN_TEAM`). Nếu 1.000 đội cùng leo tháp, hàng đợi có thể dài vài giờ; khi đó hãy tắt *Mở chiến dịch boss* hoặc tăng `--slots`. Boss 5 nghĩ tới ~0,6 giây mỗi nước, nên ván với boss 5 dài hơn ván thường.
 
 Khuyến nghị: dùng máy API 4 lõi / 8 GB. Mỗi máy runner có bao nhiêu lõi trống thì đặt `--slots` bằng chừng đó (mỗi sandbox `--cpus=1`, `--memory=256m`, nên 8 slot cần khoảng 4 GB RAM cho bot). Nhiều runner có thể dùng chung một database **trên cùng máy**. Không đặt SQLite lên ổ mạng; nếu cần runner ở máy khác, phải thiết kế lại (ví dụ chuyển sang PostgreSQL). Admin dashboard hiển thị "Ước tính xong" dựa trên thời gian chấm thực tế của giờ gần nhất.
 
-Trước sự kiện, chạy thử tải trên **máy staging giống hệt production**:
+Trước sự kiện, chạy thử tải trên **máy staging giống hệt production** (hoặc dùng cách trong container tạm như trên, không bao giờ trỏ vào database thật):
 
 ```sh
 python scripts/arena-load.py --base https://staging.example.org --users 1000 --invite MÃ --unique-bots
@@ -105,6 +123,7 @@ CLI tương đương (có thêm `--dry-run`): `python -m arena_backend import-fo
 | T-1 ngày | Chốt commit, image và engine. Tạo giải Swiss với hạn chọn bot, bật *Tự mở vòng*. Đăng thông báo. |
 | Mở cổng | Bật đăng ký. Theo dõi chỉ số "SV chưa có đội" và nhắc lập đội. |
 | Trước hạn 30 phút | Thông báo hạn chót. Hàng chờ kiểm tra sẽ dài hơn; số "Ước tính xong" cho biết còn bao lâu. |
+| Cần đổi giải | Tab *Giải đấu*: sửa tên/mô tả/hạn/số vòng Swiss, **Đóng đăng ký ngay**, thêm đội thủ công bằng mã đội hoặc tên đội (đội lỡ hạn, nộp qua Google Form), xóa đội khỏi danh sách trước khi khóa, xem từng cặp đấu theo vòng, hoặc **Hủy giải** (hủy mọi ván chưa xong). |
 | Sau hạn | Chờ "Bài nộp đang chờ" về 0, rồi bấm **Khóa danh sách** (hoặc **Khóa bắt buộc** để loại các bot chưa được kiểm tra). Tắt đấu xếp hạng, đấu tập/giao hữu và chiến dịch boss; backup; rồi **Mở vòng**. |
 | Mỗi vòng | Xem "Job lỗi". Nếu có, bấm *Thử lại mọi job lỗi*. Vòng tiếp theo tự mở. |
 | Chung kết | Tạo giải *Loại trực tiếp* với nguồn đội "Top N của" vòng Swiss: danh sách được khóa ngay với hạt giống theo hạng. |
