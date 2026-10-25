@@ -133,13 +133,13 @@ function syncTournamentForm() {
 
 async function renderTeams() {
   const {items} = await api(`/admin/teams?q=${encodeURIComponent($('#team-search').value)}`);
-  $('#team-list').innerHTML = items.length ? items.map(t => `<div class="job"><div><strong>${escape(t.name)}</strong> ${t.status !== 'active' ? badge('disqualified') : ''}<p>Mã ${escape(t.code)} · ${t.members} thành viên · ${t.valid_bots}/${t.bots} bot hợp lệ · Elo ${t.rating ?? 1000}<br>${escape(t.member_list.map(m => `${m.name} (@${m.username}${m.student_id ? `, ${m.student_id}` : ''})`).join(', ') || t.note || 'Chưa có thành viên')}</p></div><div class="action-row"><button class="button" data-team-action="rename" data-team="${t.id}">Đổi tên</button><button class="button" data-team-action="new_code" data-team="${t.id}">Mã mới</button>${t.status === 'active' ? `<button class="button danger" data-team-action="disqualify" data-team="${t.id}">Truất quyền</button>` : `<button class="button" data-team-action="reinstate" data-team="${t.id}">Khôi phục</button>`}</div></div>`).join('')
+  $('#team-list').innerHTML = items.length ? items.map(t => `<div class="job"><div><strong>${escape(t.name)}</strong> ${t.status !== 'active' ? badge('disqualified') : ''}<p>Mã ${escape(t.code)} · ${t.members} thành viên · ${t.valid_bots}/${t.bots} bot hợp lệ · Elo ${t.rating ?? 1000}<br>${escape(t.member_list.map(m => `${m.name} (@${m.username}${m.student_id ? `, ${m.student_id}` : ''})`).join(', ') || t.note || 'Chưa có thành viên')}</p></div><div class="action-row"><button class="button" data-team-action="rename" data-team="${t.id}">Đổi tên</button><button class="button" data-team-action="new_code" data-team="${t.id}">Mã mới</button><button class="button danger" data-team-action="delete" data-team="${t.id}" data-name="${escape(t.name)}">Xóa đội</button>${t.status === 'active' ? `<button class="button danger" data-team-action="disqualify" data-team="${t.id}">Truất quyền</button>` : `<button class="button" data-team-action="reinstate" data-team="${t.id}">Khôi phục</button>`}</div></div>`).join('')
     : '<p class="caption">Không tìm thấy đội.</p>';
 }
 
 async function renderUsers() {
   const {items} = await api(`/admin/users?q=${encodeURIComponent($('#user-search').value)}`);
-  $('#user-list').innerHTML = items.length ? items.map(u => `<div class="job"><div><strong>${escape(u.name)}</strong> <small>@${escape(u.username)}</small> ${u.role === 'admin' ? '<span class="badge">BTC</span>' : ''} ${u.disabled ? badge('disqualified') : ''}<p>${escape(u.team || 'Chưa có đội')}${u.student_id ? ` · MSSV ${escape(u.student_id)}` : ''} · tạo ${formatTime(u.created)}${u.must_change ? ' · đang dùng mật khẩu tạm' : ''}</p></div><div class="action-row"><button class="button" data-user-action="reset_password" data-user="${u.id}">Cấp lại mật khẩu</button>${u.team ? `<button class="button" data-user-action="remove_from_team" data-user="${u.id}">Rời đội</button>` : ''}<button class="button" data-user-action="${u.disabled ? 'enable' : 'disable'}" data-user="${u.id}">${u.disabled ? 'Mở khóa' : 'Khóa'}</button><button class="button" data-user-action="${u.role === 'admin' ? 'remove_admin' : 'make_admin'}" data-user="${u.id}">${u.role === 'admin' ? 'Bỏ quyền BTC' : 'Cấp quyền BTC'}</button><button class="button danger" data-user-action="delete" data-user="${u.id}" data-username="${escape(u.username)}">Xóa tài khoản</button></div></div>`).join('')
+  $('#user-list').innerHTML = items.length ? items.map(u => `<div class="job"><div><strong>${escape(u.name)}</strong> <small>@${escape(u.username)}</small> ${u.role === 'admin' ? '<span class="badge">BTC</span>' : ''} ${u.disabled ? badge('disqualified') : ''}<p>${escape(u.team || 'Chưa có đội')}${u.student_id ? ` · MSSV ${escape(u.student_id)}` : ''} · tạo ${formatTime(u.created)}${u.must_change ? ' · đang dùng mật khẩu tạm' : ''}</p></div><div class="action-row"><button class="button" data-user-action="reset_password" data-user="${u.id}">Cấp lại mật khẩu</button>${u.team ? `<button class="button" data-user-action="remove_from_team" data-user="${u.id}">Rời đội</button>` : ''}<button class="button" data-user-action="${u.disabled ? 'enable' : 'disable'}" data-user="${u.id}">${u.disabled ? 'Mở khóa' : 'Khóa'}</button><button class="button" data-user-action="${u.role === 'admin' ? 'remove_admin' : 'make_admin'}" data-user="${u.id}">${u.role === 'admin' ? 'Bỏ quyền BTC' : 'Cấp quyền BTC'}</button><button class="button danger" data-user-action="delete" data-user="${u.id}" data-username="${escape(u.username)}" data-team-size="${u.team_size || 0}" data-team-name="${escape(u.team || '')}">Xóa tài khoản</button></div></div>`).join('')
     : '<p class="caption">Không tìm thấy tài khoản.</p>';
 }
 
@@ -199,20 +199,29 @@ document.addEventListener('click', event => {
   if (button.dataset.teamAction) action(button, async () => {
     const kind = button.dataset.teamAction, body = {action: kind};
     if (kind === 'rename') { body.name = prompt('Tên đội mới:'); if (!body.name) return; }
+    if (kind === 'delete') {
+      const typed = prompt(`XÓA ĐỘI “${button.dataset.name}”?\nĐội sẽ biến mất cùng toàn bộ bot, ván đấu xếp hạng và tiến độ chiến dịch. Nếu đội đã dự giải, đội chỉ bị ẩn để bảng điểm giải giữ nguyên. Thành viên (nếu còn) được rời đội, tài khoản vẫn giữ.\n\nGõ đúng tên đội để xác nhận:`);
+      if (typed === null) return;
+      if (typed.trim() !== button.dataset.name) throw new Error('Tên đội không khớp, chưa xóa.');
+    }
     if (kind === 'disqualify') { body.note = prompt('Lý do truất quyền đội (áp dụng cho mọi giải đang chạy):'); if (body.note === null) return; }
     const result = await api(`/admin/teams/${button.dataset.team}`, body);
-    notice(result.code ? `Mã đội mới: ${result.code}` : 'Đã cập nhật đội.'); await renderTeams(); });
+    notice(result.code ? `Mã đội mới: ${result.code}` : kind === 'delete' ? (result.mode === 'hidden' ? 'Đã xóa đội khỏi danh sách (đội từng dự giải nên dữ liệu giải được giữ).' : 'Đã xóa đội cùng toàn bộ bot và ván đấu.') : 'Đã cập nhật đội.');
+    await Promise.all([renderTeams(), renderUsers()]); });
   if (button.dataset.userAction) action(button, async () => {
-    const kind = button.dataset.userAction;
+    const kind = button.dataset.userAction, body = {action: kind};
     if (kind === 'delete') {
       const typed = prompt(`XÓA VĨNH VIỄN tài khoản @${button.dataset.username}? Không khôi phục được. Bot và kết quả của đội vẫn được giữ.\n\nGõ tên đăng nhập để xác nhận:`);
       if (typed === null) return;
       if (typed.trim() !== button.dataset.username) throw new Error('Tên đăng nhập không khớp, chưa xóa.');
+      if (Number(button.dataset.teamSize) === 1) {
+        body.delete_team = confirm(`@${button.dataset.username} là thành viên cuối của đội “${button.dataset.teamName}”.\n\nOK: xóa luôn đội cùng toàn bộ bot và ván đấu của đội.\nHủy: chỉ xóa tài khoản, đội vẫn giữ bot, Elo và kết quả (đội sẽ không còn thành viên).`);
+      }
     } else if (['disable','remove_admin','remove_from_team'].includes(kind) && !confirm('Xác nhận thao tác với tài khoản này?')) return;
-    const result = await api(`/admin/users/${button.dataset.user}`, {action: kind});
+    const result = await api(`/admin/users/${button.dataset.user}`, body);
     if (result.password) prompt('Mật khẩu tạm (chỉ hiện một lần, gửi riêng cho thí sinh):', result.password);
-    else notice(kind === 'delete' ? (result.team_kept ? 'Đã xóa tài khoản. Đội vẫn giữ bot và kết quả.' : 'Đã xóa tài khoản.') : 'Đã cập nhật tài khoản.');
-    await renderUsers(); });
+    else notice(kind === 'delete' ? (result.team_deleted ? 'Đã xóa tài khoản và đội.' : result.team_kept ? 'Đã xóa tài khoản. Đội vẫn giữ bot và kết quả.' : 'Đã xóa tài khoản.') : 'Đã cập nhật tài khoản.');
+    await Promise.all([renderUsers(), renderTeams()]); });
   if (button.dataset.viewSource) action(button, async () => {
     const {source} = await api(`/admin/submissions/${button.dataset.viewSource}/source`);
     $('#source-title').textContent = button.dataset.label; $('#source-view').textContent = source; $('#source-dialog').showModal(); });
@@ -269,6 +278,13 @@ for (const [input, work] of [['#team-search', renderTeams], ['#user-search', ren
 $('#bot-status').addEventListener('change', () => action(null, renderBots));
 for (const id of ['#match-status', '#match-kind']) $(id).addEventListener('change', () => action(null, renderMatches));
 $('#job-status').addEventListener('change', () => action(null, renderJobs));
+$('#cleanup-teams').addEventListener('click', event => action(event.target, async () => {
+  const preview = await api('/admin/teams-cleanup', {});
+  if (!preview.count) { notice('Không có đội nào trống.'); return; }
+  if (!confirm(`Xóa ${preview.count} đội không còn thành viên?\n${preview.names.join(', ')}${preview.count > preview.names.length ? ', …' : ''}\n\nBot, ván đấu và Elo của các đội này sẽ mất (đội từng dự giải chỉ bị ẩn).`)) return;
+  const done = await api('/admin/teams-cleanup', {confirm: true});
+  notice(`Đã dọn ${done.count} đội (${done.deleted} xóa hẳn, ${done.hidden} chỉ ẩn vì từng dự giải).`);
+  await Promise.all([renderTeams(), renderUsers()]); }));
 $('#retry-all').addEventListener('click', event => action(event.target, async () => { const r = await api('/admin/jobs/retry-failed', {}); notice(`Đã đưa ${r.count} job lỗi trở lại hàng đợi.`); await renderJobs(); }));
 
 const deadline = new Date(Date.now() + 3600000); deadline.setMinutes(deadline.getMinutes() - deadline.getTimezoneOffset());

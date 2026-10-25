@@ -776,8 +776,9 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
                 '(SELECT COUNT(*) FROM submissions s WHERE s.team_id=t.id) bots,'
                 "(SELECT COUNT(*) FROM submissions s WHERE s.team_id=t.id AND s.status='valid') valid_bots,"
                 'r.rating FROM teams t LEFT JOIN ratings r ON r.team_id=t.id '
-                'WHERE t.name LIKE ? OR t.code LIKE ? OR t.id IN (SELECT team_id FROM users WHERE username LIKE ? '
-                'OR name LIKE ? OR student_id LIKE ?) ORDER BY t.created DESC LIMIT 50 OFFSET ?',
+                "WHERE t.status NOT IN ('system','deleted') AND (t.name LIKE ? OR t.code LIKE ? OR t.id IN "
+                '(SELECT team_id FROM users WHERE username LIKE ? OR name LIKE ? OR student_id LIKE ?)) '
+                'ORDER BY t.created DESC LIMIT 50 OFFSET ?',
                 (q, q, q, q, q, page()*50)).fetchall()
             items = [dict(r) for r in rows]
             for item in items:
@@ -797,9 +798,16 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
                                   str(data.get('note') or ''))
         elif action == 'new_code':
             return jsonify(code=store.new_team_code(actor, team, admin=True))
+        elif action == 'delete':
+            return jsonify(store.delete_team(team, actor))
         else:
             raise Problem('Thao tác không hợp lệ.')
         return jsonify(ok=True)
+
+    @app.post('/api/admin/teams-cleanup')
+    def teams_cleanup():
+        actor, data = auth(True), body()
+        return jsonify(store.cleanup_empty_teams(actor, bool(data.get('confirm'))))
 
     @app.get('/api/admin/users')
     def admin_users():
@@ -807,7 +815,8 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         q = f"%{request.args.get('q', '').strip()}%"
         with store.connect() as db:
             rows = db.execute('SELECT u.id,u.username,u.name,u.role,u.created,u.student_id,u.disabled,u.must_change,'
-                              't.name team FROM users u LEFT JOIN teams t ON t.id=u.team_id WHERE u.username LIKE ? '
+                              't.name team,u.team_id,(SELECT COUNT(*) FROM users x WHERE x.team_id=u.team_id) team_size '
+                              'FROM users u LEFT JOIN teams t ON t.id=u.team_id WHERE u.username LIKE ? '
                               'OR u.name LIKE ? OR u.student_id LIKE ? OR t.name LIKE ? '
                               'ORDER BY u.created DESC LIMIT 50 OFFSET ?', (q, q, q, q, page()*50)).fetchall()
         return jsonify(items=[dict(r) for r in rows])
@@ -817,7 +826,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         actor, data = auth(True), body()
         action = data.get('action')
         if action == 'delete':
-            return jsonify(store.delete_user(user, actor))
+            return jsonify(store.delete_user(user, actor, bool(data.get('delete_team'))))
         if action == 'reset_password':
             secret = temp_password()
             digest = generate_password_hash(secret, method='scrypt')

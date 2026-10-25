@@ -136,9 +136,17 @@ try {
   await page.locator('[role=tab][data-tab=watch]').click();
   await page.locator('#match-filter').selectOption('all');
   await page.locator('#match-list [data-watch]').nth(2).waitFor();
-  for(let i=0;i<2;i++) await page.locator('#match-list [data-watch]').nth(i).click();
-  await page.locator('#watch-grid .mini-board').nth(1).waitFor();
-  await page.locator('#match-list [data-watch]').nth(2).click();
+  // The team's own running games open by themselves on this tab; wait for them to finish and close what opened.
+  await page.waitForFunction(()=>!document.querySelector('#match-list .is-live')&&document.querySelector('#live-banner').hidden,null,{timeout:90000});
+  while (await page.locator('#watch-grid .watch-card [data-watch]').count()) await page.locator('#watch-grid .watch-card [data-watch]').first().click();
+  // Pick three distinct finished games by id (the list may reorder while games start and finish).
+  const wanted=(await page.locator('#match-list .match-row:not(.is-live) [data-watch]').evaluateAll(els=>els.slice(0,3).map(e=>e.dataset.watch)));
+  assert.equal(new Set(wanted).size,3);
+  for(const [i,id] of wanted.slice(0,2).entries()){
+    await page.locator(`#match-list [data-watch="${id}"]`).click();
+    await page.locator('#watch-grid .watch-card .mini-board').nth(i).waitFor();
+  }
+  await page.locator(`#match-list [data-watch="${wanted[2]}"]`).click();
   assert.equal(await page.locator('#watch-grid .watch-card').count(),2);
   assert.match(await page.locator('#notice').textContent(),/hai bàn/);
   const slider=page.locator('[data-replay]').first();
@@ -308,6 +316,22 @@ try {
   await doomed.reload();
   await doomed.locator('#auth-form').waitFor();
   assert.equal(await doomed.locator('#gate').isVisible(),true,'the deleted person is signed out');
+  // Deleting a team: needs its exact name; the team leaves the list (hidden, since it entered a tournament).
+  await admin.locator('#team-search').fill('Kéo Thần Tốc');
+  await admin.locator('#team-list .job').filter({hasText:'Kéo Thần Tốc'}).waitFor();
+  admin.once('dialog',dialog=>dialog.accept('sai ten'));
+  await admin.locator('#team-list .job').filter({hasText:'Kéo Thần Tốc'}).locator('[data-team-action=delete]').click();
+  await admin.locator('#notice.error').filter({hasText:'Tên đội không khớp'}).waitFor();
+  assert.equal(await admin.locator('#team-list .job').filter({hasText:'Kéo Thần Tốc'}).count(),1,'a wrong name deletes nothing');
+  admin.once('dialog',dialog=>dialog.accept('Kéo Thần Tốc'));
+  await admin.locator('#team-list .job').filter({hasText:'Kéo Thần Tốc'}).locator('[data-team-action=delete]').click();
+  await admin.locator('#notice').filter({hasText:'Đã xóa đội'}).waitFor();
+  await admin.locator('#team-list .job').filter({hasText:'Kéo Thần Tốc'}).waitFor({state:'detached'});
+  await admin.locator('#team-search').fill('');
+  admin.on('dialog',dialog=>dialog.accept());
+  await admin.locator('#cleanup-teams').click();
+  await admin.locator('#notice').filter({hasText:/Đã dọn|Không có đội nào trống/}).waitFor();
+  admin.removeAllListeners('dialog');
   await admin.setViewportSize({width:390,height:844});
   await noOverflow(admin);
   assert.deepEqual(errors,[]);

@@ -1552,7 +1552,7 @@ class DeleteUser(Base):
         with self.store.connect(True) as db:
             db.execute('INSERT INTO sessions VALUES(?,?,?,?)', ('h' * 64, member, 'csrf', now() + 600))
         result = self.store.delete_user(member, admin)
-        self.assertEqual(result, {'ok': True, 'team_kept': True})
+        self.assertEqual(result, {'ok': True, 'team_kept': True, 'team_deleted': None})
         self.assertFalse(self.exists('users', 'id', member))
         self.assertFalse(self.exists('sessions', 'user_id', member))
         self.assertTrue(self.exists('teams', 'id', team))
@@ -1587,7 +1587,7 @@ class DeleteUser(Base):
     def test_team_without_any_history_disappears_with_its_only_member(self):
         admin = self.make_admin('boss')
         team, owner = self.team('Chưa làm gì')
-        self.assertEqual(self.store.delete_user(owner, admin), {'ok': True, 'team_kept': False})
+        self.assertEqual(self.store.delete_user(owner, admin), {'ok': True, 'team_kept': False, 'team_deleted': None})
         self.assertFalse(self.exists('teams', 'id', team))
 
     def test_refuses_self_unknown_and_the_last_admin(self):
@@ -1759,6 +1759,138 @@ class MapsAndAdjudication(Base):
         self.assertEqual([(t['name'], t['map']) for t in listing], [('Vòng trong', 'block')])
         self.assertEqual(self.post(f"/admin/tournaments/{ok.json['id']}/update", {'map': 'flank'}).status_code, 200)
         self.assertEqual(self.client.get('/api/tournaments').json['items'][0]['map'], 'flank')
+
+
+class DeleteTeam(Base):
+    def count(self, sql, *args):
+        with self.store.connect() as db:
+            return db.execute(sql, args).fetchone()[0]
+
+    def played_team(self):
+        """A team with bots, a finished ranked pair against another team, a practice game and a boss run."""
+        (a, ua), (b, ub) = self.team('Sẽ bị xóa'), self.team('Ở lại')
+        sa, sb = self.valid(a), self.valid(b)
+        self.store.join_ranked(a, sa)
+        series = self.store.join_ranked(b, sb)
+        for _ in range(2):
+            job = self.store.claim('t', 'samples')
+            self.store.finish(job, {'winner': 'p1', 'reason': 'goal', 'moves': []})
+        self.store.practice(a, ua, sa, sa)
+        return a, ua, sa, b, ub, sb, series['series_id']
+
+    def test_a_team_that_never_played_a_tournament_disappears_completely(self):
+        a, ua, sa, b, ub, sb, series = self.played_team()
+        admin = self.user('quan_tri')
+        before = self.count('SELECT rating FROM ratings WHERE team_id=?', b)
+        self.assertEqual(self.store.delete_team(a, admin), {'mode': 'deleted'})
+        self.assertEqual(self.count('SELECT COUNT(*) FROM teams WHERE id=?', a), 0)
+        for table, column in (('submissions', 'team_id'), ('ratings', 'team_id'), ('ranked_queue', 'team_id')):
+            self.assertEqual(self.count(f'SELECT COUNT(*) FROM {table} WHERE {column}=?', a), 0, table)
+        self.assertEqual(self.count('SELECT COUNT(*) FROM ranked_series WHERE id=?', series), 0)
+        self.assertEqual(self.count('SELECT COUNT(*) FROM matches'), 0, 'every game of the deleted team is gone')
+        self.assertEqual(self.count("SELECT COUNT(*) FROM jobs WHERE kind='game'"), 0)
+        self.assertEqual(self.count('SELECT COUNT(*) FROM jobs WHERE ref=?', sa), 0)
+        self.assertEqual(self.count('SELECT rating FROM ratings WHERE team_id=?', b), before, 'the opponent keeps its Elo')
+        self.assertEqual(self.count('SELECT COUNT(*) FROM submissions WHERE id=?', sb), 1)
+        self.assertEqual(self.count('SELECT COUNT(*) FROM users WHERE id=?', ua), 1, 'accounts are not deleted with a team')
+        self.assertIsNone(self.count('SELECT team_id FROM users WHERE id=?', ua) or None)
+        self.assertEqual(self.count("SELECT COUNT(*) FROM audit WHERE action='team.deleted'"), 1)
+        # The same name can be taken again and the player can start a new team.
+        self.store.create_team(ua, 'Sẽ bị xóa')
+
+    def test_a_team_with_tournament_history_is_hidden_so_standings_survive(self):
+        tid = self.tournament('swiss', rounds=2)
+        teams = self.entrants(tid, 3)
+        self.close_deadline(tid)
+        self.store.freeze(tid, 'admin')
+        self.store.next_round(tid, 'admin')
+        self.finish_round(tid)
+        admin = self.user('quan_tri')
+        victim = teams[0]
+        with self.store.connect() as db:
+            name, code = db.execute('SELECT name,code FROM teams WHERE id=?', (victim,)).fetchone()
+        self.assertEqual(self.store.delete_team(victim, admin), {'mode': 'hidden'})
+        with self.store.connect() as db:
+            row = db.execute('SELECT status,code,owner FROM teams WHERE id=?', (victim,)).fetchone()
+        self.assertEqual(row['status'], 'deleted')
+        self.assertNotEqual(row['code'], code)
+        self.assertIsNone(row['owner'])
+        self.assertEqual(len(self.store.standings(self.store.open(), tid)), 3, 'tournament results stay whole')
+        self.assertEqual(self.store.create_team(self.user('moi'), name) is not None, True, 'the name is free again')
+        newcomer = self.user('vao_muon')
+        with self.assertRaises(Problem):
+            self.store.join_team(newcomer, code)
+        self.register('xem_ho_so')
+        self.assertEqual(self.client.get(f'/api/teams/{victim}').status_code, 404)
+        self.assertNotIn(victim, [r['team_id'] for r in self.store.ranked_leaderboard()['leaderboard']])
+
+    def test_system_team_unknown_team_and_double_delete_are_refused(self):
+        admin = self.user('quan_tri')
+        team, _ = self.team('Một lần')
+        from arena_backend.store import SYSTEM_TEAM
+        with self.store.connect(True) as db:
+            db.execute("INSERT INTO teams(id,name,name_key,code,status,created) VALUES(?,?,?,?,'system',?)",
+                       (SYSTEM_TEAM, 'Boss', 'boss', 'BOSSBOSS', now()))
+        for target, status in ((SYSTEM_TEAM, 409), ('nope', 404)):
+            with self.assertRaises(Problem) as caught:
+                self.store.delete_team(target, admin)
+            self.assertEqual(caught.exception.status, status)
+        self.store.delete_team(team, admin)
+        with self.assertRaises(Problem) as caught:
+            self.store.delete_team(team, admin)
+        self.assertEqual(caught.exception.status, 404)
+
+    def test_cleanup_previews_then_removes_only_teams_without_members(self):
+        admin = self.user('quan_tri')
+        kept, _ = self.team('Còn người')
+        orphan_a, owner_a = self.team('Trống A')
+        orphan_b, owner_b = self.team('Trống B')
+        self.valid(orphan_a)
+        for owner in (owner_a, owner_b):
+            self.store.leave_team(owner)
+        preview = self.store.cleanup_empty_teams(admin)
+        self.assertEqual((preview['count'], sorted(preview['names'])), (1, ['Trống A']),
+                         'a team with no bots and no history is already removed when its last member leaves')
+        self.assertEqual(self.count('SELECT COUNT(*) FROM teams WHERE id=?', orphan_a), 1, 'a preview deletes nothing')
+        done = self.store.cleanup_empty_teams(admin, confirm=True)
+        self.assertEqual((done['count'], done['deleted'], done['hidden']), (1, 1, 0))
+        self.assertEqual(self.count('SELECT COUNT(*) FROM teams WHERE id=?', orphan_a), 0)
+        self.assertEqual(self.count('SELECT COUNT(*) FROM teams WHERE id=?', kept), 1)
+        self.assertEqual(self.store.cleanup_empty_teams(admin)['count'], 0)
+
+    def test_deleting_the_last_member_can_take_the_team_along(self):
+        admin = self.user('quan_tri')
+        solo, owner = self.team('Một mình')
+        self.valid(solo)
+        pair, first = self.team('Hai người')
+        second = self.user('ban_cung_doi')
+        with self.store.connect() as db:
+            code = db.execute('SELECT code FROM teams WHERE id=?', (pair,)).fetchone()[0]
+        self.store.join_team(second, code)
+        kept = self.store.delete_user(first, admin, delete_team=True)
+        self.assertEqual((kept['team_kept'], kept['team_deleted']), (True, None), 'a team that still has a member is never deleted')
+        result = self.store.delete_user(owner, admin, delete_team=True)
+        self.assertEqual((result['team_kept'], result['team_deleted']), (False, 'deleted'))
+        self.assertEqual(self.count('SELECT COUNT(*) FROM teams WHERE id=?', solo), 0)
+        self.assertEqual(self.count('SELECT COUNT(*) FROM submissions WHERE team_id=?', solo), 0)
+
+    def test_http_endpoints_and_listings(self):
+        a, ua, sa, b, ub, sb, series = self.played_team()
+        self.register('quan_tri_web')
+        victim = self.client.get('/api/me').json['user']['id']
+        self.assertEqual(self.post(f'/admin/teams/{a}', {'action': 'delete'}).status_code, 403)
+        with self.store.connect(True) as db:
+            db.execute("UPDATE users SET role='admin' WHERE id=?", (victim,))
+            db.execute("INSERT INTO teams(id,name,name_key,code,status,created) VALUES('b0550000000000000000b055','Boss','boss','BOSSBOSS','system',?)", (now(),))
+        listing = self.client.get('/api/admin/teams').json['items']
+        self.assertEqual({t['name'] for t in listing}, {'Sẽ bị xóa', 'Ở lại'}, 'the boss team is not listed')
+        self.assertEqual(self.post('/admin/teams-cleanup', {}).json['count'], 0)
+        users = self.client.get('/api/admin/users?q=u').json['items']
+        self.assertTrue(all('team_size' in u and 'team_id' in u for u in users))
+        self.assertEqual(self.post(f'/admin/teams/{a}', {'action': 'delete'}).json, {'mode': 'deleted'})
+        self.assertEqual({t['name'] for t in self.client.get('/api/admin/teams').json['items']}, {'Ở lại'})
+        self.assertEqual(self.post('/admin/teams/b0550000000000000000b055', {'action': 'delete'}).status_code, 409)
+        self.assertEqual(self.post(f'/admin/teams/{a}', {'action': 'delete'}).status_code, 404)
 
 
 class AdminMatches(Base):

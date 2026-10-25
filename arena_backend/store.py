@@ -594,8 +594,58 @@ class Store:
         self.audit(db, actor, 'team.left', {'team': team['id'], 'user': user})
         return True
 
-    def delete_user(self, user, actor):
-        """Remove an account for good. Bots, results and Elo stay with the team; the team keeps going without them."""
+    def _remove_team(self, db, team_id, actor):
+        """Delete a team. A team that never took part in a tournament disappears completely, with its bots, its games and
+        its ranked/boss history. A team that did is only hidden and renamed, so other teams' tournament results stay intact."""
+        team = db.execute('SELECT * FROM teams WHERE id=?', (team_id,)).fetchone()
+        db.execute('UPDATE users SET team_id=NULL WHERE team_id=?', (team_id,))
+        db.execute('DELETE FROM ranked_queue WHERE team_id=?', (team_id,))
+        in_tournament = db.execute('SELECT 1 FROM entries WHERE team_id=? UNION SELECT 1 FROM pairings WHERE a=? OR b=?',
+                                   (team_id,) * 3).fetchone()
+        if in_tournament:
+            db.execute("UPDATE teams SET status='deleted',owner=NULL,name_key=?,code=? WHERE id=?",
+                       (f"{team['name_key']}:deleted:{team_id}", f'DEL{team_id[:10].upper()}', team_id))
+            mode = 'hidden'
+        else:
+            mine = 'SELECT id FROM submissions WHERE team_id=?'
+            db.execute('DELETE FROM campaign_runs WHERE team_id=?', (team_id,))
+            db.execute('DELETE FROM ranked_series WHERE a=? OR b=?', (team_id, team_id))
+            db.execute(f"DELETE FROM jobs WHERE kind='game' AND ref IN (SELECT id FROM matches WHERE p1 IN ({mine}) "
+                       f"OR p2 IN ({mine}))", (team_id, team_id))
+            db.execute(f'DELETE FROM matches WHERE p1 IN ({mine}) OR p2 IN ({mine})', (team_id, team_id))
+            db.execute(f"DELETE FROM jobs WHERE kind='validate' AND ref IN ({mine})", (team_id,))
+            db.execute('DELETE FROM ratings WHERE team_id=?', (team_id,))
+            db.execute('DELETE FROM submissions WHERE team_id=?', (team_id,))
+            db.execute('DELETE FROM teams WHERE id=?', (team_id,))
+            mode = 'deleted'
+        self.audit(db, actor, 'team.deleted', {'team': team_id, 'name': team['name'], 'mode': mode})
+        return mode
+
+    def delete_team(self, team_id, actor):
+        with self.connect(True) as db:
+            team = db.execute('SELECT status FROM teams WHERE id=?', (team_id,)).fetchone()
+            if not team or team['status'] == 'deleted':
+                raise Problem('Không tìm thấy đội.', 404)
+            if team['status'] == 'system':
+                raise Problem('Đội boss do hệ thống quản lý.', 409)
+            return {'mode': self._remove_team(db, team_id, actor)}
+
+    def empty_teams(self, db):
+        return db.execute("SELECT t.id,t.name FROM teams t WHERE t.status NOT IN ('system','deleted') AND NOT EXISTS "
+                          '(SELECT 1 FROM users u WHERE u.team_id=t.id) ORDER BY t.created').fetchall()
+
+    def cleanup_empty_teams(self, actor, confirm=False):
+        """Preview (or, with confirm, delete) every team that has no members left."""
+        with self.connect(True) as db:
+            teams = self.empty_teams(db)
+            if not confirm:
+                return {'count': len(teams), 'names': [t['name'] for t in teams[:20]]}
+            modes = [self._remove_team(db, t['id'], actor) for t in teams]
+            return {'count': len(teams), 'deleted': modes.count('deleted'), 'hidden': modes.count('hidden')}
+
+    def delete_user(self, user, actor, delete_team=False):
+        """Remove an account for good. Bots, results and Elo stay with the team unless `delete_team` asks to remove
+        the team too once its last member is gone."""
         with self.connect(True) as db:
             row = db.execute('SELECT * FROM users WHERE id=?', (user,)).fetchone()
             if not row:
@@ -611,7 +661,12 @@ class Store:
             db.execute('DELETE FROM users WHERE id=?', (user,))
             self.audit(db, actor, 'user.deleted', {'user': user, 'username': row['username'], 'name': row['name'],
                                                    'role': row['role'], 'team': team['id'] if team else None})
-            return {'ok': True, 'team_kept': bool(team and db.execute('SELECT 1 FROM teams WHERE id=?', (team['id'],)).fetchone())}
+            team_mode = None
+            if delete_team and team and not db.execute('SELECT 1 FROM users WHERE team_id=?', (team['id'],)).fetchone() \
+                    and db.execute('SELECT 1 FROM teams WHERE id=?', (team['id'],)).fetchone():
+                team_mode = self._remove_team(db, team['id'], actor)
+            kept = bool(team and db.execute("SELECT 1 FROM teams WHERE id=? AND status!='deleted'", (team['id'],)).fetchone())
+            return {'ok': True, 'team_kept': kept, 'team_deleted': team_mode}
 
     def kick(self, owner, member):
         with self.connect() as db:
@@ -1089,7 +1144,7 @@ class Store:
     def team_profile(self, team):
         with self.connect() as db:
             row = db.execute('SELECT id,name,status,created FROM teams WHERE id=?', (team,)).fetchone()
-            if not row or row['status'] == 'disqualified':
+            if not row or row['status'] in ('disqualified', 'deleted'):
                 raise Problem('Không tìm thấy đội.', 404)
             system = row['status'] == 'system'
             rating = db.execute('SELECT * FROM ratings WHERE team_id=?', (team,)).fetchone()
@@ -1119,7 +1174,7 @@ class Store:
             for row in db.execute(
                     'SELECT rs.finished,rs.a,rs.b,ta.name a_name,tb.name b_name,rs.a_points,rs.rating_change,'
                     'rs.a_rating,rs.b_rating,rs.first_match FROM ranked_series rs JOIN teams ta ON ta.id=rs.a '
-                    "JOIN teams tb ON tb.id=rs.b WHERE rs.status='done' AND rs.a_points!=1 "
+                    "JOIN teams tb ON tb.id=rs.b WHERE rs.status='done' AND rs.a_points!=1 AND ta.status!='deleted' AND tb.status!='deleted' "
                     'ORDER BY rs.finished DESC LIMIT ?', (limit,)):
                 winner, loser = ('a', 'b') if row['a_points'] > 1 else ('b', 'a')
                 points = row['a_points'] if winner == 'a' else 2 - row['a_points']
@@ -1260,7 +1315,7 @@ class Store:
         with self.connect(True) as db:
             team = db.execute('SELECT * FROM teams WHERE id=? OR code=? OR name_key=?',
                               (reference, reference.upper(), name_key(reference))).fetchone()
-            if not team or team['status'] == 'system':
+            if not team or team['status'] in ('system', 'deleted'):
                 raise Problem('Không tìm thấy đội.', 404)
             sub = db.execute("SELECT id FROM submissions WHERE team_id=? AND status IN ('valid','queued','running') "
                              "ORDER BY (status='valid') DESC,created DESC,rowid DESC LIMIT 1", (team['id'],)).fetchone()
