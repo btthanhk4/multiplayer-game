@@ -271,9 +271,9 @@ class Executor:
             bot.close()
 
 
-def observation(packet, seed, time_left=None):
+def observation(packet, seed, time_left=None, map_name='standard'):
     state = packet['state']
-    return {'protocol_version': LIMITS['protocol'], 'ruleset_hash': RULES_HASH, 'board': state['board'],
+    return {'protocol_version': LIMITS['protocol'], 'ruleset_hash': RULES_HASH, 'map': map_name, 'board': state['board'],
             'mySide': state['turn'], 'turn': state['turn'], 'legalMoves': packet['legalMoves'],
             'ply': state['revision'], 'quietPly': state['quietPly'],
             'repetitions': state['repetitions'], 'seed': seed,
@@ -435,7 +435,8 @@ class Worker:
             if hashlib.sha256(s['source'].encode()).hexdigest() != s['hash']:
                 raise InfrastructureError('Hash bài nộp không khớp.', retry=False)
         seed = int(job['ref'][:8], 16)
-        packet, moves = referee.call('new'), []
+        map_name = match.get('map') or 'standard'
+        packet, moves = referee.call('new', map=map_name), []
         winner, reason = None, None
         budgets = {'p1': LIMITS['game_seconds'], 'p2': LIMITS['game_seconds']}
         bots = self.spawn_all({side: s['source'] for side, s in submissions.items()}, seed, labels)
@@ -451,18 +452,21 @@ class Worker:
                     "SELECT COUNT(*) FROM jobs WHERE status='queued'").fetchone()[0] < LIVE_SHED_BACKLOG
             while not winner and not packet['state']['winner']:
                 self.check(lost)
-                if not packet['legalMoves']:
-                    winner, reason = 'draw', 'no_legal_moves'
-                    break
-                if len(moves) >= LIMITS['max_plies']:
-                    winner, reason = 'draw', 'ply_limit'
+                for cause, stalled in (('no_legal_moves', not packet['legalMoves']),
+                                       ('ply_limit', len(moves) >= LIMITS['max_plies'])):
+                    if stalled:
+                        # A game the arena cannot continue is decided like any stalled game: material, then advancement.
+                        verdict = referee.call('adjudicate', cause=cause)['verdict']
+                        winner, reason = verdict['winner'], verdict['reason']
+                        break
+                if winner:
                     break
                 side = packet['state']['turn']
                 if live_on and time.monotonic() - last_progress > PROGRESS_INTERVAL:
                     self.publish(job, moves, side, budgets)
                     last_progress = time.monotonic()
                 try:
-                    move, used = bots[side].move(observation(packet, seed + len(moves), budgets[side]), budgets[side])
+                    move, used = bots[side].move(observation(packet, seed + len(moves), budgets[side], map_name), budgets[side])
                 except BotFault as exc:
                     winner, reason = ('p2' if side == 'p1' else 'p1'), 'technical:' + str(exc).split(':', 1)[0]
                     self.audit_faults(job, {side: exc})
@@ -479,7 +483,7 @@ class Worker:
         # tables are most of the size of a stored replay).
         final = {k: v for k, v in state.items() if k not in ('history', 'repetitions')}
         return {'winner': winner or state['winner'], 'reason': reason or state['winReason'],
-                'moves': moves, 'final_state': final, 'rules_hash': RULES_HASH,
+                'moves': moves, 'final_state': final, 'rules_hash': RULES_HASH, 'map': map_name,
                 'source_hashes': {side: s['hash'] for side, s in submissions.items()},
                 'seed': seed, 'limits': LIMITS, 'execution_mode': self.executor.mode,
                 'time_used': {side: round(LIMITS['game_seconds'] - left, 3) for side, left in budgets.items()},

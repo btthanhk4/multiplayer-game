@@ -16,7 +16,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory, g
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .store import Store, Problem, ROOT, RULES_HASH, LIMITS, TEAM_SIZE, SYSTEM_TEAM, uid, now
+from .store import Store, Problem, ROOT, RULES_HASH, LIMITS, TEAM_SIZE, SYSTEM_TEAM, MAPS, uid, now
 
 PUBLIC_FILES = {'rules.js', 'arena/arena.js', 'arena/admin.js', 'arena/common.js', 'arena/watch.js', 'arena/arena.css',
                 'arena/guide.html'}
@@ -244,7 +244,8 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
                 'open': {key: values.get(key) == '1' for key in
                          ('registration_open', 'submissions_open', 'ranked_open', 'practice_open', 'campaign_open',
                           'live_open', 'read_only')},
-                'avg_seconds': {k: round(v, 1) for k, v in store.timing().items()}}
+                'avg_seconds': {k: round(v, 1) for k, v in store.timing().items()},
+                'maps': [{'id': i, 'name': n, 'blurb': b} for i, n, b in MAPS]}
 
     @app.get('/api/health')
     def health():
@@ -436,7 +437,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
     def practice():
         (user, team), data = team_required(), body()
         rate('practice_team', team)
-        ids = store.practice(team, user, text(data, 'p1', 24, 24), text(data, 'p2', 24, 24))
+        ids = store.practice(team, user, text(data, 'p1', 24, 24), text(data, 'p2', 24, 24), data.get('map') or 'standard')
         return jsonify(ids=ids), 201
 
     # ---- ranked ---------------------------------------------------------
@@ -500,7 +501,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
     def tournament_list():
         with store.connect() as db:
             rows = db.execute('SELECT t.id,t.name,t.format,t.rounds,t.round,t.deadline,t.status,t.created,'
-                              't.auto_advance,t.description,t.seed_from,'
+                              't.auto_advance,t.description,t.seed_from,t.map,'
                               '(SELECT COUNT(*) FROM entries e WHERE e.tournament_id=t.id) entrants '
                               'FROM tournaments t ORDER BY t.created DESC LIMIT 100').fetchall()
         return [dict(r) for r in rows]
@@ -694,13 +695,13 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         tid = store.create_tournament(
             actor, text(data, 'name', 3, 80), data.get('format'), data.get('rounds', 5), data.get('deadline'),
             bool(data.get('auto_advance')), str(data.get('description') or '')[:500],
-            data.get('seed_from') or None, data.get('seed_count'))
+            data.get('seed_from') or None, data.get('seed_count'), data.get('map') or 'standard')
         return jsonify(id=tid), 201
 
     @app.post('/api/admin/tournaments/<tid>/update')
     def update_tournament(tid):
         actor, data = auth(True), body()
-        store.update_tournament(tid, actor, data.get('name'), data.get('description'), data.get('deadline'), data.get('rounds'))
+        store.update_tournament(tid, actor, data.get('name'), data.get('description'), data.get('deadline'), data.get('rounds'), data.get('map'))
         return jsonify(ok=True)
 
     @app.post('/api/admin/tournaments/<tid>/cancel')

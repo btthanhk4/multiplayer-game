@@ -71,7 +71,11 @@ python scripts/arena-load.py --base https://staging.example.org --users 1000 --i
 
 ## 3. Hợp đồng bot và thể lệ
 
-Xem `/arena/guide.html`. Tóm tắt: `choose_move(observation)` trả `{from: [r,c], to: [r,c]}`. Mỗi bot được nạp một lần mỗi ván và giữ biến toàn cục trong ván. Giới hạn: 3 giây/lượt, quỹ 60 giây suy nghĩ mỗi ván, 5 giây nạp mã, 256 MiB RAM, 4 KiB kết quả, 1 MiB log, 400 nửa lượt (đủ thì hòa). Sandbox chặn mạng, đặt rootfs chỉ đọc, `cap-drop ALL`, `no-new-privileges`, `RLIMIT_NPROC=1` sau khi adapter khởi động, giới hạn PID cgroup 64 và CPU tích lũy bằng quỹ thời gian + 20 giây. `print()` của bot được chuyển sang stderr nên không thể làm hỏng giao thức.
+Xem `/arena/guide.html`. Tóm tắt: `choose_move(observation)` trả `{from: [r,c], to: [r,c]}`. Mỗi bot được nạp một lần mỗi ván và giữ biến toàn cục trong ván. Giới hạn: 3 giây/lượt, quỹ 60 giây suy nghĩ mỗi ván, 5 giây nạp mã, 256 MiB RAM, 4 KiB kết quả, 1 MiB log, 400 nửa lượt (đủ thì xử ván). Sandbox chặn mạng, đặt rootfs chỉ đọc, `cap-drop ALL`, `no-new-privileges`, `RLIMIT_NPROC=1` sau khi adapter khởi động, giới hạn PID cgroup 64 và CPU tích lũy bằng quỹ thời gian + 20 giây. `print()` của bot được chuyển sang stderr nên không thể làm hỏng giao thức.
+
+**Luật xử ván (giảm hòa).** Ván hết thế (lặp thế ba lần, 80 nửa lượt không ăn quân, đủ 400 nửa lượt, hoặc phe đến lượt hết nước đi) không còn hòa ngay: bên nhiều quân hơn thắng, bằng quân thì bên có quân gần ô đích hơn thắng, vẫn bằng thì mới hòa. Đo với các bot mẫu và boss, tỉ lệ hòa giảm từ khoảng 22% xuống 0–3%, nên bảng điểm Swiss ít bị dồn đồng điểm. Lưu ý: bên đi sau có lợi thế đáng kể trên bản đồ chuẩn (hai bot giống nhau tự đấu: đi sau thắng khoảng 65%, đi trước khoảng 26%); vì mỗi cặp luôn gồm hai ván đổi màu nên lợi thế này triệt tiêu ở cấp cặp và cấp giải.
+
+**Bản đồ.** Mỗi giải có một bản đồ (cách xếp quân ban đầu): Chuẩn, Bức tường, Hai cánh, Khối vuông, hoặc Ngẫu nhiên (mỗi cặp một kiểu đối xứng, hai ván của cặp dùng chung). Luật đi, ô đích và kích thước bàn cờ không bao giờ đổi, nên bot đã nộp vẫn chạy được. Admin chọn bản đồ lúc tạo giải và có thể đổi giữa các vòng ở tab *Giải đấu* (chỉ áp dụng cho vòng mở sau đó). Đề xuất: vòng loại Swiss dùng *Chuẩn*; vòng trong/chung kết dùng *Ngẫu nhiên* hoặc một bản đồ công bố trước để bot không học thuộc thế mở đầu. Xếp hạng và chiến dịch luôn dùng *Chuẩn* để Elo ổn định. Sinh viên thử bản đồ khác ở mục Đấu tập. Đổi luật hoặc kích thước bàn cờ giữa chừng thì **không hỗ trợ**: bot được viết một lần theo luật đã công bố.
 
 Bot lỗi thua kỹ thuật ván đó; nếu cả hai bot cùng lỗi thì ván hòa. Lỗi hạ tầng không bao giờ bị tính là bot thua: hệ thống tự chạy lại 3 lần, sau đó job chờ BTC bấm "Thử lại". Chẩn đoán lỗi bot trong trận chỉ nằm trong nhật ký BTC. Riêng log kiểm tra bot thì đội tự xem được, để biết cách sửa.
 
@@ -116,7 +120,7 @@ Cách hỗ trợ sát hạn:
 | Cần đổi giải | Tab *Giải đấu*: sửa tên/mô tả/hạn/số vòng Swiss, **Đóng đăng ký ngay**, thêm đội thủ công bằng mã đội hoặc tên đội (đội lỡ hạn), xóa đội khỏi danh sách trước khi khóa, xem từng cặp đấu theo vòng, hoặc **Hủy giải** (hủy mọi ván chưa xong). |
 | Sau hạn | Chờ "Bài nộp đang chờ" về 0, rồi bấm **Khóa danh sách** (hoặc **Khóa bắt buộc** để loại các bot chưa được kiểm tra). Tắt đấu xếp hạng, đấu tập/giao hữu và chiến dịch boss; backup; rồi **Mở vòng**. |
 | Mỗi vòng | Xem "Job lỗi". Nếu có, bấm *Thử lại mọi job lỗi*. Vòng tiếp theo tự mở. |
-| Chung kết | Tạo giải *Loại trực tiếp* với nguồn đội "Top N của" vòng Swiss: danh sách được khóa ngay với hạt giống theo hạng. |
+| Chung kết | Tạo giải *Loại trực tiếp* với nguồn đội "Top N của" vòng Swiss: danh sách được khóa ngay với hạt giống theo hạng. Chọn bản đồ cho vòng trong (ví dụ *Ngẫu nhiên*) và thông báo trước cho sinh viên. |
 | Kết thúc | Tải CSV bảng điểm và xếp loại. Backup. Bật lại đấu xếp hạng nếu muốn. |
 
 Xử lý sự cố:

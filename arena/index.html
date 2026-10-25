@@ -70,7 +70,7 @@
         </form>
         <aside class="lab-sidebar">
           <div class="paper-card"><p class="eyebrow">BẮT ĐẦU NHANH</p><h3>Chọn một bot mẫu</h3><p>Chạy thử nguyên bản hoặc sửa hàm <code>choose_move</code> theo chiến thuật của bạn.</p><button class="sample-button" data-sample="first">01 · Nước đầu tiên <span>↙</span></button><button class="sample-button" data-sample="hunter">02 · Thợ săn <span>↙</span></button><button class="sample-button" data-sample="guardian">03 · Người gác <span>↙</span></button><button class="sample-button" data-sample="template">04 · Khung chiến thuật (có chú thích) <span>↙</span></button></div>
-          <form method="post" action="/arena/enable-javascript" id="practice-form" class="paper-card"><p class="eyebrow">ĐẤU TẬP / KHÔNG TÍNH ĐIỂM</p><h3>So hai phiên bản của đội</h3><label>Bot A<select id="practice-a" required></select></label><label>Bot B<select id="practice-b" required></select></label><button class="button" type="submit">Đấu hai ván đổi màu</button><p class="caption">Replay công khai; mã nguồn chỉ đội bạn xem được.</p></form>
+          <form method="post" action="/arena/enable-javascript" id="practice-form" class="paper-card"><p class="eyebrow">ĐẤU TẬP / KHÔNG TÍNH ĐIỂM</p><h3>So hai phiên bản của đội</h3><label>Bot A<select id="practice-a" required></select></label><label>Bot B<select id="practice-b" required></select></label><label>Bản đồ<select id="practice-map"><option value="standard">Chuẩn</option><option value="wall">Bức tường</option><option value="flank">Hai cánh</option><option value="block">Khối vuông</option><option value="random">Ngẫu nhiên (mỗi cặp một kiểu)</option></select></label><button class="button" type="submit">Đấu hai ván đổi màu</button><p class="caption">Replay công khai; mã nguồn chỉ đội bạn xem được.</p></form>
         </aside>
       </div>
       <div class="section-heading minor"><h3>Các phiên bản của đội</h3><span id="submission-count" class="caption"></span></div>
@@ -108,7 +108,7 @@
       <div id="round-view" class="round-view" hidden></div>
       <div class="table-scroll"><table id="standings-table" class="compact"><thead><tr><th>HẠNG</th><th>ĐỘI / BOT</th><th>XẾP LOẠI</th><th>ĐIỂM</th><th>T / H / B</th><th>BUCHHOLZ</th><th>ĐIỂM VÁN</th></tr></thead><tbody id="standings-body"></tbody></table></div>
       <button class="button more-button" id="standings-more" hidden>Hiện thêm</button>
-      <details class="more"><summary>Cách tính điểm và xếp loại</summary><p class="caption">Thắng cặp 1 điểm, hòa 0,5; đồng điểm xét Buchholz rồi điểm ván. Loại trực tiếp: hòa cặp xét số quân còn lại rồi hạt giống. Xếp loại: 10% đầu Xuất sắc, 20% kế Giỏi, 30% kế Khá, còn lại Đạt.</p></details>
+      <details class="more"><summary>Cách tính điểm và xếp loại</summary><p class="caption">Thắng cặp 1 điểm, hòa 0,5; ván hết thế được xử theo quân còn lại rồi độ tiến gần ô đích; đồng điểm xét Buchholz rồi điểm ván. Loại trực tiếp: hòa cặp xét số quân còn lại rồi hạt giống. Xếp loại: 10% đầu Xuất sắc, 20% kế Giỏi, 30% kế Khá, còn lại Đạt.</p></details>
     </section>
 
     <section id="watch" class="view" role="tabpanel" hidden>

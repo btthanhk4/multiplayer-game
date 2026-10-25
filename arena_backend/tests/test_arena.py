@@ -946,9 +946,11 @@ class LocalArena(unittest.TestCase):
         local = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(local)
         referee, rng, moves_checked, endings = Referee(), random.Random(7), 0, set()
+        maps = [*local.MAP_NAMES, 'random:1f2e3d4c', 'random:0', 'random:ffffffff']
         try:
-            for game in range(60):
-                packet, state = referee.call('new'), local.new_game()
+            for game in range(80):
+                name = maps[game % len(maps)]
+                packet, state = referee.call('new', map=name), local.new_game(name)
                 for _ in range(400):
                     theirs = packet['legalMoves']
                     self.assertEqual(local.legal_moves(state), theirs, (game, state['revision']))
@@ -967,11 +969,79 @@ class LocalArena(unittest.TestCase):
                         self.assertEqual(state[key], expected[key], (game, state['revision'], key))
                     self.assertEqual(state['lastMove']['notation'], expected['lastMove']['notation'])
                     moves_checked += 1
-                endings.add(packet['state']['winReason'])
+                if packet['state']['winReason']:
+                    endings.add(packet['state']['winReason'])
         finally:
             referee.close()
         self.assertGreater(moves_checked, 500)
-        self.assertTrue({'goal', 'quiet'} <= endings and any(e.startswith('eliminate') for e in endings), endings)
+        self.assertIn('goal', endings)
+        self.assertTrue(any(e.startswith('eliminate') for e in endings), endings)
+        self.assertTrue(any(e.startswith(('material:', 'advance:')) for e in endings), 'some games end by adjudication')
+
+    def load_local(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('local_arena', ROOT / 'sdk/local_arena.py')
+        local = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(local)
+        return local
+
+    def test_every_map_is_legal_symmetric_safe_and_identical_in_both_engines(self):
+        local, referee = self.load_local(), Referee()
+        names = [*local.MAP_NAMES, 'random:0', 'random:1', 'random:ffffffff', 'random:deadbeef'] + [f'random:{n * 2654435761 % 2**32:x}' for n in range(1, 120)]
+        try:
+            for name in names:
+                board = local.new_game(name)['board']
+                self.assertEqual(referee.call('new', map=name)['state']['board'], board, name)
+                mine = {(r, c): p['type'] for r, row in enumerate(board) for c, p in enumerate(row) if p and p['owner'] == 'p1'}
+                theirs = {(r, c): p['type'] for r, row in enumerate(board) for c, p in enumerate(row) if p and p['owner'] == 'p2'}
+                self.assertEqual(len(mine), 9, name)
+                self.assertEqual(sorted(mine.values()), ['paper'] * 3 + ['rock'] * 3 + ['scissors'] * 3, name)
+                self.assertEqual({(8 - r, 8 - c): t for (r, c), t in mine.items()}, theirs, f'{name}: Đỏ là bản quay 180° của Xanh')
+                self.assertTrue(all(r >= 6 for r, _ in mine), f'{name}: Xanh ở hàng 6–8')
+                for goal in local.GOALS.values():
+                    self.assertIsNone(board[goal[0]][goal[1]], f'{name}: ô đích để trống')
+                gap = min(max(abs(a[0] - b[0]), abs(a[1] - b[1])) for a in mine for b in theirs)
+                self.assertGreaterEqual(gap, 4, f'{name}: không có ăn quân ngay từ nước đầu')
+                self.assertTrue(local.legal_moves(local.new_game(name)))
+            with self.assertRaises(ValueError):
+                local.new_game('khong-co')
+            self.assertFalse(referee.call.__self__ is None)
+            self.assertFalse(referee.call('new', map='standard')['state']['board'] != local.new_game()['board'])
+        finally:
+            referee.close()
+        self.assertEqual(len({str(local.new_game(n)['board']) for n in names[:4]}), 4, 'the named maps differ')
+        self.assertGreater(len({str(local.new_game(n)['board']) for n in names[4:]}), 100, 'random maps vary with the seed')
+
+    def test_a_stalled_game_is_decided_by_material_then_advancement(self):
+        local, referee = self.load_local(), Referee()
+
+        def board_of(p1, p2):
+            board = [[None] * 9 for _ in range(9)]
+            for (r, c, t) in p1:
+                board[r][c] = {'owner': 'p1', 'type': t}
+            for (r, c, t) in p2:
+                board[r][c] = {'owner': 'p2', 'type': t}
+            return board
+        full = [(8, 1, 'rock'), (8, 2, 'paper'), (8, 3, 'scissors')]
+        far = [(0, 1, 'rock'), (0, 2, 'paper'), (0, 3, 'scissors')]
+        cases = [
+            (board_of(full + [(6, 6, 'rock')], far), ('p1', 'material')),                      # one more piece
+            (board_of(full, far + [(5, 5, 'paper')]), ('p2', 'material')),
+            (board_of([(1, 7, 'rock')], [(6, 2, 'rock')]), ('p1', 'advance')),                  # level on pieces; p1 is 1 from i9, p2 is 2 from a1
+            (board_of([(6, 6, 'rock')], [(2, 2, 'rock')]), ('draw', 'level')),                  # 6 from i9 and 6 from a1
+        ]
+        try:
+            for board, expected in cases:
+                self.assertEqual(local.adjudicate(board), expected)
+                self.assertEqual(local.adjudicated(board, 'quiet'),
+                                 ('draw', 'quiet') if expected[0] == 'draw' else (expected[0], f'{expected[1]}:quiet'))
+            # The referee answers the move-cap case with the same rule.
+            packet = referee.call('new')
+            self.assertEqual(packet['state']['board'], local.new_game()['board'])
+            verdict = referee.call('adjudicate', cause='ply_limit')['verdict']
+            self.assertEqual(verdict, {'winner': 'draw', 'reason': 'ply_limit'}, 'the opening position is level')
+        finally:
+            referee.close()
 
     def test_illegal_moves_are_rejected_like_the_referee(self):
         import importlib.util
@@ -1564,6 +1634,131 @@ class DeleteUser(Base):
         again = victim_client.post('/api/register', json={'username': 'se_bi_xoa', 'name': 'Người mới', 'password': 'test-only-password-123',
                                                            'invite': 'test-invite'}, headers=origin)
         self.assertEqual(again.status_code, 200, again.json)
+
+
+class MapsAndAdjudication(Base):
+    FIRST_MOVE = "def choose_move(o):\n    m = o['legalMoves'][0]\n    return {'from': m['from'], 'to': m['to']}\n"
+    LAST_MOVE = "def choose_move(o):\n    m = o['legalMoves'][-1]\n    return {'from': m['from'], 'to': m['to']}\n"
+    # Fails the game (a technical loss) unless it is told the right map and the board really is that map.
+    EXPECT = ("EXPECTED = {expected!r}\n"
+              "def choose_move(o):\n"
+              "    assert o['map'] == EXPECTED or (EXPECTED == 'random' and o['map'].startswith('random:')), o['map']\n"
+              "    m = o['legalMoves'][0]\n"
+              "    return {{'from': m['from'], 'to': m['to']}}\n")
+
+    def load_local(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('local_arena', ROOT / 'sdk/local_arena.py')
+        local = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(local)
+        return local
+
+    def play_one(self, source_a, source_b, map_name):
+        team, user = self.team('Bản đồ ' + uid()[:5])
+        a, b = self.valid(team, source_a, 'a'), self.valid(team, source_b, 'b')
+        with self.store.connect(True) as db:
+            mid = self.store.create_match(db, a, b, requester=user, map_name=map_name)
+        Worker(self.store, TrustedExecutor()).run_once()
+        with self.store.connect() as db:
+            row = dict(db.execute('SELECT * FROM matches WHERE id=?', (mid,)).fetchone())
+        return row, json.loads(row['replay'])
+
+    def test_bots_are_told_the_map_and_it_is_recorded_in_the_replay(self):
+        for name in ('standard', 'wall', 'flank', 'block', 'random:1a2b3c4d'):
+            row, replay = self.play_one(self.EXPECT.format(expected=name), self.EXPECT.format(expected=name), name)
+            self.assertEqual(row['status'], 'done')
+            self.assertFalse(row['reason'].startswith('technical'), (name, row['reason']))
+            self.assertEqual((row['map'], replay['map']), (name, name))
+
+    def test_stalled_games_are_decided_the_same_way_by_the_arena_and_the_local_tool(self):
+        local = self.load_local()
+        first, last = local.Player('first', local.bot_first, None), local.Player('last', lambda o: {
+            'from': o['legalMoves'][-1]['from'], 'to': o['legalMoves'][-1]['to']}, None)
+        for name in ('standard', 'wall', 'flank', 'block'):
+            row, replay = self.play_one(self.FIRST_MOVE, self.LAST_MOVE, name)
+            winner, reason, plies, *_ = local.play(first, last, 1, False, name)
+            self.assertEqual((row['winner'], row['reason']), (winner, reason), name)
+            self.assertEqual(len(replay['moves']), plies, name)
+            self.assertFalse(row['reason'].startswith('technical'))
+
+    def test_move_cap_and_blocked_side_are_adjudicated_not_drawn(self):
+        referee = Referee()
+        try:
+            referee.call('new')
+            for cause in ('ply_limit', 'no_legal_moves'):
+                self.assertEqual(referee.call('adjudicate', cause=cause)['verdict'], {'winner': 'draw', 'reason': cause})
+        finally:
+            referee.close()
+        self.assertEqual(LIMITS['ply_limit'], 'adjudicate')
+        self.assertEqual(LIMITS['no_legal_moves'], 'adjudicate')
+
+    def test_map_lists_in_server_pages_and_rules_agree(self):
+        import re
+        from arena_backend.store import MAP_IDS
+        local = self.load_local()
+        self.assertEqual(MAP_IDS, {*local.MAP_NAMES, 'random'})
+        for page, select in (('arena/index.html', 'practice-map'), ('arena/admin.html', 'map'), ('arena/admin.html', 'edit-map')):
+            html = (ROOT / page).read_text(encoding='utf-8')
+            tag = re.search(rf'<select[^>]*id="{select}"[^>]*>(.*?)</select>', html, re.S)
+            self.assertIsNotNone(tag, (page, select))
+            self.assertEqual(set(re.findall(r'value="([^"]+)"', tag.group(1))), MAP_IDS, (page, select))
+        common = (ROOT / 'arena/common.js').read_text(encoding='utf-8')
+        for name in MAP_IDS:
+            self.assertIn(f'{name}:', common, f'label for {name}')
+
+    def test_practice_map_choice_random_gives_both_games_the_same_new_formation(self):
+        team, user = self.team('Tập bản đồ')
+        a, b = self.valid(team, HUNTER, 'a'), self.valid(team, HUNTER, 'b')
+        ids = self.store.practice(team, user, a, b, 'random')
+        with self.store.connect() as db:
+            maps = [db.execute('SELECT map FROM matches WHERE id=?', (i,)).fetchone()[0] for i in ids]
+        self.assertEqual(maps[0], maps[1])
+        self.assertRegex(maps[0], r'^random:[0-9a-f]{8}$')
+        with self.assertRaises(Problem):
+            self.store.practice(team, user, a, b, 'khong-co-ban-do')
+        self.client.post('/api/register', json={'username': 'mapper', 'name': 'Mapper', 'password': 'test-only-password-123',
+                                                'invite': 'test-invite'}, headers={'Origin': 'http://localhost:8080'})
+        health = self.client.get('/api/health').json
+        self.assertEqual([m['id'] for m in health['maps']], ['standard', 'wall', 'flank', 'block', 'random'])
+
+    def test_tournament_map_applies_per_round_and_can_change_between_rounds(self):
+        tid = self.tournament('swiss', rounds=3)
+        self.entrants(tid, 6)
+        self.close_deadline(tid)
+        self.store.freeze(tid, 'admin')
+        with self.assertRaises(Problem):
+            self.store.update_tournament(tid, 'admin', map_choice='moon')
+        self.store.update_tournament(tid, 'admin', map_choice='wall')
+        self.store.next_round(tid, 'admin')
+        self.finish_round(tid)
+        self.store.update_tournament(tid, 'admin', map_choice='random')
+        self.store.next_round(tid, 'admin')
+        with self.store.connect() as db:
+            rows = db.execute('SELECT p.round,p.id pid,m.map FROM matches m JOIN pairings p ON p.id=m.pairing_id '
+                              'ORDER BY p.round,p.slot').fetchall()
+        first_round = {r['map'] for r in rows if r['round'] == 1}
+        self.assertEqual(first_round, {'wall'}, 'games already made keep their map')
+        second = {}
+        for r in rows:
+            if r['round'] == 2:
+                second.setdefault(r['pid'], set()).add(r['map'])
+        self.assertTrue(all(len(v) == 1 and next(iter(v)).startswith('random:') for v in second.values()),
+                        'both games of a pair share one random formation')
+        self.assertGreater(len({next(iter(v)) for v in second.values()}), 1, 'different pairs get different formations')
+
+    def test_admin_creates_a_tournament_with_a_map_over_http(self):
+        self.register('map_admin')
+        with self.store.connect(True) as db:
+            db.execute("UPDATE users SET role='admin' WHERE username='map_admin'")
+        ok = self.post('/admin/tournaments', {'name': 'Vòng trong', 'format': 'knockout', 'rounds': 3,
+                                              'deadline': now() + 3600, 'map': 'block'})
+        self.assertEqual(ok.status_code, 201, ok.json)
+        self.assertEqual(self.post('/admin/tournaments', {'name': 'Sai bản đồ', 'format': 'swiss', 'rounds': 3,
+                                                          'deadline': now() + 3600, 'map': 'moon'}).status_code, 400)
+        listing = self.client.get('/api/tournaments').json['items']
+        self.assertEqual([(t['name'], t['map']) for t in listing], [('Vòng trong', 'block')])
+        self.assertEqual(self.post(f"/admin/tournaments/{ok.json['id']}/update", {'map': 'flank'}).status_code, 200)
+        self.assertEqual(self.client.get('/api/tournaments').json['items'][0]['map'], 'flank')
 
 
 class AdminMatches(Base):

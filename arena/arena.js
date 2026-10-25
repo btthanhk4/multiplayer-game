@@ -1,5 +1,5 @@
 import {$, $$, escape, labels, formats, kinds, formatTime, badge, session, api, notice, action, options, countdown,
-  poller, outcome, teamLink, starText, ago, sparkline, celebrate} from './common.js';
+  poller, outcome, teamLink, starText, ago, sparkline, celebrate, mapLabel} from './common.js';
 import {createWatch} from './watch.js';
 
 document.getElementById('boot-note')?.remove();   // reaching here means every module loaded
@@ -328,7 +328,7 @@ async function renderCompetition() {
   if (id !== selectedTournament) return;
   competition = result;
   const t = result.tournament;
-  $('#competition-info').innerHTML = `<div class="tournament-head"><p>${badge(t.status)} <strong>${escape(t.name)}</strong></p><p class="caption">${escape(formats[t.format])} · Vòng ${t.round}/${t.rounds}${result.unfinished ? ` · ${result.unfinished} ván đang chờ/chạy` : ''}${t.status === 'open' ? ` · Hạn chọn bot ${formatTime(t.deadline)} (${countdown(t.deadline)})` : ''}<br>Luật cố định: ${escape(t.rules_hash.slice(0,12))} · ${t.config.turn_seconds}s/lượt · quỹ ${t.config.game_seconds}s/ván · Hai ván đổi màu mỗi cặp.</p>${t.description ? `<p>${escape(t.description)}</p>` : ''}</div>${podium(result)}`;
+  $('#competition-info').innerHTML = `<div class="tournament-head"><p>${badge(t.status)} <strong>${escape(t.name)}</strong></p><p class="caption">${escape(formats[t.format])} · Vòng ${t.round}/${t.rounds}${result.unfinished ? ` · ${result.unfinished} ván đang chờ/chạy` : ''}${t.status === 'open' ? ` · Hạn chọn bot ${formatTime(t.deadline)} (${countdown(t.deadline)})` : ''}<br>Bản đồ: <strong>${escape(mapLabel(t.map))}</strong> · Luật cố định: ${escape(t.rules_hash.slice(0,12))} · ${t.config.turn_seconds}s/lượt · quỹ ${t.config.game_seconds}s/ván · Hai ván đổi màu mỗi cặp.</p>${t.description ? `<p>${escape(t.description)}</p>` : ''}</div>${podium(result)}`;
   const open = t.status === 'open' && t.deadline > Date.now()/1000 && !t.seed_from;
   $('#join-form').hidden = !open || !me;
   const mine = result.mine;
@@ -498,7 +498,7 @@ $('#submit-form').addEventListener('submit', event => { event.preventDefault(); 
   await api('/submissions', {name: $('#bot-name').value, source: $('#source').value.replace(/\r\n/g, '\n')}); forget();
   notice('Đã lưu phiên bản. Kết quả kiểm tra sẽ cập nhật trong danh sách bên dưới.'); await refresh(); }); });
 $('#practice-form').addEventListener('submit', event => { event.preventDefault(); if (!requireTeam()) return; action(event.submitter, async () => {
-  const result = await api('/practice', {p1: $('#practice-a').value, p2: $('#practice-b').value});
+  const result = await api('/practice', {p1: $('#practice-a').value, p2: $('#practice-b').value, map: $('#practice-map').value});
   notice('Đã xếp hai ván đổi màu vào hàng chờ.'); await watch.toggle(result.ids[0]); }); });
 $('#campaign-form').addEventListener('submit', event => { event.preventDefault(); if (!requireTeam()) return; action(event.submitter, async () => {
   await api('/campaign/challenge', {level: Number($('#campaign-level').value), submission_id: $('#campaign-submission').value}); forget();

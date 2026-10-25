@@ -2,7 +2,7 @@
 //   moves  : nước đi dạng gọn [hàng, cột, hàng mới, cột mới]
 //   states : trạng thái bàn cờ sau từng nước (states[0] là thế ban đầu)
 //   follow : đang bám theo nước mới nhất của ván trực tiếp
-import {$, escape, api, notice, kinds, formatTime, badge, board, outcome, newGame, pieceCounts, teamLink,
+import {$, escape, api, notice, kinds, formatTime, badge, board, outcome, newGame, pieceCounts, teamLink, mapLabel,
   extendStates, compactMoves} from './common.js';
 
 // Live viewing is a luxury for the grader and the API, so each person watches at most two boards.
@@ -46,6 +46,7 @@ export function createWatch(ctx) {
   function caption(item) {
     const m = item.meta, used = m.replay?.time_used;
     const parts = [`${m.bot1} (Xanh) / ${m.bot2} (Đỏ)`];
+    if (m.map && m.map !== 'standard') parts.push(`Bản đồ ${mapLabel(m.map)}`);
     if (item.status === 'done' && used) parts.push(`nghĩ ${used.p1}s / ${used.p2}s`);
     if (m.replay?.execution_mode && m.replay.execution_mode !== 'docker') parts.push('Trận thử nội bộ');
     return `${item.status === 'done' ? `<strong>${escape(outcome(m))}</strong><br>` : ''}<span class="caption">${parts.map(escape).join(' · ')}</span>`;
@@ -110,7 +111,7 @@ export function createWatch(ctx) {
 
   function setMoves(item, compact) {
     item.moves = compact.slice();
-    item.states = [newGame()];
+    item.states = [newGame(item.meta?.map)];
     extendStates(item.states, item.moves);
     item.position = Math.min(item.position, last(item));
   }
@@ -192,7 +193,7 @@ export function createWatch(ctx) {
       if (!item.meta) continue;
       const end = last(item);
       if (item.follow) {
-        if (item.position < end) { const behind = end - item.position; item.position = Math.min(end, item.position + (behind > 40 ? 4 : behind > 12 ? 2 : 1)); paint(id); }
+        if (item.position < end) { const behind = end - item.position; item.position = Math.min(end, item.position + (behind > 40 ? 8 : behind > 16 ? 4 : behind > 6 ? 2 : 1)); paint(id); }
         continue;
       }
       if (!item.playing) continue;

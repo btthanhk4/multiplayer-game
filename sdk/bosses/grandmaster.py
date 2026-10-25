@@ -1,4 +1,4 @@
-"""Boss 5 · Đại kiện tướng: alpha-beta ba nửa lượt, xét nốt các nước ăn quân, quản lý quỹ thời gian, tránh hòa khi đang thắng."""
+"""Boss 5 · Đại kiện tướng: alpha-beta ba nửa lượt, xét nốt các nước ăn quân, quản lý quỹ thời gian, biết luật xử ván khi hết thế."""
 import random
 import time
 
@@ -100,6 +100,21 @@ def evaluate(pos, side):
     return score + hanging[other(side)] // 2
 
 
+def settle(pos, side):
+    """Score if the game were decided now: more pieces wins, then the piece nearest its goal wins, else a draw."""
+    mine, theirs = sum(pos.count[side].values()), sum(pos.count[other(side)].values())
+    if mine != theirs:
+        return WIN // 2 if mine > theirs else -WIN // 2
+    near = {}
+    for who in (side, other(side)):
+        goal_r, goal_c = GOALS[who]
+        near[who] = min((max(abs(r - goal_r), abs(c - goal_c)) for r in range(9) for c in range(9)
+                         if pos.cells[r][c] and pos.cells[r][c][0] == who), default=9)
+    if near[side] != near[other(side)]:
+        return WIN // 2 if near[side] < near[other(side)] else -WIN // 2
+    return 0
+
+
 class Search:
     def __init__(self, pos, deadline):
         self.pos, self.deadline, self.nodes = pos, deadline, 0
@@ -159,6 +174,7 @@ def choose_move(observation):
     deadline = time.perf_counter() + budget
     pos = Position(observation['board'])
     repetitions = observation.get('repetitions') or {}
+    quiet = observation.get('quietPly', 0)
     legal = {(m['from'][0], m['from'][1], m['to'][0], m['to'][1]) for m in observation['legalMoves']}
     root = [m for m in pos.moves(side) if m[:4] in legal] or \
         [(r, c, nr, nc, pos.cells[nr][nc]) for r, c, nr, nc in legal]
@@ -173,9 +189,9 @@ def choose_move(observation):
                     value = WIN + depth
                 else:
                     value = -search.negamax(other(side), depth - 1, -WIN * 3, -alpha)
-                    # A third repetition is a draw: avoid it while ahead, welcome it while behind.
-                    if repetitions.get(pos.key(other(side)), 0) >= 2:
-                        value = 0
+                    # A third repetition, or the 80th quiet half-move, ends the game by the adjudication rule.
+                    if repetitions.get(pos.key(other(side)), 0) >= 2 or (move[4] is None and quiet + 1 >= 80):
+                        value = settle(pos, side)
                 pos.undo(move)
                 scored.append((value + jitter[move], move))
                 alpha = max(alpha, value)

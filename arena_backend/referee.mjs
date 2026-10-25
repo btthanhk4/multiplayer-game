@@ -1,5 +1,5 @@
 import readline from 'node:readline';
-import {newGame, applyMove, legalMoves} from '../rules.js';
+import {newGame, applyMove, legalMoves, adjudicated} from '../rules.js';
 let state = newGame();
 function snapshot() {
   const moves = [];
@@ -13,11 +13,15 @@ function snapshot() {
 for await (const line of readline.createInterface({input:process.stdin})) {
   try {
     const command = JSON.parse(line);
-    if (command.op === 'new') state = newGame();
+    if (command.op === 'new') state = newGame(command.map || 'standard');
     else if (command.op === 'move') {
-      const result = applyMove(state,state.turn,command.from,command.to);
+      const result = applyMove(state,state.turn,command.from,command.to,{adjudicate:true});
       if (!result.ok) throw new Error(result.error);
       state = result.state;
+    } else if (command.op === 'adjudicate') {
+      // The arena ends a game it cannot continue (move cap, no legal move) the same way the rules end a stalemate.
+      process.stdout.write(JSON.stringify({ok:true,verdict:adjudicated(state,String(command.cause)),...snapshot()})+'\n');
+      continue;
     } else throw new Error('Unknown referee operation');
     process.stdout.write(JSON.stringify({ok:true,...snapshot()})+'\n');
   } catch (error) { process.stdout.write(JSON.stringify({ok:false,error:error.message})+'\n'); }

@@ -18,8 +18,18 @@ RULES_HASH = hashlib.sha256((ROOT / 'rules.js').read_bytes()).hexdigest()
 # game_seconds is each bot's thinking budget for the whole game.
 LIMITS = {'protocol': 2, 'turn_seconds': 3, 'game_seconds': 60, 'init_seconds': 5,
           'memory_mib': 256, 'source_bytes': 65536, 'output_bytes': 4096,
-          'max_plies': 400, 'no_legal_moves': 'draw', 'ply_limit': 'draw'}
+          'max_plies': 400, 'no_legal_moves': 'adjudicate', 'ply_limit': 'adjudicate'}
 ENGINE_KEY = hashlib.sha256((RULES_HASH + json.dumps(LIMITS, sort_keys=True)).encode()).hexdigest()
+# Starting formations ("bản đồ"). Rules, goals and board size never change; ids match rules.js. `random` gives every
+# pair its own symmetric formation (both games of the pair share it).
+MAPS = [
+    ('standard', 'Chuẩn', 'Cách xếp quân gốc.'),
+    ('wall', 'Bức tường', 'Hai hàng liền nhau dọc đáy bàn cờ.'),
+    ('flank', 'Hai cánh', 'Quân chia thành hai cụm ở hai bên.'),
+    ('block', 'Khối vuông', 'Ba hàng ba quân xếp thành một khối.'),
+    ('random', 'Ngẫu nhiên', 'Mỗi cặp đấu một cách xếp khác nhau, đối xứng hai bên.'),
+]
+MAP_IDS = {item[0] for item in MAPS}
 SCHEMA_VERSION = 3
 PRIORITY = {'validate': 0, 'tournament': 1, 'ranked': 2, 'campaign': 3, 'friendly': 3, 'practice': 3}
 TEAM_SIZE = int(os.getenv('ARENA_TEAM_SIZE', '4'))
@@ -69,7 +79,9 @@ BADGES = [
     ('excellent', '🎓', 'Xuất sắc', 'Xếp loại Xuất sắc ở một giải đã hoàn tất'),
 ]
 # Columns added after a table first shipped; CREATE TABLE IF NOT EXISTS cannot add them.
-ADDED_COLUMNS = {'matches': ['plies INTEGER'], 'ranked_series': ['a_rating INTEGER', 'b_rating INTEGER']}
+ADDED_COLUMNS = {'matches': ['plies INTEGER', "map TEXT NOT NULL DEFAULT 'standard'"],
+                 'ranked_series': ['a_rating INTEGER', 'b_rating INTEGER'],
+                 'tournaments': ["map TEXT NOT NULL DEFAULT 'standard'"]}
 
 SCHEMA = [
     '''CREATE TABLE IF NOT EXISTS teams (
@@ -93,7 +105,7 @@ SCHEMA = [
         deadline REAL NOT NULL, status TEXT NOT NULL DEFAULT 'open',
         rules_hash TEXT NOT NULL, config TEXT NOT NULL, created REAL NOT NULL,
         auto_advance INTEGER NOT NULL DEFAULT 0, seed_from TEXT, seed_count INTEGER,
-        description TEXT NOT NULL DEFAULT '')''',
+        description TEXT NOT NULL DEFAULT '', map TEXT NOT NULL DEFAULT 'standard')''',
     '''CREATE TABLE IF NOT EXISTS entries (
         tournament_id TEXT NOT NULL REFERENCES tournaments(id),
         team_id TEXT NOT NULL REFERENCES teams(id),
@@ -109,7 +121,8 @@ SCHEMA = [
         p1 TEXT NOT NULL REFERENCES submissions(id), p2 TEXT NOT NULL REFERENCES submissions(id),
         requester TEXT, kind TEXT NOT NULL DEFAULT 'practice', status TEXT NOT NULL DEFAULT 'queued',
         winner TEXT, reason TEXT, replay TEXT, progress TEXT,
-        rules_hash TEXT NOT NULL, created REAL NOT NULL, p1_left INTEGER, p2_left INTEGER, plies INTEGER)''',
+        rules_hash TEXT NOT NULL, created REAL NOT NULL, p1_left INTEGER, p2_left INTEGER, plies INTEGER,
+        map TEXT NOT NULL DEFAULT 'standard')''',
     '''CREATE TABLE IF NOT EXISTS jobs (
         id TEXT PRIMARY KEY, kind TEXT NOT NULL, ref TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'queued', token TEXT, expires REAL,
@@ -190,6 +203,14 @@ def slug(text):
 
 def team_code():
     return ''.join(secrets.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(8))
+
+
+def resolve_map(choice, seed=None):
+    """Concrete map id for one pair of games: `random` becomes `random:<seed>` so both games share a formation."""
+    choice = choice or 'standard'
+    if choice not in MAP_IDS:
+        raise Problem('Bản đồ không tồn tại.')
+    return f'random:{(seed or uid())[:8]}' if choice == 'random' else choice
 
 
 def elo_tier(rating):
@@ -709,14 +730,15 @@ class Store:
     # ---- matches and ranked ladder ---------------------------------------
 
     @classmethod
-    def create_match(cls, db, p1, p2, requester=None, pairing=None, kind='practice'):
+    def create_match(cls, db, p1, p2, requester=None, pairing=None, kind='practice', map_name='standard'):
         mid = uid()
-        db.execute('INSERT INTO matches(id,pairing_id,p1,p2,requester,kind,rules_hash,created) VALUES(?,?,?,?,?,?,?,?)',
-                   (mid, pairing, p1, p2, requester, kind, RULES_HASH, now()))
+        db.execute('INSERT INTO matches(id,pairing_id,p1,p2,requester,kind,rules_hash,created,map) VALUES(?,?,?,?,?,?,?,?,?)',
+                   (mid, pairing, p1, p2, requester, kind, RULES_HASH, now(), map_name))
         cls.job(db, 'game', mid, PRIORITY[kind])
         return mid
 
-    def practice(self, team, actor, a, b):
+    def practice(self, team, actor, a, b, map_choice='standard'):
+        name = resolve_map(map_choice)
         with self.connect(True) as db:
             self.require_open(db, 'practice_open', 'Đấu tập đang tạm đóng để ưu tiên giải đấu.')
             self.check_capacity(db, 'practice')
@@ -727,7 +749,7 @@ class Store:
             if db.execute("SELECT 1 FROM matches m JOIN submissions s ON s.id=m.p1 WHERE m.kind='practice' "
                           "AND s.team_id=? AND m.status IN ('queued','running')", (team,)).fetchone():
                 raise Problem('Đội còn trận tập đang chờ/chạy.', 409)
-            return [self.create_match(db, a, b, actor), self.create_match(db, b, a, actor)]
+            return [self.create_match(db, a, b, actor, map_name=name), self.create_match(db, b, a, actor, map_name=name)]
 
     def ranked_leaderboard(self, limit=50):
         with self.connect() as db:
@@ -1143,9 +1165,10 @@ class Store:
     # ---- tournaments ----------------------------------------------------
 
     def create_tournament(self, actor, name, fmt, rounds=5, deadline=None, auto_advance=False,
-                          description='', seed_from=None, seed_count=None):
+                          description='', seed_from=None, seed_count=None, map_choice='standard'):
         if fmt not in ('swiss', 'round_robin', 'knockout'):
             raise Problem('Thể thức không hợp lệ.')
+        map_choice = resolve_map(map_choice, 'x') if map_choice != 'random' else 'random'
         if type(rounds) is not int or not 1 <= rounds <= 30:
             raise Problem('Số vòng Swiss cần từ 1 đến 30.')
         tid = uid()
@@ -1160,9 +1183,9 @@ class Store:
                 if len(ranked) < 2:
                     raise Problem('Giải nguồn chưa có đủ hai đội được xếp hạng.', 409)
                 db.execute('INSERT INTO tournaments(id,name,format,rounds,deadline,status,rules_hash,config,created,'
-                           'auto_advance,seed_from,seed_count,description) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                           'auto_advance,seed_from,seed_count,description,map) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                            (tid, name, fmt, rounds, now(), 'open', RULES_HASH, json.dumps(LIMITS), now(),
-                            int(bool(auto_advance)), seed_from, seed_count, description))
+                            int(bool(auto_advance)), seed_from, seed_count, description, map_choice))
                 for seed, row in enumerate(ranked, 1):
                     db.execute('INSERT INTO entries(tournament_id,team_id,submission_id,seed) VALUES(?,?,?,?)',
                                (tid, row['team_id'], row['submission_id'], seed))
@@ -1171,16 +1194,17 @@ class Store:
                 if type(deadline) not in (float, int) or not now()+60 <= deadline <= now()+86400*365:
                     raise Problem('Hạn đăng ký phải sau ít nhất một phút và trong một năm tới.')
                 db.execute('INSERT INTO tournaments(id,name,format,rounds,deadline,rules_hash,config,created,'
-                           'auto_advance,description) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                           'auto_advance,description,map) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                            (tid, name, fmt, rounds, deadline, RULES_HASH, json.dumps(LIMITS), now(),
-                            int(bool(auto_advance)), description))
+                            int(bool(auto_advance)), description, map_choice))
                 self.audit(db, actor, 'tournament.created', {'id': tid})
         if seed_from:
             self.freeze(tid, actor)
         return tid
 
-    def update_tournament(self, tid, actor, name=None, description=None, deadline=None, rounds=None):
-        """Rename, re-describe, move the deadline or change the Swiss round count (open tournaments only)."""
+    def update_tournament(self, tid, actor, name=None, description=None, deadline=None, rounds=None, map_choice=None):
+        """Rename, re-describe, move the deadline or change the Swiss round count (open tournaments only).
+        The map may also change between rounds: it applies to rounds opened afterwards, never to games already made."""
         with self.connect(True) as db:
             t = db.execute('SELECT * FROM tournaments WHERE id=?', (tid,)).fetchone()
             if not t:
@@ -1193,6 +1217,10 @@ class Store:
                 changes['name'] = label
             if description is not None:
                 changes['description'] = str(description).strip()[:500]
+            if map_choice is not None:
+                if t['status'] not in ('open', 'frozen', 'running'):
+                    raise Problem('Giải đã kết thúc, không đổi bản đồ được.', 409)
+                changes['map'] = map_choice if map_choice == 'random' else resolve_map(map_choice, 'x')
             if deadline is not None or rounds is not None:
                 if t['status'] != 'open':
                     raise Problem('Chỉ đổi hạn hoặc số vòng khi giải còn nhận đăng ký.', 409)
@@ -1503,7 +1531,8 @@ class Store:
                        (pid, tid, next_number, slot, a, b, forfeit))
             if b and not forfeit:
                 for first, second in ((a, b), (b, a)):
-                    self.create_match(db, sids[first], sids[second], pairing=pid, kind='tournament')
+                    self.create_match(db, sids[first], sids[second], pairing=pid, kind='tournament',
+                                      map_name=resolve_map(t['map'], pid))
         db.execute("UPDATE tournaments SET status='running',round=? WHERE id=?", (next_number, tid))
         self.audit(db, actor, 'round.created', {'id': tid, 'round': next_number, 'pairs': len(pairs)})
         if all(b is None or forfeit for _, _, b, forfeit in pairs):

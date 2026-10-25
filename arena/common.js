@@ -108,27 +108,38 @@ export function board(state, {flip = false} = {}) {
 // Moves travel as [row, col, row, col]; the side is whoever is to move in the previous state.
 export function extendStates(states, compact) {
   for (const [fr, fc, tr, tc] of compact) {
-    const previous = states.at(-1), next = applyMove(previous, previous.turn, [fr, fc], [tr, tc]);
+    const previous = states.at(-1), next = applyMove(previous, previous.turn, [fr, fc], [tr, tc], {adjudicate: true});
     if (!next.ok) throw new Error('Replay không khớp phiên bản luật. Hãy liên hệ BTC.');
     states.push(next.state);
   }
 }
 export const compactMoves = moves => moves.map(m => [...m.from, ...m.to]);
 
-const reasons = {goal:'Chạm ô đích',quiet:'80 nửa lượt không ăn quân',repetition:'Lặp thế ba lần',
-  no_legal_moves:'Không còn nước hợp lệ',ply_limit:'Đủ giới hạn nửa lượt','technical:both':'Cả hai bot lỗi'};
+export const MAP_LABELS = {standard: 'Chuẩn', wall: 'Bức tường', flank: 'Hai cánh', block: 'Khối vuông', random: 'Ngẫu nhiên'};
+export const mapLabel = map => MAP_LABELS[String(map || 'standard').split(':')[0]] || 'Chuẩn';
+
+const stalls = {quiet: '80 nửa lượt không ăn quân', repetition: 'Lặp thế ba lần', ply_limit: 'Đủ 400 nửa lượt', no_legal_moves: 'Không còn nước đi'};
+export function reasonText(reason) {
+  if (!reason) return '';
+  if (reason === 'goal') return 'Chạm ô đích';
+  if (reason.startsWith('eliminate:')) return 'Loại hết một loại quân';
+  if (reason === 'technical:both') return 'Cả hai bot lỗi';
+  if (reason.startsWith('technical:')) return 'Đối thủ lỗi thực thi/nước đi';
+  const [basis, cause] = reason.split(':');
+  if (basis === 'material' || basis === 'advance') return `${stalls[cause] || 'Hết thế'} · xử thắng vì ${basis === 'material' ? 'nhiều quân hơn' : 'quân gần ô đích hơn'}`;
+  return stalls[reason] ? `${stalls[reason]} · thế cân bằng` : reason;
+}
+
 export function outcome(match) {
   if (match.status !== 'done') return match.status === 'queued' && match.position ? `Đang chờ · vị trí #${match.position}` : labels[match.status] || match.status;
   const who = match.winner === 'draw' ? 'Ván hòa' : `${match.winner === 'p1' ? 'Xanh' : 'Đỏ'} thắng`;
-  const reason = reasons[match.reason] || (match.reason?.startsWith('technical:') ? 'Đối thủ lỗi thực thi/nước đi'
-    : match.reason?.startsWith('eliminate:') ? 'Loại hết một loại quân' : match.reason);
-  return `${who} · ${reason}`;
+  return `${who} · ${reasonText(match.reason)}`;
 }
 
-export function replayStates(moves) {
-  const states = [newGame()];
+export function replayStates(moves, map) {
+  const states = [newGame(map)];
   for (const move of moves) {
-    const next = applyMove(states.at(-1), move.side, move.from, move.to);
+    const next = applyMove(states.at(-1), move.side, move.from, move.to, {adjudicate: true});
     if (!next.ok) throw new Error('Replay không khớp phiên bản luật. Hãy liên hệ BTC.');
     states.push(next.state);
   }

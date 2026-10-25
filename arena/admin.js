@@ -1,5 +1,5 @@
 import {$, $$, escape, labels, formats, kinds, formatTime, badge, session, api, notice, action, options, countdown,
-  duration, poller, outcome} from './common.js';
+  duration, poller, outcome, mapLabel} from './common.js';
 
 document.getElementById('boot-note')?.remove();   // reaching here means every module loaded
 let editingFor = '';
@@ -80,19 +80,20 @@ async function renderEvents() {
   detail = await api(`/tournaments/${adminTournament}`);
   const t = detail.tournament, active = detail.standings.filter(s => s.entry_status === 'active').length;
   const pending = detail.standings.filter(s => ['queued','running'].includes(s.bot_status)).length;
-  $('#tournament-state').innerHTML = `${badge(t.status)} ${escape(formats[t.format])} · Vòng ${t.round}/${t.rounds} · ${detail.standings.length} đăng ký${t.status !== 'open' ? ` · ${active} đang thi` : ''}${pending && t.status === 'open' ? ` · <strong>${pending} bot đang chờ kiểm tra</strong>` : ''}<br>${t.status === 'open' ? `Hạn: ${formatTime(t.deadline)} (${countdown(t.deadline)})` : `${detail.unfinished} ván chưa xong`}`;
+  $('#tournament-state').innerHTML = `${badge(t.status)} ${escape(formats[t.format])} · Vòng ${t.round}/${t.rounds} · Bản đồ ${mapLabel(t.map)} · ${detail.standings.length} đăng ký${t.status !== 'open' ? ` · ${active} đang thi` : ''}${pending && t.status === 'open' ? ` · <strong>${pending} bot đang chờ kiểm tra</strong>` : ''}<br>${t.status === 'open' ? `Hạn: ${formatTime(t.deadline)} (${countdown(t.deadline)})` : `${detail.unfinished} ván chưa xong`}`;
   $('#freeze-button').disabled = $('#force-freeze').disabled = t.status !== 'open' || t.deadline > Date.now()/1000;
   $('#next-round-button').disabled = !['frozen','running'].includes(t.status) || detail.unfinished > 0;
   $('#auto-toggle').checked = Boolean(t.auto_advance);
   const form = $('#tournament-edit'), open = t.status === 'open', ended = ['completed', 'cancelled'].includes(t.status);
   if (editingFor !== t.id) {   // only when the selection changes, so typing is not overwritten by the 5 s refresh
     editingFor = t.id;
-    form.elements.name.value = t.name; form.elements.description.value = t.description || '';
+    form.elements.name.value = t.name; form.elements.description.value = t.description || ''; form.elements.map.value = t.map || 'standard';
     const local = new Date(t.deadline * 1000); local.setMinutes(local.getMinutes() - local.getTimezoneOffset());
     form.elements.deadline.value = local.toISOString().slice(0, 16); form.elements.rounds.value = t.rounds;
   }
   $('#edit-deadline-field').hidden = !open || Boolean(t.seed_from);
   $('#edit-rounds-field').hidden = !open || t.format !== 'swiss';
+  $('#edit-map').disabled = ended;
   $('#close-now').disabled = !open || Boolean(t.seed_from);
   $('#cancel-tournament').disabled = ended;
   $('#add-entry').hidden = !open || Boolean(t.seed_from);
@@ -226,7 +227,7 @@ $('#settings-form').addEventListener('submit', event => { event.preventDefault()
 $('#tournament-form').addEventListener('change', syncTournamentForm);
 $('#tournament-form').addEventListener('submit', event => { event.preventDefault(); action(event.submitter, async () => {
   const form = event.target, data = Object.fromEntries(new FormData(form));
-  const body = {name: data.name, format: data.format, rounds: Number(data.rounds), description: data.description, auto_advance: form.elements.auto_advance.checked};
+  const body = {name: data.name, format: data.format, rounds: Number(data.rounds), map: data.map, description: data.description, auto_advance: form.elements.auto_advance.checked};
   if (data.source) Object.assign(body, {seed_from: data.source, seed_count: Number(data.seed_count)});
   else body.deadline = new Date(data.deadline).getTime() / 1000;
   const result = await api('/admin/tournaments', body);
@@ -234,6 +235,7 @@ $('#tournament-form').addEventListener('submit', event => { event.preventDefault
   await renderEvents(); }); });
 $('#tournament-edit').addEventListener('submit', event => { event.preventDefault(); action(event.submitter, async () => {
   const form = event.target, t = detail.tournament, body = {name: form.elements.name.value, description: form.elements.description.value};
+  if (['open', 'frozen', 'running'].includes(t.status)) body.map = form.elements.map.value;
   if (t.status === 'open' && !t.seed_from) {
     if (form.elements.deadline.value) body.deadline = new Date(form.elements.deadline.value).getTime() / 1000;
     if (t.format === 'swiss' && form.elements.rounds.value) body.rounds = Number(form.elements.rounds.value);

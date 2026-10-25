@@ -5,6 +5,7 @@
     python local_arena.py bot.py --vs random --games 10
     python local_arena.py bot.py --vs khac.py       # đấu với một file bot khác
     python local_arena.py bot.py --trace            # in từng nước đi và bàn cờ
+    python local_arena.py bot.py --map wall         # thử trên bản đồ khác: standard wall flank block random
 
 Luật, giới hạn thời gian và dữ liệu `observation` giống hệt Arena. Mỗi ván đổi màu luân phiên.
 Kết quả ở đây chỉ để tham khảo: máy chấm thật chạy trong sandbox và có thể chậm hơn máy bạn.
@@ -19,9 +20,49 @@ from pathlib import Path
 BOARD_SIZE = 9
 BEATS = {'rock': 'scissors', 'paper': 'rock', 'scissors': 'paper'}
 GOALS = {'p1': (0, 8), 'p2': (8, 0)}
-FORMATION = [(7, 0, 'rock'), (6, 1, 'rock'), (8, 2, 'rock'),
-             (8, 1, 'paper'), (7, 2, 'paper'), (7, 3, 'paper'),
-             (6, 0, 'scissors'), (7, 1, 'scissors'), (6, 2, 'scissors')]
+# "Bản đồ" chỉ đổi cách xếp quân ban đầu của Xanh (Đỏ là bản quay 180°); luật và ô đích không đổi.
+FORMATIONS = {
+    'standard': [(7, 0, 'rock'), (6, 1, 'rock'), (8, 2, 'rock'),
+                 (8, 1, 'paper'), (7, 2, 'paper'), (7, 3, 'paper'),
+                 (6, 0, 'scissors'), (7, 1, 'scissors'), (6, 2, 'scissors')],
+    'wall': [(8, 1, 'paper'), (8, 2, 'rock'), (8, 3, 'scissors'), (8, 4, 'paper'),
+             (7, 0, 'scissors'), (7, 1, 'paper'), (7, 2, 'rock'), (7, 3, 'scissors'), (7, 4, 'rock')],
+    'flank': [(6, 0, 'rock'), (6, 1, 'scissors'), (7, 0, 'paper'), (7, 1, 'rock'),
+              (7, 3, 'scissors'), (7, 4, 'paper'), (8, 2, 'rock'), (8, 3, 'scissors'), (8, 4, 'paper')],
+    'block': [(8, 1, 'rock'), (8, 2, 'paper'), (8, 3, 'scissors'),
+              (7, 1, 'scissors'), (7, 2, 'rock'), (7, 3, 'paper'),
+              (6, 2, 'paper'), (6, 3, 'scissors'), (6, 4, 'rock')],
+}
+MAP_NAMES = list(FORMATIONS)
+
+
+def random_formation(seed_hex):
+    """`random:<hex>` maps: pseudo-random but identical to rules.js for the same seed (LCG, high bits)."""
+    state = int(seed_hex, 16) & 0xFFFFFFFF
+
+    def step():
+        nonlocal state
+        state = (state * 1664525 + 1013904223) & 0xFFFFFFFF
+        return state
+
+    def shuffle(items):
+        for i in range(len(items) - 1, 0, -1):
+            j = (step() >> 8) % (i + 1)
+            items[i], items[j] = items[j], items[i]
+        return items
+    cells = [(r, c) for r in range(6, 9) for c in range(0, 5) if not (r == 8 and c == 0)]
+    types = shuffle(['rock'] * 3 + ['paper'] * 3 + ['scissors'] * 3)
+    shuffle(cells)
+    return [(cells[i][0], cells[i][1], types[i]) for i in range(9)]
+
+
+def formation_of(name='standard'):
+    import re
+    if isinstance(name, str) and re.fullmatch(r'random:[0-9a-f]{1,8}', name):
+        return random_formation(name[7:])
+    if name not in FORMATIONS:
+        raise ValueError(f'Bản đồ không tồn tại: {name}')
+    return FORMATIONS[name]
 # Giới hạn của Arena (xem sổ tay)
 TURN_SECONDS, GAME_SECONDS, MAX_PLIES, QUIET_LIMIT = 3.0, 60.0, 400, 80
 LETTER = {'rock': 'Đ', 'paper': 'L', 'scissors': 'K'}
@@ -31,9 +72,9 @@ def square_name(row, col):
     return f"{'abcdefghi'[col]}{BOARD_SIZE - row}"
 
 
-def new_game():
+def new_game(map_name='standard'):
     board = [[None] * BOARD_SIZE for _ in range(BOARD_SIZE)]
-    for row, col, kind in FORMATION:
+    for row, col, kind in formation_of(map_name):
         board[row][col] = {'owner': 'p1', 'type': kind}
         board[8 - row][8 - col] = {'owner': 'p2', 'type': kind}
     return {'board': board, 'turn': 'p1', 'winner': None, 'winReason': None, 'revision': 0, 'quietPly': 0,
@@ -51,6 +92,29 @@ def piece_counts(board):
             if piece:
                 counts[piece['owner']][piece['type']] += 1
     return counts
+
+
+def nearest_to_goal(board, side):
+    goal_row, goal_col = GOALS[side]
+    return min(max(abs(r - goal_row), abs(c - goal_col)) for r in range(BOARD_SIZE) for c in range(BOARD_SIZE)
+               if board[r][c] and board[r][c]['owner'] == side)
+
+
+def adjudicate(board):
+    """Hết thế: nhiều quân hơn thắng; bằng quân thì quân gần ô đích hơn thắng; vẫn bằng thì hòa."""
+    counts = piece_counts(board)
+    total = {side: sum(counts[side].values()) for side in counts}
+    if total['p1'] != total['p2']:
+        return ('p1' if total['p1'] > total['p2'] else 'p2'), 'material'
+    near = {side: nearest_to_goal(board, side) for side in ('p1', 'p2')}
+    if near['p1'] != near['p2']:
+        return ('p1' if near['p1'] < near['p2'] else 'p2'), 'advance'
+    return 'draw', 'level'
+
+
+def adjudicated(board, cause):
+    winner, basis = adjudicate(board)
+    return winner, cause if winner == 'draw' else f'{basis}:{cause}'
 
 
 def step_moves(board, row, col):
@@ -115,15 +179,15 @@ def apply_move(state, side, source, target):
     key = position_key(board, next_turn)
     repetitions[key] = repetitions.get(key, 0) + 1
     if not winner and (repetitions[key] >= 3 or quiet >= QUIET_LIMIT):
-        winner, reason = 'draw', 'repetition' if repetitions[key] >= 3 else 'quiet'
+        winner, reason = adjudicated(board, 'repetition' if repetitions[key] >= 3 else 'quiet')
     return {'board': board, 'turn': side if winner else next_turn, 'winner': winner, 'winReason': reason,
             'revision': state['revision'] + 1, 'quietPly': quiet, 'repetitions': repetitions,
             'lastMove': {'side': side, 'from': list(source), 'to': list(target),
                          'notation': f"{square_name(fr, fc)}{'×' if captured else '–'}{square_name(tr, tc)}"}}, None
 
 
-def observation(state, seed, time_left):
-    return {'protocol_version': 2, 'board': state['board'], 'mySide': state['turn'], 'turn': state['turn'],
+def observation(state, seed, time_left, map_name='standard'):
+    return {'protocol_version': 2, 'map': map_name, 'board': state['board'], 'mySide': state['turn'], 'turn': state['turn'],
             'legalMoves': legal_moves(state), 'ply': state['revision'], 'quietPly': state['quietPly'],
             'repetitions': state['repetitions'], 'seed': seed, 'timeLeft': round(time_left, 3),
             'turnLimit': TURN_SECONDS, 'maxPly': MAX_PLIES}
@@ -200,12 +264,12 @@ class Fault(Exception):
     pass
 
 
-def play(first, second, seed, trace=False):
+def play(first, second, seed, trace=False, map_name='standard'):
     players = {'p1': first, 'p2': second}
     budget = {'p1': GAME_SECONDS, 'p2': GAME_SECONDS}
     slowest = {'p1': 0.0, 'p2': 0.0}
     spent = {'p1': 0.0, 'p2': 0.0}
-    state = new_game()
+    state = new_game(map_name)
     for side, player in players.items():
         try:
             player.start(seed + (side == 'p2'))
@@ -215,14 +279,14 @@ def play(first, second, seed, trace=False):
     while not state['winner']:
         moves = legal_moves(state)
         if not moves:
-            return 'draw', 'no_legal_moves', plies, slowest, spent
+            return (*adjudicated(state['board'], 'no_legal_moves'), plies, slowest, spent)
         if plies >= MAX_PLIES:
-            return 'draw', 'ply_limit', plies, slowest, spent
+            return (*adjudicated(state['board'], 'ply_limit'), plies, slowest, spent)
         side = state['turn']
         other = 'p2' if side == 'p1' else 'p1'
         started = time.perf_counter()
         try:
-            answer = players[side].move(observation(state, seed + plies, budget[side]))
+            answer = players[side].move(observation(state, seed + plies, budget[side], map_name))
         except Fault as fault:
             return other, f'technical: {fault}', plies, slowest, spent
         used = time.perf_counter() - started
@@ -254,6 +318,7 @@ def main():
     parser.add_argument('--vs', default='hunter', help='first | random | hunter | đường dẫn file bot khác')
     parser.add_argument('--games', type=int, default=4, help='số ván (đổi màu luân phiên)')
     parser.add_argument('--seed', type=int, default=1)
+    parser.add_argument('--map', default='standard', help='standard | wall | flank | block | random (khác nhau mỗi ván)')
     parser.add_argument('--trace', action='store_true', help='in từng nước đi')
     args = parser.parse_args()
     mine, theirs = Player(*load_bot(args.bot)), Player(*load_bot(args.vs))
@@ -262,12 +327,13 @@ def main():
     for game in range(args.games):
         mine_first = game % 2 == 0
         first, second = (mine, theirs) if mine_first else (theirs, mine)
-        winner, reason, plies, slowest, spent = play(first, second, args.seed + game * 101, args.trace)
+        map_name = f'random:{(args.seed + game // 2 * 7919) & 0xFFFFFFF:x}' if args.map == 'random' else args.map
+        winner, reason, plies, slowest, spent = play(first, second, args.seed + game * 101, args.trace, map_name)
         mine_side = 'p1' if mine_first else 'p2'
         result = 'draw' if winner == 'draw' else 'win' if winner == mine_side else 'loss'
         score[result] += 1
         label = {'win': 'THẮNG', 'draw': 'HÒA', 'loss': 'THUA'}[result]
-        print(f"ván {game + 1} ({'Xanh' if mine_first else 'Đỏ '}): {label:<5} {reason}, {plies} nửa lượt, "
+        print(f"ván {game + 1} ({'Xanh' if mine_first else 'Đỏ '}, {map_name}): {label:<5} {reason}, {plies} nửa lượt, "
               f"nước chậm nhất của bạn {slowest[mine_side]*1000:.0f} ms, tổng {spent[mine_side]:.1f}s")
     print(f"\nKết quả: {score['win']} thắng · {score['draw']} hòa · {score['loss']} thua")
 

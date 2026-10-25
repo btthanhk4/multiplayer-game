@@ -110,6 +110,12 @@ try {
   await mate.locator('#boss-path .boss.cleared').first().waitFor();
   await noOverflow(mate);
   await mate.screenshot({path:'artifacts/arena-campaign-mobile.png',fullPage:true});
+  // Practice on another map: the replay records and names it.
+  await page.locator('[role=tab][data-tab=lab]').click();
+  await page.locator('#practice-map').selectOption('wall');
+  await page.locator('#practice-form button[type=submit]').click();
+  await page.locator('#watch-grid .replay-caption').filter({hasText:'Bản đồ Bức tường'}).waitFor({timeout:60000});
+  await page.locator('#watch-grid .watch-card [data-watch]').first().click();
   await page.locator('[role=tab][data-tab=competition]').click();
   await page.locator('#join-form button[type=submit]').click();
   await page.locator('#entry-status').filter({hasText:'Đội đã chọn'}).waitFor();
@@ -167,7 +173,7 @@ try {
   await page.locator('#match-filter').selectOption('all');
   await page.locator(`#match-list [data-watch="${target}"]`).click();
   await page.locator('#watch-grid .live-pill').filter({hasText:'TRỰC TIẾP'}).waitFor();
-  await page.locator('.watch-note').filter({hasText:`Nước ${second}/${second}`}).waitFor({timeout:15000});
+  await page.locator('.live-strip').filter({hasText:`nước ${second}`}).waitFor({timeout:15000});   // the poll delivered the next batch
   assert.match(await page.locator('.live-strip').textContent(),/3 người đang xem/);
   assert.equal(sinceSeen[0],String(first),'incremental poll asks only for moves after the ones it already has');
   await page.locator('.result-banner').waitFor({timeout:15000});
@@ -264,9 +270,12 @@ try {
   await admin.screenshot({path:'artifacts/admin-matches.png',fullPage:true});
   await admin.locator('[role=tab][data-tab=events]').click();
   await admin.locator('#tournament-form [name=name]').fill('Giải trình duyệt');
+  await admin.locator('#tournament-form [name=map]').selectOption('flank');
   await admin.locator('#tournament-form button.primary').click();
   await admin.locator('#admin-tournament').getByRole('option',{name:/Giải trình duyệt/}).waitFor({state:'attached'});
   assert.equal(await admin.locator('#freeze-button').isDisabled(),true);
+  await admin.locator('#tournament-state').filter({hasText:'Bản đồ Hai cánh'}).waitFor();
+  await admin.locator('#tournament-edit [name=map]').selectOption('block');
   await admin.locator('#tournament-edit [name=name]').fill('Giải đã đổi tên');
   await admin.locator('#tournament-edit button.primary').click();
   await admin.locator('#admin-tournament option').filter({hasText:'Giải đã đổi tên'}).waitFor({state:'attached'});
