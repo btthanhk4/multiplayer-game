@@ -93,13 +93,27 @@ export function poller(work, interval) {
   return {now: run, schedule};
 }
 
-export function board(state) {
-  return `<div class="mini-board" role="img" aria-label="Bàn cờ 9 nhân 9, ${state.revision} nước">${state.board.flatMap((row,r)=>row.map((p,c)=>{
+export function board(state, {flip = false} = {}) {
+  // Flipping turns the board 180 degrees so the viewer's own side is at the bottom.
+  const order = flip ? [8,7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7,8];
+  return `<div class="mini-board${flip ? ' flipped' : ''}" role="img" aria-label="Bàn cờ 9 nhân 9, ${state.revision} nước">${order.flatMap((r, i) => order.map((c, j) => {
+    const p = state.board[r][c];
     const goal=r===0&&c===8?'goal-blue':r===8&&c===0?'goal-red':'';
     const last=state.lastMove&&[state.lastMove.from,state.lastMove.to].some(x=>x[0]===r&&x[1]===c);
-    return `<div class="square ${(r+c)%2?'dark':''} ${goal} ${last?'last':''}" title="${squareName(r,c)}${p?` · ${p.owner==='p1'?'Xanh':'Đỏ'} · ${{rock:'Đấm',paper:'Lá',scissors:'Kéo'}[p.type]}`:''}">${p?`<span class="stone ${p.owner}">${{rock:'Đ',paper:'L',scissors:'K'}[p.type]}</span>`:goal?`<small>${squareName(r,c)}</small>`:''}</div>`;
+    const labels=`${j===0&&!goal?`<small class="rank">${9-r}</small>`:''}${i===8?`<small class="file">${'abcdefghi'[c]}</small>`:''}`;
+    return `<div class="square ${(r+c)%2?'dark':''} ${goal} ${last?'last':''}" title="${squareName(r,c)}${p?` · ${p.owner==='p1'?'Xanh':'Đỏ'} · ${{rock:'Đấm',paper:'Lá',scissors:'Kéo'}[p.type]}`:''}">${p?`<span class="stone ${p.owner}">${{rock:'Đ',paper:'L',scissors:'K'}[p.type]}</span>`:goal?`<small>${squareName(r,c)}</small>`:''}${labels}</div>`;
   })).join('')}</div>`;
 }
+
+// Moves travel as [row, col, row, col]; the side is whoever is to move in the previous state.
+export function extendStates(states, compact) {
+  for (const [fr, fc, tr, tc] of compact) {
+    const previous = states.at(-1), next = applyMove(previous, previous.turn, [fr, fc], [tr, tc]);
+    if (!next.ok) throw new Error('Replay không khớp phiên bản luật. Hãy liên hệ BTC.');
+    states.push(next.state);
+  }
+}
+export const compactMoves = moves => moves.map(m => [...m.from, ...m.to]);
 
 const reasons = {goal:'Chạm ô đích',quiet:'80 nửa lượt không ăn quân',repetition:'Lặp thế ba lần',
   no_legal_moves:'Không còn nước hợp lệ',ply_limit:'Đủ giới hạn nửa lượt','technical:both':'Cả hai bot lỗi'};

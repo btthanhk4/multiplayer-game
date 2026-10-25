@@ -281,6 +281,10 @@ def observation(packet, seed, time_left=None):
             'turnLimit': LIMITS['turn_seconds'], 'maxPly': LIMITS['max_plies']}
 
 
+# Live viewers see a new batch of moves about this often; a 400-move game is ~6 KB per write.
+PROGRESS_INTERVAL = 0.4
+
+
 class Worker:
     def __init__(self, store, executor, slots=1):
         self.store, self.executor, self.id, self.slots = store, executor, uid(), max(1, slots)
@@ -449,8 +453,8 @@ class Worker:
                     winner, reason = 'draw', 'ply_limit'
                     break
                 side = packet['state']['turn']
-                if time.monotonic() - last_progress > 1:
-                    self.store.progress(job, {'state': packet['state'], 'ply': len(moves)})
+                if time.monotonic() - last_progress > PROGRESS_INTERVAL:
+                    self.publish(job, moves, side, budgets)
                     last_progress = time.monotonic()
                 try:
                     move, used = bots[side].move(observation(packet, seed + len(moves), budgets[side]), budgets[side])
@@ -472,6 +476,12 @@ class Worker:
                 'seed': seed, 'limits': LIMITS, 'execution_mode': self.executor.mode,
                 'time_used': {side: round(LIMITS['game_seconds'] - left, 3) for side, left in budgets.items()},
                 'image_id': self.executor.image_id, 'finished': now()}
+
+    def publish(self, job, moves, side, budgets):
+        """Live view: compact moves so far, whose turn it is, and each side's remaining clock."""
+        self.store.progress(job, {'ply': len(moves), 'thinking': side,
+                                  'moves': [[m['from'][0], m['from'][1], m['to'][0], m['to'][1]] for m in moves],
+                                  'left': {k: round(v, 1) for k, v in budgets.items()}})
 
     def audit_faults(self, job, faults):
         with self.store.connect(True) as db:

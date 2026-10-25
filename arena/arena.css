@@ -328,3 +328,31 @@ body.guest .gate{display:grid}
 .feed-icon{font-size:9px}
 @media(max-width:700px){.guide table{display:block;overflow-x:auto;max-width:100%}.guide-layout{padding:24px 16px 60px}}
 .guide-layout main{margin:0;padding:0;max-width:none;width:100%}
+
+/* ---- V5: live spectating ---- */
+.live-pill{display:inline-block;background:var(--red);color:#fff9ed;font-size:10px;font-weight:700;letter-spacing:1px;padding:3px 9px;border-radius:10px;animation:pulse 1.6s ease-in-out infinite;vertical-align:middle}
+.live-pill.wait{background:#b08a2e;animation:none}.live-pill.off{background:#777;animation:none}
+.live-banner{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:18px;padding:14px 20px;background:#f6ebe1;border-left:4px solid var(--red);font-size:14px}
+.live-banner>span:nth-child(2){flex:1;min-width:200px}
+.live-banner .button{min-height:40px}
+.live-strip{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:10px;font-size:12px;line-height:1.6}
+.viewers{color:var(--muted)}
+.match-row.is-live{background:#f6ebe1;margin:0 -10px;padding:15px 10px;border-radius:2px}
+.match-directory input[type=search]{margin-bottom:14px}
+.match-directory #watch-random{margin-bottom:10px;min-height:40px;font-size:12px}
+.watch-card.focused{outline:2px solid var(--green)}
+.game-no{display:inline-block;margin-left:6px;padding:1px 7px;background:#e3e8dc;font-size:9px;font-weight:700;letter-spacing:.8px;vertical-align:middle}
+.replay-controls .golive{width:auto;padding:0 10px;border-color:var(--red);color:var(--red);font-weight:700;white-space:nowrap}
+.square .rank,.square .file{position:absolute;font-size:8px;font-weight:700;color:#5c7e69;opacity:.8;pointer-events:none;line-height:1}
+.square .rank{top:2px;left:3px}.square .file{bottom:2px;right:3px}
+.moves-box{margin-top:12px;border-top:1px solid var(--line);padding-top:8px;font-size:12px}
+.moves-box summary{cursor:pointer;font-weight:600;font-size:12px;padding:4px 0}
+.move-list{list-style:none;margin:8px 0;padding:0;max-height:170px;overflow:auto;position:relative;font:12px Consolas,'Courier New',monospace}
+.move-list li{display:grid;grid-template-columns:34px 1fr 1fr;align-items:center}
+.move-list .n{color:var(--muted);padding-left:4px}
+.move-list button{border:0;background:none;padding:5px 6px;text-align:left;font:inherit;color:inherit;border-radius:2px}
+.move-list button:hover{background:#e3e8dc}
+.move-list button.active{background:#e6dda4;font-weight:700}
+.watch-card .action-row{margin-top:12px}
+.watch-card .action-row .button{min-height:38px;font-size:12px}
+.replay-controls[hidden]{display:none!important}

@@ -16,6 +16,7 @@
         <li><a href="#chienthuat">Gợi ý chiến thuật</a></li>
         <li><a href="#gioihan">Giới hạn và môi trường chạy</a></li>
         <li><a href="#thu">Thử bot tại máy</a></li>
+        <li><a href="#xem">Xem bot thi đấu</a></li>
         <li><a href="#loi">Lỗi thường gặp</a></li>
         <li><a href="#diem">Cách tính điểm và giải đấu</a></li>
         <li><a href="#faq">Câu hỏi hay gặp</a></li>
@@ -307,8 +308,22 @@ python local_arena.py bot.py --trace --games 1     # in từng nước và bàn 
         <p>Sau khi nộp, máy chấm chạy bot của bạn đấu với chính nó <b>12 nửa lượt</b> ở cả hai phe. Qua được bước này nghĩa là: file nạp được, hàm tồn tại, trả đúng định dạng và nước hợp lệ ở các thế cờ đầu. Nó <b>không</b> chứng minh bot đúng ở mọi thế cờ; hãy tự thử nhiều ván bằng <code>local_arena.py</code>.</p>
       </section>
 
+      <section id="xem">
+        <h2>10. Xem bot của bạn thi đấu</h2>
+        <p>Khi đội bạn có ván đang chờ hoặc đang chạy, một thanh báo hiện ở đầu trang với nút <b>Xem trực tiếp</b>. Mở <i>Khán đài</i> lúc đó là ván của đội tự mở ra. Bàn cờ cập nhật liên tục: bạn thấy từng nước, bên nào đang nghĩ và quỹ thời gian còn lại của mỗi bot.</p>
+        <ul>
+          <li><b>Bám trực tiếp:</b> bàn cờ luôn chạy theo nước mới nhất. Bấm vào danh sách nước đi hay kéo thanh tua để xem lại; nút <b>● Trực tiếp</b> (phím <code>L</code>) đưa bạn về nước hiện tại.</li>
+          <li><b>Danh sách nước đi:</b> bấm một nước để nhảy tới đó; <b>Sao chép danh sách nước đi</b> để dán vào ghi chú khi phân tích.</li>
+          <li><b>Xoay bàn:</b> bàn cờ tự xoay để quân của đội bạn nằm ở phía dưới; nút <b>Xoay</b> (phím <code>F</code>) đổi lại.</li>
+          <li><b>Phím tắt:</b> <code>←</code> <code>→</code> một nước, <code>Shift</code> + mũi tên mười nước, <code>Home</code>/<code>End</code> về đầu/cuối, <code>Space</code> phát/dừng. Xem nhiều bàn thì bấm vào bàn muốn điều khiển trước.</li>
+          <li><b>Chia sẻ:</b> nút <b>Chia sẻ</b> sao chép link ván; nếu bạn đang dừng ở một nước của ván đã xong, link mở thẳng tới nước đó.</li>
+          <li>Ván 1 và ván 2 của cùng một cặp có nút chuyển nhanh sang nhau. <b>Xem ngẫu nhiên một trận đang đấu</b> giúp bạn xem đội khác.</li>
+        </ul>
+        <p class="callout">Bot đơn giản thường kết thúc ván trong chưa tới một giây, nên có thể bạn chỉ kịp xem lại. Bot nghĩ lâu hơn (như các boss mạnh) cho bạn nhiều thời gian xem trực tiếp hơn.</p>
+      </section>
+
       <section id="loi">
-        <h2>10. Lỗi thường gặp</h2>
+        <h2>11. Lỗi thường gặp</h2>
         <table><thead><tr><th>Thông báo / triệu chứng</th><th>Nguyên nhân hay gặp</th><th>Cách sửa</th></tr></thead><tbody>
           <tr><td>"Không thấy hàm choose_move"</td><td>Đặt sai tên hàm, hoặc thụt lề khiến hàm nằm trong khối khác.</td><td>Hàm phải nằm ở mức ngoài cùng, tên đúng <code>choose_move</code>.</td></tr>
           <tr><td>"Không nạp được bot: SyntaxError"</td><td>Lỗi cú pháp; thường do dán mã từ web bị đổi dấu nháy hoặc mất thụt lề.</td><td>Chạy <code>python bot.py</code> hoặc <code>local_arena.py</code> để xem dòng lỗi.</td></tr>
@@ -325,16 +340,16 @@ python local_arena.py bot.py --trace --games 1     # in từng nước và bàn 
       </section>
 
       <section id="diem">
-        <h2>11. Cách tính điểm và giải đấu</h2>
-        <h3>11.1. Mỗi cặp là hai ván</h3>
+        <h2>12. Cách tính điểm và giải đấu</h2>
+        <h3>12.1. Mỗi cặp là hai ván</h3>
         <p>Mọi cuộc đối đầu (xếp hạng, boss, giải đấu) là <b>hai ván đổi màu</b>: mỗi bot được chơi cả Xanh lẫn Đỏ. Thắng ván được 1 điểm, hòa 0,5, thua 0: tổng từ 0 đến 2.</p>
-        <h3>11.2. Chiến dịch boss</h3>
+        <h3>12.2. Chiến dịch boss</h3>
         <p>Năm boss mạnh dần. Được từ <b>1,5/2</b> điểm là qua ải và mở ải kế tiếp (★★); thắng trắng <b>2–0</b> được ★★★. Bạn đánh lại thoải mái; hệ thống giữ kết quả tốt nhất. Bảng vàng xếp theo số ải, rồi tổng sao, rồi ai đạt trước. Chiến dịch <b>không</b> ảnh hưởng Elo hay điểm giải.</p>
-        <h3>11.3. Đấu xếp hạng (Elo)</h3>
+        <h3>12.3. Đấu xếp hạng (Elo)</h3>
         <p>Chọn một bot hợp lệ và <i>Tìm đối thủ</i>. Hệ thống ghép với đội chưa gặp trong 24 giờ có Elo gần nhất, không bao giờ ghép hai bot cùng đội. Mỗi đội bắt đầu <b>1000 Elo</b>; thay đổi = <code>round(K × (điểm/2 − kỳ vọng))</code>, K = 32, giảm dần khi gặp lại cùng đối thủ trong 24 giờ (tối thiểu 8). Bậc: Đồng &lt; 1000 ≤ Bạc &lt; 1075 ≤ Vàng &lt; 1150 ≤ Kim cương.</p>
-        <h3>11.4. Giao hữu và đấu tập</h3>
+        <h3>12.4. Giao hữu và đấu tập</h3>
         <p>Bấm tên một đội bất kỳ để xem hồ sơ và mời <b>giao hữu</b> (hai ván với bot hợp lệ mới nhất của họ, không tính Elo). <b>Đấu tập</b> là hai phiên bản của chính đội bạn đấu với nhau, không tính điểm.</p>
-        <h3>11.5. Giải đấu và xếp loại</h3>
+        <h3>12.5. Giải đấu và xếp loại</h3>
         <p>Trước hạn, chọn một phiên bản để đăng ký (bot đang chờ kiểm tra cũng được chọn). Khi ban tổ chức khóa danh sách, bản chọn được <b>đóng băng</b> và chỉ bot <b>hợp lệ</b> mới được thi; bot lỗi bị loại nhưng không ảnh hưởng đội khác.</p>
         <ul>
           <li><b>Swiss:</b> mỗi vòng ghép các đội gần điểm nhau, tránh gặp lại. Thắng cặp 1 điểm, hòa 0,5, thua 0. Số đội lẻ thì một đội nhận BYE (1 điểm). Đồng điểm xét Buchholz (tổng điểm đối thủ đã gặp) rồi điểm ván.</li>
@@ -343,12 +358,12 @@ python local_arena.py bot.py --trace --games 1     # in từng nước và bàn 
           <li><b>Xếp loại</b> theo hạng cuối: 10% đầu <i>Xuất sắc</i>, 20% kế <i>Giỏi</i>, 30% kế <i>Khá</i>, còn lại <i>Đạt</i>; đội không ghi điểm nào là <i>Chưa đạt</i>.</li>
           <li>Đội vi phạm có thể bị truất quyền: các ván chưa đấu được xử thắng cho đối thủ.</li>
         </ul>
-        <h3>11.6. Huy hiệu</h3>
+        <h3>12.6. Huy hiệu</h3>
         <p>Có 17 huy hiệu cho cả đội, ví dụ <i>Khai bút</i> (bot hợp lệ đầu tiên), <i>Về đích</i>, <i>Càn quét</i> (ăn hết một loại), <i>Chớp nhoáng</i> (thắng trong 40 nửa lượt), <i>Toàn vẹn</i> (thắng không mất quân), <i>Lật kèo</i> (thắng đội hơn 100 Elo), <i>Hạ trùm cuối</i>… Thắng kỹ thuật và ván đấu tập không được tính.</p>
       </section>
 
       <section id="faq">
-        <h2>12. Câu hỏi hay gặp</h2>
+        <h2>13. Câu hỏi hay gặp</h2>
         <details><summary>Người khác có xem được mã bot của đội mình không?</summary><p>Không. Chỉ thành viên đội (và ban tổ chức khi kiểm tra gian lận) xem được mã. Tên đội, tên bot, kết quả và replay thì công khai với những người đã đăng nhập.</p></details>
         <details><summary>Nộp bot nhiều lần có bị trừ gì không?</summary><p>Không. Mỗi lần nộp là một phiên bản. Giới hạn duy nhất: tối đa 3 bài đang chờ kiểm tra cùng lúc, và 20 lượt nộp mỗi giờ cho cả đội.</p></details>
         <details><summary>Bot của mình đăng ký giải rồi, sửa bot thì sao?</summary><p>Đến hết hạn đăng ký, bạn được đổi sang phiên bản khác. Khi ban tổ chức khóa danh sách, bản đã chọn được đóng băng và không đổi được nữa.</p></details>

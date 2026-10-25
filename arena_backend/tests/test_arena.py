@@ -1075,6 +1075,148 @@ class LocalArena(unittest.TestCase):
         self.assertIsNotNone(local.apply_move(state, 'p2', [1, 8], [2, 8])[1])
 
 
+class LiveSpectating(Base):
+    MOVES = [[6, 1, 5, 1], [2, 7, 3, 7], [5, 1, 4, 1]]
+
+    def running_match(self, name='Trực tiếp'):
+        (a, ua), (b, _) = self.team(name + ' A'), self.team(name + ' B')
+        sa, sb = self.valid(a), self.valid(b)
+        with self.store.connect(True) as db:
+            mid = self.store.create_match(db, sa, sb, ua)
+        job = self.store.claim('test', 'samples')
+        self.assertEqual(job['ref'], mid)
+        return mid, job, a, b
+
+    def watcher(self, name='viewer'):
+        client = self.app.test_client()
+        client.post('/api/register', json={'username': name, 'name': 'Khán giả', 'password': 'test-only-password-123',
+                                           'invite': 'test-invite'}, headers={'Origin': 'http://localhost:8080'})
+        return client
+
+    def test_live_poll_returns_only_new_moves_and_detects_restarts(self):
+        mid, job, _, _ = self.running_match()
+        viewer = self.watcher()
+        self.assertEqual(self.app.test_client().get(f'/api/matches/{mid}/live').status_code, 401)
+        first = viewer.get(f'/api/matches/{mid}/live').json
+        self.assertEqual((first['status'], first['moves'], first['ply'], first['reset']), ('running', [], 0, False))
+        self.store.progress(job, {'ply': 3, 'thinking': 'p2', 'moves': self.MOVES, 'left': {'p1': 59.2, 'p2': 58.9}})
+        self.app.extensions['cache'].clear()
+        live = viewer.get(f'/api/matches/{mid}/live?since=0').json
+        self.assertEqual((live['moves'], live['ply'], live['thinking'], live['left']['p2']), (self.MOVES, 3, 'p2', 58.9))
+        self.assertEqual(viewer.get(f'/api/matches/{mid}/live?since=2').json['moves'], [self.MOVES[2]])
+        self.assertEqual(viewer.get(f'/api/matches/{mid}/live?since=3').json['moves'], [])
+        for junk in ('abc', '-5', ''):
+            self.assertEqual(viewer.get(f'/api/matches/{mid}/live?since={junk}').status_code, 200)
+        # The grader restarted the game (retry): fewer moves than the viewer already has => full resync.
+        self.store.progress(job, {'ply': 1, 'thinking': 'p2', 'moves': self.MOVES[:1], 'left': {'p1': 60, 'p2': 60}})
+        self.app.extensions['cache'].clear()
+        restart = viewer.get(f'/api/matches/{mid}/live?since=3').json
+        self.assertEqual((restart['reset'], restart['moves']), (True, self.MOVES[:1]))
+        self.assertEqual(viewer.get('/api/matches/nope/live').status_code, 404)
+
+    def test_live_status_queue_position_done_and_cancel(self):
+        (a, ua), (b, _) = self.team('Chờ A'), self.team('Chờ B')
+        sa, sb = self.valid(a), self.valid(b)
+        with self.store.connect(True) as db:
+            ahead = self.store.create_match(db, sa, sb, ua)
+            waiting = self.store.create_match(db, sb, sa, ua)
+        viewer = self.watcher('queuer')
+        queued = viewer.get(f'/api/matches/{waiting}/live').json
+        self.assertEqual((queued['status'], queued['position']), ('queued', 2))
+        job = self.store.claim('test', 'samples')
+        self.assertEqual(job['ref'], ahead)
+        self.assertTrue(self.store.finish(job, {'winner': 'p1', 'reason': 'goal', 'moves': [{'from': [6, 1], 'to': [5, 1]}]}))
+        self.app.extensions['cache'].clear()
+        done = viewer.get(f'/api/matches/{ahead}/live').json
+        self.assertEqual((done['status'], done['winner'], done['moves']), ('done', 'p1', []))
+        with self.store.connect(True) as db:
+            self.store.cancel_match(db, waiting)
+        self.app.extensions['cache'].clear()
+        self.assertEqual(viewer.get(f'/api/matches/{waiting}/live').json['status'], 'cancelled')
+
+    def test_viewer_count_and_team_live_list(self):
+        mid, job, a, b = self.running_match('Đếm')
+        first, second = self.watcher('w_one'), self.watcher('w_two')
+        self.assertEqual(first.get(f'/api/matches/{mid}/live').json['viewers'], 1)
+        self.assertEqual(second.get(f'/api/matches/{mid}/live').json['viewers'], 2)
+        self.assertEqual(second.get(f'/api/matches/{mid}').json['viewers'], 2)
+        self.assertEqual(first.get(f'/api/matches/{mid}/live').json['viewers'], 2)
+        # A signed-in player sees the games of their own team, running first.
+        owner = self.app.test_client()
+        owner.post('/api/register', json={'username': 'owner_x', 'name': 'Chủ đội', 'password': 'test-only-password-123',
+                                          'invite': 'test-invite'}, headers={'Origin': 'http://localhost:8080'})
+        csrf = owner.get('/api/me').json['csrf']
+        self.assertEqual(owner.get('/api/me/live').json['items'], [])
+        with self.store.connect(True) as db:
+            user = db.execute("SELECT id FROM users WHERE username='owner_x'").fetchone()[0]
+            db.execute('UPDATE users SET team_id=? WHERE id=?', (a, user))
+        self.app.extensions['cache'].clear()
+        items = owner.get('/api/me/live').json['items']
+        self.assertEqual([(m['id'], m['status']) for m in items], [(mid, 'running')])
+        self.assertEqual({items[0]['team1_id'], items[0]['team2_id']}, {a, b})
+        del csrf
+        self.assertEqual(self.app.test_client().get('/api/me/live').status_code, 401)
+
+    def test_match_detail_links_the_other_game_of_each_pair(self):
+        (a, _), (b, _) = self.team('Cặp A'), self.team('Cặp B')
+        sa, sb = self.valid(a), self.valid(b)
+        self.store.join_ranked(a, sa)
+        series = self.store.join_ranked(b, sb)
+        viewer = self.watcher('pairs')
+        first, second = series['matches']
+        one, two = viewer.get(f'/api/matches/{first}').json, viewer.get(f'/api/matches/{second}').json
+        self.assertEqual((one['sibling'], one['game_number'], two['sibling'], two['game_number']), (second, 1, first, 2))
+        with self.store.connect(True) as db:
+            lone = self.store.create_match(db, sa, sb, None)
+        self.assertEqual(viewer.get(f'/api/matches/{lone}').json['sibling'], None)
+        requester = self.user('req_user')
+        with self.store.connect(True) as db:
+            pair = self.store.create_match(db, sa, sb, requester=requester)
+            other = self.store.create_match(db, sb, sa, requester=requester)
+        self.app.extensions['cache'].clear()
+        self.assertEqual(viewer.get(f'/api/matches/{pair}').json['sibling'], other)
+
+    def test_match_list_filters_by_kind_and_team_name(self):
+        (a, ua), (b, _) = self.team('Sói Xám'), self.team('Cáo Đỏ')
+        sa, sb = self.valid(a), self.valid(b)
+        with self.store.connect(True) as db:
+            practice = self.store.create_match(db, sa, sb, ua)
+            friendly = self.store.create_match(db, sb, sa, ua, kind='friendly')
+        viewer = self.watcher('lister')
+        ids = lambda query: {m['id'] for m in viewer.get('/api/matches' + query).json['items']}
+        self.assertEqual(ids(''), {practice, friendly})
+        self.assertEqual(ids('?kind=friendly'), {friendly})
+        self.assertEqual(ids('?q=S%C3%B3i'), {practice, friendly})
+        self.assertEqual(ids('?q=Cáo&kind=practice'), {practice})
+        self.assertEqual(ids('?q=%25%27%3B--'), set())
+        self.assertEqual(ids('?kind=bogus'), {practice, friendly})
+
+    def test_runner_publishes_compact_progress_while_a_game_runs(self):
+        from arena_backend import runner as runner_module
+        team, user = self.team('Tiến độ')
+        a, b = self.valid(team, HUNTER, 'a'), self.valid(team, HUNTER, 'b')
+        with self.store.connect(True) as db:
+            mid = self.store.create_match(db, a, b, requester=user)
+        snapshots, real = [], self.store.progress
+        self.store.progress = lambda job, state: (snapshots.append(state), real(job, state))
+        old, runner_module.PROGRESS_INTERVAL = runner_module.PROGRESS_INTERVAL, 0
+        try:
+            Worker(self.store, TrustedExecutor()).run_once()
+        finally:
+            runner_module.PROGRESS_INTERVAL = old
+        self.assertGreaterEqual(len(snapshots), 2)
+        plies = [snap['ply'] for snap in snapshots]
+        self.assertEqual(plies, sorted(plies))
+        last = snapshots[-1]
+        self.assertEqual(len(last['moves']), last['ply'])
+        self.assertTrue(all(len(m) == 4 and all(type(x) is int for x in m) for m in last['moves']))
+        self.assertIn(last['thinking'], ('p1', 'p2'))
+        self.assertTrue(0 < last['left']['p1'] <= 60)
+        with self.store.connect() as db:
+            row = db.execute('SELECT status,progress FROM matches WHERE id=?', (mid,)).fetchone()
+        self.assertEqual((row['status'], row['progress']), ('done', None))
+
+
 class AdminMatches(Base):
     def admin_client(self):
         self.register('boss_admin')

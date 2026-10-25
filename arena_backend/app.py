@@ -19,7 +19,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from . import importer
 from .store import Store, Problem, ROOT, RULES_HASH, LIMITS, TEAM_SIZE, SYSTEM_TEAM, uid, now
 
-PUBLIC_FILES = {'rules.js', 'arena/arena.js', 'arena/admin.js', 'arena/common.js', 'arena/arena.css',
+PUBLIC_FILES = {'rules.js', 'arena/arena.js', 'arena/admin.js', 'arena/common.js', 'arena/watch.js', 'arena/arena.css',
                 'arena/guide.html'}
 SAMPLES = {'sdk/examples/first.py', 'sdk/examples/hunter.py', 'sdk/examples/guardian.py',
            'sdk/examples/template.py', 'sdk/local_arena.py'}
@@ -547,7 +547,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
     ORDER = ("ORDER BY CASE m.status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END,"
              "m.created DESC,m.id LIMIT 100")
 
-    def match_list(status, tid):
+    def match_list(status, tid, kind='', query=''):
         where, args = [], []
         if status in ('queued', 'running', 'done', 'failed', 'cancelled'):
             where.append('m.status=?')
@@ -555,6 +555,12 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         if tid:
             where.append('p.tournament_id=?')
             args.append(tid)
+        if kind in ('practice', 'ranked', 'tournament', 'campaign', 'friendly'):
+            where.append('m.kind=?')
+            args.append(kind)
+        if query:
+            where.append('(t1.name LIKE ? OR t2.name LIKE ?)')
+            args += [f'%{query}%'] * 2
         with store.connect() as db:
             rows = db.execute(MATCH_SELECT + ('WHERE ' + ' AND '.join(where) + ' ' if where else '') + ORDER,
                               args).fetchall()
@@ -570,7 +576,9 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
                                   'OR m.p2 IN (SELECT id FROM submissions WHERE team_id=?) ' + ORDER,
                                   (g.user['team_id'], g.user['team_id'])).fetchall()
             return jsonify(items=[dict(r) for r in rows])
-        return jsonify(items=cache.get(f'matches:{status}:{tid}', 3, lambda: match_list(status, tid)))
+        kind, query = request.args.get('kind', ''), request.args.get('q', '').strip()[:40]
+        return jsonify(items=cache.get(f'matches:{status}:{tid}:{kind}:{query}', 3,
+                                       lambda: match_list(status, tid, kind, query)))
 
     def match_data(mid):
         with store.connect() as db:
@@ -582,7 +590,10 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
             if not row:
                 raise Problem('Không tìm thấy ván.', 404)
             position = store.queue_positions(db, [mid]).get(mid)
+            sibling, number = store.sibling(db, mid, row['kind'], row['pairing_id'], row['created'], row['requester'],
+                                            row['p1'], row['p2'])
         data = dict(row)
+        data['sibling'], data['game_number'] = sibling, number
         data['replay'] = json.loads(data['replay']) if data['replay'] else None
         data['progress'] = json.loads(data['progress']) if data['progress'] else None
         data['position'] = position
@@ -592,7 +603,43 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
 
     @app.get('/api/matches/<mid>')
     def match(mid):
-        return jsonify(cache.get(f'match:{mid}', 2, lambda: match_data(mid)))
+        data = cache.get(f'match:{mid}', 2, lambda: match_data(mid))
+        return jsonify({**data, 'viewers': touch_viewer(mid)})
+
+    # In-memory, per process: who has polled a game in the last few seconds.
+    viewers, viewers_lock = {}, threading.Lock()
+
+    def touch_viewer(mid):
+        key = g.user['id'] if g.user else g.client_ip
+        moment = time.monotonic()
+        with viewers_lock:
+            seen = viewers.setdefault(mid, {})
+            seen[key] = moment
+            for stale in [k for k, t in seen.items() if moment - t > 8]:
+                del seen[stale]
+            if len(viewers) > 5000:
+                for old in [m for m, v in viewers.items() if not v or max(v.values()) < moment - 60]:
+                    del viewers[old]
+            return len(seen)
+
+    @app.get('/api/matches/<mid>/live')
+    def match_live(mid):
+        """Cheap incremental poll: only moves after `since`; `reset` when the game restarted."""
+        try:
+            since = max(0, int(request.args.get('since', 0)))
+        except ValueError:
+            since = 0
+        live = cache.get(f'live:{mid}', 1, lambda: store.match_live(mid))
+        moves = live['moves']
+        reset = since > len(moves)
+        return jsonify({**{k: v for k, v in live.items() if k != 'moves'}, 'ply': len(moves), 'reset': reset,
+                        'moves': moves if reset else moves[since:], 'viewers': touch_viewer(mid)})
+
+    @app.get('/api/me/live')
+    def my_live():
+        auth()
+        team = g.user['team_id']
+        return jsonify(items=cache.get(f'mylive:{team}', 2, lambda: store.live_matches(team)) if team else [])
 
     # ---- admin ----------------------------------------------------------
 

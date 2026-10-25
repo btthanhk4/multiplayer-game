@@ -1,13 +1,14 @@
 import {$, $$, escape, labels, formats, kinds, formatTime, badge, session, api, notice, action, options, countdown,
-  poller, board, outcome, replayStates, newGame, pieceCounts, teamLink, starText, ago, sparkline, celebrate} from './common.js';
+  poller, outcome, teamLink, starText, ago, sparkline, celebrate} from './common.js';
+import {createWatch} from './watch.js';
 
 let me = null, team = null, health = null, tab = 'overview', register = false;
 let tournaments = [], submissions = [], selectedTournament = '', competition = null, standingsLimit = 100, ranked = null;
 let campaign = null, badges = null, selectedLevel = null, profile = null;
-const watched = new Map();
 const DRAFT = 'ottv2-draft';
 const TABS = ['overview','team','lab','campaign','ranked','competition','watch'];
 const CLEAR = 1.5;
+const watch = createWatch({team: () => team, tab: () => tab, setTab: value => setTab(value)});
 const TIER_CLASS = {'Đồng':'bronze','Bạc':'silver','Vàng':'gold','Kim cương':'diamond'};
 const tier = label => `<span class="tier ${TIER_CLASS[label] || ''}">${escape(label)}</span>`;
 
@@ -35,6 +36,7 @@ function setTab(value) {
   $$('[role=tab]').forEach(el => el.setAttribute('aria-selected', String(el.dataset.tab === tab)));
   history.replaceState(null, '', `#${tab}`);
   refresher.now();
+  watch.scheduleLive(100);
 }
 
 function requireLogin() {
@@ -376,82 +378,27 @@ async function openTeam(id) {
   if (!$('#team-dialog').open) $('#team-dialog').showModal();
 }
 
-// ---- watch --------------------------------------------------------------
+// ---- watch (see watch.js) ------------------------------------------------
 
-function matchRow(m) {
-  return `<article class="match-row">${badge(m.status)}<p><strong>${teamLink(m.team1_id, m.team1)}</strong> · ${escape(m.bot1)}<br>× <strong>${teamLink(m.team2_id, m.team2)}</strong> · ${escape(m.bot2)}</p><p class="caption">${m.pairing_id ? `Giải · vòng ${m.round}` : escape(kinds[m.kind] || 'Trận tập')} · ${formatTime(m.created)}${m.status === 'done' ? ` · ${escape(outcome(m))}` : ''}</p><button class="button" data-watch="${m.id}">${watched.has(m.id) ? 'Bỏ xem' : m.status === 'done' ? 'Xem replay' : 'Theo dõi'}</button></article>`;
-}
+let mineLive = [];
+const autoOpened = new Set();
 
-async function matchDirectory() {
-  const filter = $('#match-filter').value;
-  if (filter === 'mine' && !team) {
-    $('#match-list').innerHTML = '<div class="caption">Lập đội để xem các ván của đội. Chọn “Tất cả” để xem đội khác.</div>';
-  } else {
-    const {items} = await api(filter === 'mine' ? '/matches?mine=1' : filter === 'all' ? '/matches' : `/matches?status=${filter}`);
-    $('#match-list').innerHTML = items.length ? items.map(matchRow).join('') : '<div class="caption">Chưa có ván phù hợp.</div>';
+async function loadMineLive() {
+  if (!team) { mineLive = []; renderLiveBanner(); return; }
+  try { mineLive = (await api('/me/live')).items; } catch { return; }
+  renderLiveBanner();
+  if (tab === 'watch' && !watch.size()) {
+    const running = mineLive.find(m => m.status === 'running' && !autoOpened.has(m.id));
+    if (running) { autoOpened.add(running.id); await watch.toggle(running.id); renderLiveBanner(); }
   }
-  $('#watch-count').textContent = `${watched.size} / 4 BÀN`;
 }
 
-const SHORT = {rock:'Đ', paper:'L', scissors:'K'};
-function material(state) {
-  const counts = pieceCounts(state.board);
-  const side = (who, label) => `<span class="side ${who}">${label} ${['rock','paper','scissors'].map(t => `<b class="${counts[who][t] <= 1 ? 'low' : ''}" title="${counts[who][t]} quân ${{rock:'Đấm',paper:'Lá',scissors:'Kéo'}[t]}">${SHORT[t]}${counts[who][t]}</b>`).join('')}</span>`;
-  return `<div class="material">${side('p1', 'Xanh')}${side('p2', 'Đỏ')}</div>`;
-}
-
-function renderWatch(id) {
-  const item = watched.get(id), el = document.getElementById(`watch-${id}`);
-  if (!item?.data || !el) return;
-  const m = item.data, complete = m.status === 'done';
-  const state = complete ? item.states[item.position] : m.progress?.state || newGame();
-  const end = complete && item.position === item.states.length - 1;
-  el.classList.toggle('large', Boolean(item.large));
-  el.innerHTML = `<div class="watch-card-head"><strong>${teamLink(m.team1_id, m.team1)} <span class="red">×</span> ${teamLink(m.team2_id, m.team2)}</strong><span class="watch-tools"><button class="text-link" data-share="${id}" title="Sao chép link ván này">Chia sẻ</button><button class="text-link" data-expand="${id}">${item.large ? 'Thu nhỏ' : 'Phóng to'}</button><button class="close-button" data-watch="${id}" aria-label="Bỏ xem trận">×</button></span></div><div class="watch-card-body">${material(state)}<div class="board-wrap">${board(state)}${end ? `<div class="result-banner ${m.winner}">${escape(outcome(m))}</div>` : ''}</div><div class="replay-caption">${escape(outcome(m))}<br><span class="caption">${escape(kinds[m.kind] || '')} · ${escape(m.bot1)} (Xanh) / ${escape(m.bot2)} (Đỏ) · ${state.revision} nước${complete && m.replay?.time_used ? ` · nghĩ ${m.replay.time_used.p1}s / ${m.replay.time_used.p2}s` : ''}</span></div>${complete?`<div class="replay-controls"><button data-step="-1" data-id="${id}" aria-label="Nước trước">‹</button><input type="range" min="0" max="${item.states.length-1}" value="${item.position}" data-replay="${id}" aria-label="Chọn nước trong replay"><button data-step="1" data-id="${id}" aria-label="Nước tiếp">›</button><button data-play="${id}" aria-label="Phát hoặc dừng replay">${item.playing?'Ⅱ':'▷'}</button><button data-speed="${id}" aria-label="Tốc độ phát">${item.speed}×</button></div><p class="watch-note">Nước ${item.position}/${item.states.length-1}${item.position?` · ${escape(m.replay.moves[item.position-1].notation)}`:' · Bắt đầu'}${m.replay.execution_mode!=='docker'?' · Trận thử nội bộ':''}${watched.size === 1 ? ' · Phím ← → và Space để tua' : ''}</p>`:'<p class="watch-note">Bàn chỉ quan sát · Tự cập nhật khi máy chấm chạy ván.</p>'}</div>`;
-}
-
-async function updateWatched() {
-  await Promise.all([...watched.keys()].map(async id => {
-    const data = await api(`/matches/${id}`), item = watched.get(id);
-    if (!item) return;
-    const signature = `${data.status}:${data.progress?.ply}:${data.replay?.finished}:${data.position}`;
-    if (signature === item.signature) return;
-    const first = !item.data;
-    item.data = data; item.signature = signature;
-    if (data.replay) {
-      item.states = replayStates(data.replay.moves);
-      // A finished game opened fresh plays from the start; one that just ended jumps to the result.
-      item.position = first ? 0 : item.states.length - 1; item.playing = first;
-    }
-    renderWatch(id);
-  }));
-}
-
-async function toggleWatch(id) {
-  if (watched.has(id)) { watched.delete(id); document.getElementById(`watch-${id}`)?.remove(); }
-  else {
-    if (watched.size >= 4) throw new Error('Bạn đang xem bốn bàn. Bỏ một bàn để mở trận khác.');
-    if (tab !== 'watch') setTab('watch');
-    if (!watched.size) $('#watch-grid').replaceChildren();
-    watched.set(id, {position:0, playing:false, speed:1, clock:0});
-    const card = document.createElement('article'); card.className = 'watch-card'; card.id = `watch-${id}`; card.textContent = 'Đang tải bàn cờ…'; $('#watch-grid').append(card);
-    try { await updateWatched(); } catch (error) { watched.delete(id); card.remove(); throw error; }
-  }
-  if (!watched.size) $('#watch-grid').innerHTML = '<div class="empty">Chọn một ván ở bên trái để theo dõi hoặc xem lại.</div>';
-  $('#watch-count').textContent = `${watched.size} / 4 BÀN`;
-}
-
-function step(id, delta) {
-  const item = watched.get(id);
-  if (!item?.states) return;
-  item.position = Math.max(0, Math.min(item.states.length-1, item.position+delta)); item.playing = false; renderWatch(id);
-}
-
-function play(id) {
-  const item = watched.get(id);
-  if (!item?.states) return;
-  if (item.position === item.states.length-1) item.position = 0;
-  item.playing = !item.playing; renderWatch(id);
+function renderLiveBanner() {
+  const pending = mineLive.filter(m => !watch.has(m.id)), el = $('#live-banner');
+  if (!pending.length) { el.hidden = true; el.replaceChildren(); return; }
+  const m = pending[0], running = m.status === 'running';
+  el.hidden = false;
+  el.innerHTML = `<span class="live-pill ${running ? '' : 'wait'}">${running ? '● ĐANG ĐẤU' : 'ĐANG CHỜ'}</span><span><strong>${escape(m.team1)}</strong> × <strong>${escape(m.team2)}</strong> · ${escape(kinds[m.kind] || '')}${!running && m.position ? ` · vị trí #${m.position} trong hàng chờ` : ''}${pending.length > 1 ? ` · và ${pending.length - 1} ván khác` : ''}</span><button class="button ${running ? 'primary' : ''}" data-watch="${m.id}">${running ? 'Xem trực tiếp' : 'Theo dõi'} ↗</button>`;
 }
 
 async function copyLink(url, label) {
@@ -476,6 +423,7 @@ async function refresh() {
       announceBadges(badges);
     } else if (!team) badges = null;
     submissionRows(); renderTeam();
+    await loadMineLive();
     if (tab === 'overview') {
       const [recent, r, f, c] = await Promise.all([team ? api('/matches?mine=1') : {items:[]}, api('/ranked'),
         cached('feed', 15000, () => api('/feed')), cached(`campaign:${team?.id}`, 30000, () => api('/campaign'))]);
@@ -485,7 +433,7 @@ async function refresh() {
     if (tab === 'campaign') renderCampaign(await api('/campaign'));
     if (tab === 'ranked') renderRanked(await api('/ranked'));
     if (tab === 'competition') await renderCompetition();
-    if (tab === 'watch') { await matchDirectory(); await updateWatched(); }
+    if (tab === 'watch') await watch.directory();
   } catch (error) {
     $('#service-status').textContent = error.status === 503 ? 'Máy chủ đang bận · tự thử lại' : 'Chưa kết nối được máy chủ';
     $('#service-status').classList.remove('online');
@@ -493,7 +441,7 @@ async function refresh() {
     throw error;
   } finally { loading = false; }
 }
-const busy = () => ['ranked','watch'].includes(tab) || (tab === 'campaign' && campaign?.mine?.runs.some(r => r.status === 'running'));
+const busy = () => ['ranked','watch'].includes(tab) || mineLive.length > 0 || Boolean(ranked?.mine?.queued) || (tab === 'campaign' && campaign?.mine?.runs.some(r => r.status === 'running'));
 const refresher = poller(refresh, () => busy() ? 6000 : 15000);
 
 // ---- events -------------------------------------------------------------
@@ -515,36 +463,21 @@ document.addEventListener('click', event => {
   });
   if (button.dataset.source) action(button, async () => { const result = await api(`/submissions/${button.dataset.source}/source`); $('#source').value = result.source; updateSize(); $('#source').focus(); });
   if (button.dataset.rankBot) { setTab('ranked'); $('#ranked-submission').value = button.dataset.rankBot; }
-  if (button.dataset.watch) { if ($('#team-dialog').open) $('#team-dialog').close(); action(button, () => toggleWatch(button.dataset.watch)); }
+  watch.onClick(button);
+  if (button.dataset.watch) { if ($('#team-dialog').open) $('#team-dialog').close(); action(button, async () => { await watch.toggle(button.dataset.watch); renderLiveBanner(); if (tab === 'watch') await watch.directory(); }); }
   if (button.dataset.kick) action(button, async () => { if (!confirm('Mời thành viên này ra khỏi đội?')) return; await api('/team/kick', {user_id: button.dataset.kick}); await loadMe(); renderTeam(); });
-  if (button.dataset.step && button.dataset.id) step(button.dataset.id, Number(button.dataset.step));
-  if (button.dataset.play) play(button.dataset.play);
-  if (button.dataset.speed) { const item = watched.get(button.dataset.speed); item.speed = {1:2, 2:4, 4:1}[item.speed]; renderWatch(button.dataset.speed); }
-  if (button.dataset.expand) { const item = watched.get(button.dataset.expand); item.large = !item.large; renderWatch(button.dataset.expand); }
-  if (button.dataset.share) copyLink(`${location.origin}/#watch=${button.dataset.share}`, 'ván đấu');
 });
-document.addEventListener('keydown', event => {
-  if (tab !== 'watch' || watched.size !== 1 || event.target.closest('input,textarea,select,dialog') || event.ctrlKey || event.metaKey) return;
-  const id = [...watched.keys()][0];
-  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); step(id, event.key === 'ArrowLeft' ? -1 : 1); }
-  if (event.key === ' ' && !event.target.closest('button')) { event.preventDefault(); play(id); }
-});
+document.addEventListener('keydown', watch.onKey);
 $('#competition-select').addEventListener('change', event => { selectedTournament = event.target.value; standingsLimit = 100; action(null, renderCompetition); });
 $('#round-select').addEventListener('change', () => action(null, renderRound));
 $('#standings-search').addEventListener('input', renderStandings);
 $('#show-detail').addEventListener('change', event => $('#standings-table').classList.toggle('compact', !event.target.checked));
 $('#standings-more').addEventListener('click', () => { standingsLimit += 200; renderStandings(); });
-$('#match-filter').addEventListener('change', () => action(null, matchDirectory));
-document.addEventListener('input', event => {
-  if (!event.target.dataset.replay) return;
-  const id = event.target.dataset.replay, item = watched.get(id); item.position = Number(event.target.value); item.playing = false;
-  const card = document.getElementById(`watch-${id}`), state = item.states[item.position];
-  card.querySelector('.mini-board').outerHTML = board(state);
-  card.querySelector('.material').outerHTML = material(state);
-  card.querySelector('.result-banner')?.remove();
-  card.querySelector('.watch-note').textContent = `Nước ${item.position}/${item.states.length-1}`;
-});
-document.addEventListener('change', event => { if (event.target.dataset.replay) renderWatch(event.target.dataset.replay); });
+for (const id of ['#match-filter', '#match-kind']) $(id).addEventListener('change', () => action(null, watch.directory));
+let directoryTimer;
+$('#match-search').addEventListener('input', () => { clearTimeout(directoryTimer); directoryTimer = setTimeout(() => action(null, watch.directory), 300); });
+$('#watch-random').addEventListener('click', event => action(event.target, async () => { await watch.randomLive(); await watch.directory(); }));
+document.addEventListener('input', watch.onInput);
 $('#source').addEventListener('input', updateSize);
 $('#bot-name').addEventListener('input', updateSize);
 $('#source').addEventListener('keydown', event => { if (event.key === 'Tab') { event.preventDefault(); const el = event.target; el.setRangeText('    ', el.selectionStart, el.selectionEnd, 'end'); updateSize(); } });
@@ -555,16 +488,16 @@ $('#submit-form').addEventListener('submit', event => { event.preventDefault(); 
   notice('Đã lưu phiên bản. Kết quả kiểm tra sẽ cập nhật trong danh sách bên dưới.'); await refresh(); }); });
 $('#practice-form').addEventListener('submit', event => { event.preventDefault(); if (!requireTeam()) return; action(event.submitter, async () => {
   const result = await api('/practice', {p1: $('#practice-a').value, p2: $('#practice-b').value});
-  notice('Đã xếp hai ván đổi màu vào hàng chờ.'); await toggleWatch(result.ids[0]); }); });
+  notice('Đã xếp hai ván đổi màu vào hàng chờ.'); await watch.toggle(result.ids[0]); }); });
 $('#campaign-form').addEventListener('submit', event => { event.preventDefault(); if (!requireTeam()) return; action(event.submitter, async () => {
   await api('/campaign/challenge', {level: Number($('#campaign-level').value), submission_id: $('#campaign-submission').value}); forget();
-  notice('Đã vào ải! Hai ván với boss đang chờ máy chấm; kết quả hiện ở “Lượt gần đây”.'); await refresh(); }); });
+  notice('Đã vào ải! Hai ván với boss đang chờ máy chấm. Bấm “Xem trực tiếp” ở thanh phía trên để theo dõi.'); await refresh(); }); });
 $('#team-profile').addEventListener('submit', event => { event.preventDefault(); if (!requireTeam()) return; action(event.submitter, async () => {
   const result = await api('/friendly', {team_id: profile.id, submission_id: event.target.elements.submission.value}); forget();
-  $('#team-dialog').close(); notice(`Đã gửi lời thách đấu tới ${profile.name}. Hai ván giao hữu đang chờ máy chấm.`); await toggleWatch(result.ids[0]); }); });
+  $('#team-dialog').close(); notice(`Đã gửi lời thách đấu tới ${profile.name}. Hai ván giao hữu đang chờ máy chấm.`); await watch.toggle(result.ids[0]); }); });
 $('#ranked-form').addEventListener('submit', event => { event.preventDefault(); if (!requireTeam()) return; action(event.submitter, async () => {
   const result = await api('/ranked/queue', {submission_id: $('#ranked-submission').value});
-  notice(result.status === 'matched' ? 'Đã ghép đối thủ. Hai ván đổi màu được xếp vào hàng chờ.' : 'Đã vào hàng chờ. Hệ thống sẽ tự ghép khi có đối thủ.'); await refresh(); }); });
+  notice(result.status === 'matched' ? 'Đã ghép đối thủ. Bấm “Xem trực tiếp” ở thanh phía trên để theo dõi hai ván.' : 'Đã vào hàng chờ. Khi ghép được đối thủ, thanh phía trên sẽ báo để bạn xem trực tiếp.'); await refresh(); }); });
 $('#ranked-cancel').addEventListener('click', event => action(event.target, async () => { const result = await api('/ranked/cancel', {}); notice(result.cancelled ? 'Đã hủy tìm trận.' : 'Đối thủ vừa được ghép; cặp trận đã bắt đầu.'); await refresh(); }));
 $('#join-form').addEventListener('submit', event => { event.preventDefault(); if (!requireTeam()) return; action(event.submitter, async () => {
   await api(`/tournaments/${selectedTournament}/join`, {submission_id: $('#join-submission').value}); await loadMe();
@@ -585,7 +518,7 @@ $('#account-button').addEventListener('click', () => {
   $('#account-detail').textContent = `@${me.username}${team ? ` · Đội ${team.name}` : ' · Chưa có đội'}`;
   $('#account-dialog').showModal();
 });
-$('#logout').addEventListener('click', event => action(event.target, async () => { await api('/logout', {}); me = team = badges = campaign = session.csrf = null; forget(); $('#account-dialog').close(); watched.clear(); renderAccount(); setMode(false); refresher.now(); }));
+$('#logout').addEventListener('click', event => action(event.target, async () => { await api('/logout', {}); me = team = badges = campaign = session.csrf = null; mineLive = []; forget(); $('#account-dialog').close(); watch.clear(); renderLiveBanner(); renderAccount(); setMode(false); refresher.now(); }));
 $('#change-password').addEventListener('click', () => { $('#account-dialog').close(); $('#password-dialog').showModal(); });
 $('#open-password').addEventListener('click', () => $('#password-dialog').showModal());
 $('#password-form').addEventListener('submit', async event => { event.preventDefault(); $('#password-error').textContent = '';
@@ -621,20 +554,6 @@ $('#auth-form').addEventListener('submit', async event => {
   finally { event.submitter.disabled = false; }
 });
 
-// Replay clock: ticks often so 2× and 4× stay smooth; one move per 650 ms at 1×.
-setInterval(() => {
-  if (document.hidden || tab !== 'watch') return;
-  for (const [id, item] of watched) {
-    if (!item.playing || !item.states) continue;
-    item.clock += 130 * item.speed;
-    if (item.clock < 650) continue;
-    item.clock = 0;
-    item.position = Math.min(item.position+1, item.states.length-1);
-    if (item.position === item.states.length-1) item.playing = false;
-    renderWatch(id);
-  }
-}, 130);
-
 const draft = (() => { try { return JSON.parse(storage(DRAFT) || 'null'); } catch { return null; } })();
 if (draft?.source) { $('#source').value = draft.source; $('#bot-name').value = draft.name || ''; }
 else {
@@ -646,7 +565,7 @@ await loadMe();
 // Shared links: /#watch=<match> opens a replay, /#team=<team> opens a profile.
 function route() {
   const shared = location.hash.slice(1);
-  if (shared.startsWith('watch=')) { setTab('watch'); action(null, () => toggleWatch(shared.slice(6))); }
+  if (shared.startsWith('watch=')) { const [id, ply] = shared.slice(6).split('&ply='); setTab('watch'); action(null, () => watch.toggle(id, ply === undefined ? {} : {ply: Number(ply)})); }
   else if (shared.startsWith('team=')) { setTab('overview'); action(null, () => openTeam(shared.slice(5))); }
   else setTab(shared || 'overview');
 }

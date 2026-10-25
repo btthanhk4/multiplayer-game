@@ -147,6 +147,46 @@ try {
   await page.screenshot({path:'artifacts/arena-watch-mobile.png',fullPage:true});
   await page.setViewportSize({width:1440,height:1000});
 
+  // Live spectating: replay a real finished game as if it were running, then finish it.
+  while (await page.locator('#watch-grid .watch-card [data-watch]').count()) await page.locator('#watch-grid .watch-card [data-watch]').first().click();
+  const listing=(await (await page.request.get(base+'/api/matches?status=done')).json()).items.sort((a,b)=>(b.plies||0)-(a.plies||0));
+  const target=listing[0].id, real=await (await page.request.get(base+`/api/matches/${target}`)).json();
+  const compact=real.replay.moves.map(m=>[...m.from,...m.to]);
+  assert.ok(compact.length>=6,'need a game with a few moves');
+  const first=Math.max(2,Math.floor(compact.length/3)), second=Math.max(first+1,Math.floor(compact.length*2/3));
+  let phase=0, sinceSeen=[];
+  await page.route(new RegExp(`/api/matches/${target}$`),route=>phase<2
+    ? route.fulfill({json:{...real,status:'running',replay:null,winner:null,reason:null,progress:{ply:first,thinking:'p2',moves:compact.slice(0,first),left:{p1:58.1,p2:59}},viewers:2,position:null}})
+    : route.continue());
+  await page.route(new RegExp(`/api/matches/${target}/live`),route=>{
+    sinceSeen.push(new URL(route.request().url()).searchParams.get('since'));
+    if(phase===0){phase=1;return route.fulfill({json:{status:'running',ply:second,reset:false,moves:compact.slice(first,second),thinking:'p1',left:{p1:57,p2:58.5},viewers:3,position:null,winner:null,reason:null}});}
+    phase=2;return route.fulfill({json:{status:'done',ply:compact.length,reset:false,moves:[],thinking:null,left:null,viewers:3,position:null,winner:real.winner,reason:real.reason}});
+  });
+  await page.locator('[role=tab][data-tab=watch]').click();
+  await page.locator('#match-filter').selectOption('all');
+  await page.locator(`#match-list [data-watch="${target}"]`).click();
+  await page.locator('#watch-grid .live-pill').filter({hasText:'TRỰC TIẾP'}).waitFor();
+  await page.locator('.watch-note').filter({hasText:`Nước ${second}/${second}`}).waitFor({timeout:15000});
+  assert.match(await page.locator('.live-strip').textContent(),/3 người đang xem/);
+  assert.equal(sinceSeen[0],String(first),'incremental poll asks only for moves after the ones it already has');
+  await page.locator('.result-banner').waitFor({timeout:15000});
+  assert.equal(await page.locator('[data-golive]').isHidden(),true,'no live button once the game is over');
+  assert.equal(await page.locator('[data-r=count]').textContent(),String(compact.length),'final replay replaces the partial move list');
+  await page.locator('[data-r=moves] button[data-ply="3"]').click();
+  assert.match(await page.locator('.watch-note').textContent(),/Nước 3\//);
+  const flippedBefore=await page.locator('.mini-board.flipped').count();
+  await page.locator('[data-flip]').click();
+  assert.equal(await page.locator('.mini-board.flipped').count(),flippedBefore?0:1,'flip toggles the board orientation');
+  await page.keyboard.press('Home');
+  assert.match(await page.locator('.watch-note').textContent(),/Nước 0\//);
+  await page.keyboard.press('End');
+  assert.match(await page.locator('.watch-note').textContent(),new RegExp(`Nước ${compact.length}/`));
+  if(real.sibling) await page.locator('[data-sibling]').waitFor();
+  await page.screenshot({path:'artifacts/arena-watch-live.png',fullPage:true});
+  await page.unroute(new RegExp(`/api/matches/${target}$`));
+  await page.unroute(new RegExp(`/api/matches/${target}/live`));
+
   const admin=await newPage();
   await admin.goto(base+'/');
   await admin.locator('#auth-form [name=username]').fill('arena_admin');

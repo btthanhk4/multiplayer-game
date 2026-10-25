@@ -649,11 +649,13 @@ class Store:
     def queue_positions(db, refs):
         positions = {}
         for ref in refs:
-            job = db.execute("SELECT priority,created FROM jobs WHERE ref=? AND status='queued'", (ref,)).fetchone()
+            job = db.execute("SELECT priority,created,rowid rid FROM jobs WHERE ref=? AND status='queued'", (ref,)).fetchone()
             if job:
+                # Same order as claim(): priority, then creation time, then insertion order.
                 positions[ref] = 1 + db.execute(
-                    "SELECT COUNT(*) FROM jobs WHERE status='queued' AND (priority<? OR (priority=? AND created<?))",
-                    (job['priority'], job['priority'], job['created'])).fetchone()[0]
+                    "SELECT COUNT(*) FROM jobs WHERE status='queued' AND (priority<? OR (priority=? AND "
+                    "(created<? OR (created=? AND rowid<?))))",
+                    (job['priority'], job['priority'], job['created'], job['created'], job['rid'])).fetchone()[0]
         return positions
 
     # ---- matches and ranked ladder ---------------------------------------
@@ -1516,6 +1518,52 @@ class Store:
             if not self.owns(db, job):
                 raise Problem('Job đã được thu hồi.', 409)
             db.execute('UPDATE matches SET progress=? WHERE id=?', (json.dumps(state), job['ref']))
+
+    def match_live(self, mid):
+        """Everything the live view needs from one row, parsed once."""
+        with self.connect() as db:
+            row = db.execute('SELECT status,progress,winner,reason FROM matches WHERE id=?', (mid,)).fetchone()
+            if not row:
+                raise Problem('Không tìm thấy ván.', 404)
+            position = self.queue_positions(db, [mid]).get(mid) if row['status'] == 'queued' else None
+        progress = json.loads(row['progress']) if row['progress'] else {}
+        return {'status': row['status'], 'moves': progress.get('moves') or [], 'thinking': progress.get('thinking'),
+                'left': progress.get('left'), 'position': position, 'winner': row['winner'], 'reason': row['reason']}
+
+    def live_matches(self, team):
+        """Games of this team that are running or waiting, newest first."""
+        with self.connect() as db:
+            rows = db.execute(
+                'SELECT m.id,m.status,m.kind,m.created,t1.name team1,t2.name team2,t1.id team1_id,t2.id team2_id '
+                'FROM matches m JOIN submissions s1 ON s1.id=m.p1 JOIN submissions s2 ON s2.id=m.p2 '
+                'JOIN teams t1 ON t1.id=s1.team_id JOIN teams t2 ON t2.id=s2.team_id '
+                "WHERE m.status IN ('running','queued') AND (s1.team_id=? OR s2.team_id=?) "
+                "ORDER BY CASE m.status WHEN 'running' THEN 0 ELSE 1 END,m.created DESC LIMIT 6", (team, team)).fetchall()
+            positions = self.queue_positions(db, [r['id'] for r in rows if r['status'] == 'queued'])
+        return [{**dict(r), 'position': positions.get(r['id'])} for r in rows]
+
+    def sibling(self, db, mid, kind, pairing, created, requester, p1, p2):
+        """The other game of the same two-game pair, and whether this is game 1 or 2."""
+        other = None
+        if pairing:
+            other = db.execute('SELECT id,created FROM matches WHERE pairing_id=? AND id!=?', (pairing, mid)).fetchone()
+        elif kind == 'ranked':
+            row = db.execute('SELECT first_match,second_match FROM ranked_series WHERE first_match=? OR second_match=?',
+                             (mid, mid)).fetchone()
+            other = row and db.execute('SELECT id,created FROM matches WHERE id=?',
+                                       (row['second_match'] if row['first_match'] == mid else row['first_match'],)).fetchone()
+        elif kind == 'campaign':
+            row = db.execute('SELECT first_match,second_match FROM campaign_runs WHERE first_match=? OR second_match=?',
+                             (mid, mid)).fetchone()
+            other = row and db.execute('SELECT id,created FROM matches WHERE id=?',
+                                       (row['second_match'] if row['first_match'] == mid else row['first_match'],)).fetchone()
+        elif requester:
+            other = db.execute('SELECT id,created FROM matches WHERE kind=? AND requester=? AND p1=? AND p2=? '
+                               'AND ABS(created-?)<10 AND id!=?', (kind, requester, p2, p1, created, mid)).fetchone()
+        if not other:
+            return None, None
+        order = lambda row_id: db.execute('SELECT created,rowid FROM matches WHERE id=?', (row_id,)).fetchone()
+        return other['id'], 1 if tuple(order(mid)) <= tuple(order(other['id'])) else 2
 
     def finish(self, job, result):
         with self.connect(True) as db:
