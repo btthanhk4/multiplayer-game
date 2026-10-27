@@ -19,7 +19,10 @@ const services=[spawn(python,['-m','arena_backend','--data',data,'serve','--port
                 spawn(python,['-m','arena_backend','--data',data,'worker','--mode','samples','--slots','2'],{env,stdio:'pipe'})];
 let browser;
 const errors=[];
-const noOverflow=async page=>assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),'No horizontal overflow');
+const noOverflow=async page=>{
+  const wide=await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1?'':[...document.querySelectorAll('body *')].filter(el=>el.getBoundingClientRect().right>window.innerWidth+1).slice(0,4).map(el=>`${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0]}`).join(', '));
+  assert.equal(wide,'','No horizontal overflow');
+};
 // Phone-width audit: no sideways scrolling and no text squeezed into a sliver, on every tab, at the narrowest real phones.
 async function auditLayout(page,tabs,label){
   for(const width of [320,360,412]){
@@ -47,6 +50,45 @@ async function auditLayout(page,tabs,label){
       assert.deepEqual(problems,[],`${label} · ${tab} · ${width}px`);
     }
   }
+}
+// Colour audit: every visible piece of text keeps readable contrast against its real background in both themes.
+async function auditContrast(page,tabs,label,shots){
+  await page.emulateMedia({reducedMotion:'reduce'});   // pulsing elements change opacity mid-frame
+  for(const theme of ['dark','light']){
+    await page.evaluate(t=>document.documentElement.setAttribute('data-theme',t),theme);
+    for(const tab of tabs){
+      await page.locator(`[role=tab][data-tab=${tab}]`).click();
+      await page.waitForTimeout(250);
+      if(shots)await page.screenshot({path:`${shots}/${label}-${tab}-${theme}.png`,fullPage:true});
+      const bad=await page.evaluate(()=>{
+        const rgb=c=>{const m=c.match(/rgba?\(([^)]+)\)/);if(!m)return null;const v=m[1].split(/[ ,/]+/).filter(Boolean).map(Number);return {r:v[0],g:v[1],b:v[2],a:v[3]===undefined?1:v[3]}};
+        const lum=({r,g,b})=>{const f=x=>{x/=255;return x<=.03928?x/12.92:((x+.055)/1.055)**2.4};return .2126*f(r)+.7152*f(g)+.0722*f(b)};
+        const mix=(top,under)=>({r:top.r*top.a+under.r*(1-top.a),g:top.g*top.a+under.g*(1-top.a),b:top.b*top.a+under.b*(1-top.a),a:1});
+        const backdrop=el=>{const layers=[];for(let n=el;n;n=n.parentElement){const st=getComputedStyle(n);let c=rgb(st.backgroundColor);
+            if(st.backgroundImage&&st.backgroundImage!=='none'){const g=st.backgroundImage.match(/rgba?\([^)]+\)/);if(g)c=rgb(g[0])}
+            if(c&&c.a>0){layers.push(c);if(c.a>=.99)break}}
+          let base={r:255,g:255,b:255,a:1};for(const c of layers.reverse())base=mix(c,base);return base};
+        const out=[];
+        for(const el of document.querySelectorAll('main *, .masthead *, .gate *')){
+          if(['OPTION','SCRIPT','STYLE','svg','path','TEXTAREA'].includes(el.tagName)||el.closest('pre,textarea,.editor-panel,.hero-art,.gate-art,.stone,.mini-board,.confetti,.locked,[disabled]'))continue;
+          const own=[...el.childNodes].filter(n=>n.nodeType===3).map(n=>n.textContent).join('').trim();
+          if(own.length<2||!/[\p{L}\p{N}]/u.test(own))continue;
+          const box=el.getBoundingClientRect(),st=getComputedStyle(el);
+          if(!box.width||!box.height||st.visibility==='hidden'||st.opacity==='0'||el.closest('[hidden]'))continue;
+          const fg=rgb(st.color),bg=backdrop(el);
+          const text=mix({...fg,a:fg.a*(parseFloat(st.opacity)||1)},bg);
+          const [hi,lo]=[lum(text),lum(bg)].sort((x,y)=>y-x);
+          const ratio=(hi+.05)/(lo+.05);
+          const large=parseFloat(st.fontSize)>=24||(parseFloat(st.fontSize)>=18.6&&Number(st.fontWeight)>=700);
+          if(ratio<(large?3:4.3))out.push(`${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0]} "${own.slice(0,22)}" ${ratio.toFixed(2)}`);
+        }
+        return [...new Set(out)].slice(0,10);
+      });
+      assert.deepEqual(bad,[],`${label} · ${tab} · ${theme} contrast`);
+    }
+  }
+  await page.evaluate(()=>document.documentElement.setAttribute('data-theme','dark'));
+  await page.emulateMedia({reducedMotion:'no-preference'});
 }
 // Starts a practice pair, retrying while the team's previous pair is still queued or running (the server allows one at a time).
 async function practice(page){
@@ -307,6 +349,8 @@ try {
 
   await auditLayout(page,['overview','team','lab','campaign','ranked','competition','watch'],'student');
   await page.setViewportSize({width:1440,height:1000});
+  await auditContrast(page,['overview','team','lab','campaign','ranked','competition','watch'],'student',process.env.ARENA_SHOTS);
+  await page.setViewportSize({width:1440,height:1000});
 
   const admin=await newPage();
   await admin.goto(base+'/arena/admin');
@@ -404,6 +448,7 @@ try {
   }
   await guide.close();
   await auditLayout(admin,['dashboard','events','people','bots','matches','queue','log'],'admin');
+  await auditContrast(admin,['dashboard','events','people','bots','matches','queue','log'],'admin',process.env.ARENA_SHOTS);
   assert.deepEqual(errors,[]);
   console.log('PASS: registration, team create/join, bot validation, boss campaign clear + unlock, ranked queue/cancel, tournament entry, dashboard checklist/feed/badges, team profile, four replays with speed/expand, admin dashboard, tournament create, mobile layout.');
 } finally {

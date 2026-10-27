@@ -176,14 +176,14 @@ function renderDashboard(recent) {
   ];
   const current = steps.find(step => !step.done);
   $('#next-step').innerHTML = `<div class="next-main"><p class="eyebrow">${current ? `VIỆC TIẾP THEO · ${steps.filter(s => s.done).length}/${steps.length}` : 'XONG LỘ TRÌNH'}</p><h2>${escape(current?.title || 'Bạn đã sẵn sàng thi đấu')}</h2><p>${escape(current?.text || 'Tiếp tục leo bảng Elo, hoặc luyện thêm bằng các boss cao hơn.')}</p><button class="button primary" data-tab="${current?.tab || 'ranked'}">${escape(current?.cta || 'Đấu xếp hạng')} ↗</button></div><ol class="progress-dots" aria-label="Tiến độ">${steps.map(step => `<li class="${step.done ? 'done' : step === current ? 'now' : ''}"><span aria-hidden="true">${step.done ? '✓' : ''}</span>${escape(step.label)}</li>`).join('')}</ol>`;
-  const mine = ranked?.mine;
+  const openCount = openTournaments().length;
   const tiles = [
-    ['team', 'ĐỘI', team ? team.name : 'Chưa có đội', team ? `${team.members.length} thành viên` : 'Lập đội để bắt đầu'],
-    ['lab', 'BOT', latest ? latest.name : 'Chưa có bot', latest ? (labels[latest.status] || latest.status) : 'Nộp bot đầu tiên'],
-    ['campaign', 'CHIẾN DỊCH', `Ải ${cleared}/${levels}`, `${campaign?.mine?.stars || 0} sao`],
-    ['ranked', 'ELO', mine ? `${mine.rating} · ${mine.tier}` : '1000 · Bạc', mine?.position ? `Hạng #${mine.position}` : 'Chưa xếp hạng'],
+    ['lab', 'TỰ LUYỆN', 'Xưởng bot', 'Viết bot Python, nộp để kiểm tra và đấu tập giữa các phiên bản trên mọi bản đồ.', latest ? `${latest.name} · ${labels[latest.status] || latest.status}` : 'Chưa có bot, nộp bot đầu tiên'],
+    ['campaign', 'MỘT MÌNH', 'Chiến dịch boss', 'Hạ 5 boss mạnh dần để mở huy hiệu. Hợp để thử bot ngay sau khi nộp.', `Ải ${cleared}/${levels} · ${campaign?.mine?.stars || 0} sao`],
+    ['ranked', 'MÁY TỰ GHÉP', 'Đấu xếp hạng', 'Đưa bot vào hàng chờ, máy ghép đối thủ gần Elo và tự chơi, bạn chỉ cần xem lại.', ranked?.mine ? `${ranked.mine.rating} Elo · ${ranked.mine.tier}${ranked.mine.position ? ` · hạng #${ranked.mine.position}` : ''}` : '1000 Elo · chưa xếp hạng'],
+    ['competition', 'DO BAN TỔ CHỨC', 'Giải đấu', 'Đăng ký bot trước hạn, chờ vòng mở rồi để máy chạy toàn bộ các ván của giải.', openCount ? `${openCount} giải đang nhận đăng ký` : entered ? 'Đội đã đăng ký giải' : 'Chưa có giải đang mở'],
   ];
-  $('#dashboard-cards').innerHTML = tiles.map(([tabName, label, value, hint]) => `<button class="tile" data-tab="${tabName}"><span class="eyebrow">${label}</span><strong>${escape(value)}</strong><small>${escape(hint)}</small></button>`).join('');
+  $('#dashboard-cards').innerHTML = tiles.map(([tabName, label, title, desc, hint]) => `<button class="tile" data-tab="${tabName}"><span class="eyebrow">${label}</span><strong>${title}</strong><span class="desc">${desc}</span><small>${escape(hint)}</small></button>`).join('');
   const open = openTournaments()[0];
   const registered = open && (team?.entries || []).some(e => e.tournament_id === open.id);
   $('#open-tournament').innerHTML = open ? `<div class="banner"><div><p class="eyebrow">GIẢI ĐANG MỞ · ${escape(countdown(open.deadline).toUpperCase())}</p><h3>${escape(open.name)}</h3><p class="caption">${registered ? 'Đội đã đăng ký. Có thể đổi bot trước hạn.' : `Hạn chọn bot: ${formatTime(open.deadline)}`}</p></div><button class="button ${registered ? '' : 'primary'}" data-tournament="${open.id}">${registered ? 'Xem giải' : 'Đăng ký ngay'} ↗</button></div>` : '';

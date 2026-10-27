@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#eeeae0">
   <base href="/arena/">
   <title>Điều hành — OTTv2 Arena</title>
-  <link rel="stylesheet" href="./arena.css">
+  <script src="./theme.js"></script><link rel="stylesheet" href="./arena.css">
   <script type="module" src="./admin.js"></script>
 </head>
 <body class="admin guest">
@@ -18,13 +18,13 @@
     <div id="console" hidden>
       <div class="service-strip"><span id="service-status" role="status">Đang tải…</span><span id="service-detail"></span></div>
       <div class="section-nav" role="tablist" aria-label="Khu vực điều hành">
-        <button role="tab" aria-selected="true" data-tab="dashboard">01 <span>Tổng quan</span></button>
-        <button role="tab" aria-selected="false" data-tab="events">02 <span>Giải đấu</span></button>
-        <button role="tab" aria-selected="false" data-tab="people">03 <span>Đội & tài khoản</span></button>
-        <button role="tab" aria-selected="false" data-tab="bots">04 <span>Bài nộp</span></button>
-        <button role="tab" aria-selected="false" data-tab="matches">05 <span>Trận đấu</span></button>
-        <button role="tab" aria-selected="false" data-tab="queue">06 <span>Hàng đợi</span></button>
-        <button role="tab" aria-selected="false" data-tab="log">07 <span>Nhật ký</span></button>
+        <button role="tab" aria-selected="true" data-tab="dashboard"><span>Tổng quan</span></button>
+        <button role="tab" aria-selected="false" data-tab="events"><span>Giải đấu</span></button>
+        <button role="tab" aria-selected="false" data-tab="people"><span>Đội & tài khoản</span></button>
+        <button role="tab" aria-selected="false" data-tab="bots"><span>Bài nộp</span></button>
+        <button role="tab" aria-selected="false" data-tab="matches"><span>Trận đấu</span></button>
+        <button role="tab" aria-selected="false" data-tab="queue"><span>Hàng đợi</span></button>
+        <button role="tab" aria-selected="false" data-tab="log"><span>Nhật ký</span></button>
       </div>
       <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 

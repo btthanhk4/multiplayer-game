@@ -19,10 +19,10 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from .store import Store, Problem, ROOT, RULES_HASH, LIMITS, TEAM_SIZE, SYSTEM_TEAM, MAPS, GEOMETRY_MAPS, uid, now
 
 PUBLIC_FILES = {'rules.js', 'arena/arena.js', 'arena/admin.js', 'arena/common.js', 'arena/watch.js', 'arena/arena.css',
-                'arena/guide.html'}
+                'arena/theme.js', 'arena/guide.html'}
 # Every script and stylesheet is requested as <name>?v=<hash of all of them>. A browser or CDN that still holds
 # an older copy can then never pair it with a newer page: a new deploy changes every URL.
-VERSIONED_FILES = ('arena/arena.js', 'arena/admin.js', 'arena/common.js', 'arena/watch.js', 'arena/arena.css', 'rules.js')
+VERSIONED_FILES = ('arena/arena.js', 'arena/admin.js', 'arena/common.js', 'arena/watch.js', 'arena/arena.css', 'arena/theme.js', 'rules.js')
 ASSET_VERSION = hashlib.sha256(b''.join((ROOT / name).read_bytes() for name in VERSIONED_FILES)).hexdigest()[:10]
 JS_IMPORT = re.compile(r"(from\s+')(\.{1,2}/[\w./-]+\.js)(')")
 HTML_ASSET = re.compile(r'((?:src|href)=")(\./[\w.-]+\.(?:js|css))(")')

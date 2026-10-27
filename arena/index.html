@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#eeeae0">
   <base href="/arena/">
   <title>Đấu trường Python — OTTv2</title>
-  <link rel="stylesheet" href="./arena.css">
+  <script src="./theme.js"></script><link rel="stylesheet" href="./arena.css">
   <script type="module" src="./arena.js"></script>
 </head>
 <body class="guest">
@@ -23,19 +23,20 @@
     <div id="password-banner" class="announcement warn" hidden>Tài khoản đang dùng mật khẩu tạm do ban tổ chức cấp. <button class="text-link" id="open-password">Đổi mật khẩu ngay ↗</button></div>
     <div class="service-strip"><span id="service-status" role="status">Đang kết nối đấu trường…</span><span id="service-detail">Đang tải hàng đợi</span></div>
     <div class="section-nav" role="tablist" aria-label="Khu vực đấu trường">
-      <button role="tab" aria-selected="true" data-tab="overview">01 <span>Bảng điều khiển</span></button>
-      <button role="tab" aria-selected="false" data-tab="team">02 <span>Đội của tôi</span></button>
-      <button role="tab" aria-selected="false" data-tab="lab">03 <span>Viết & kiểm tra</span></button>
-      <button role="tab" aria-selected="false" data-tab="campaign">04 <span>Chiến dịch boss</span></button>
-      <button role="tab" aria-selected="false" data-tab="ranked">05 <span>Đấu xếp hạng</span></button>
-      <button role="tab" aria-selected="false" data-tab="competition">06 <span>Giải đấu</span></button>
-      <button role="tab" aria-selected="false" data-tab="watch">07 <span>Khán đài</span></button>
+      <button role="tab" aria-selected="true" data-tab="overview"><span>Bảng điều khiển</span></button>
+      <button role="tab" aria-selected="false" data-tab="team"><span>Đội của tôi</span></button>
+      <button role="tab" aria-selected="false" data-tab="lab"><span>Viết & kiểm tra</span></button>
+      <button role="tab" aria-selected="false" data-tab="campaign"><span>Chiến dịch boss</span></button>
+      <button role="tab" aria-selected="false" data-tab="ranked"><span>Đấu xếp hạng</span></button>
+      <button role="tab" aria-selected="false" data-tab="competition"><span>Giải đấu</span></button>
+      <button role="tab" aria-selected="false" data-tab="watch"><span>Khán đài</span></button>
     </div>
     <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
     <div id="live-banner" class="live-banner" role="status" hidden></div>
 
     <section id="overview" class="view" role="tabpanel">
-      <div id="next-step" class="next-step"></div>
+      <div class="hero"><div id="next-step" class="next-step"></div><div class="hero-art" aria-hidden="true"><div class="hero-board"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span class="hero-stone s1">Đ</span><span class="hero-stone s2">L</span><span class="hero-stone s3">K</span></div></div>
+      <div class="modes-head"><p class="eyebrow">CHỌN CHẾ ĐỘ</p><h2>Bạn muốn đấu theo cách nào?</h2></div>
       <div id="dashboard-cards" class="tiles"></div>
       <div id="open-tournament"></div>
       <div class="section-heading minor"><div><p class="eyebrow">DIỄN BIẾN</p><h2>Đang diễn ra trong đấu trường</h2></div><span id="arena-stats-line" class="caption"></span></div>

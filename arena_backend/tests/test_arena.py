@@ -1488,6 +1488,17 @@ class VersionedAssets(Base):
             self.assertTrue(all(i.endswith(f'?v={ASSET_VERSION}') for i in imports), (name, imports))
         self.assertIn(f"../rules.js?v={ASSET_VERSION}", self.client.get('/arena/common.js').get_data(as_text=True))
 
+    def test_every_page_loads_the_theme_script_from_its_own_origin(self):
+        # CSP forbids inline script, so the no-flash theme setter must be an external classic script.
+        from arena_backend.app import ASSET_VERSION
+        for path in ('/', '/arena/admin', '/arena/guide.html'):
+            html = self.client.get(path).get_data(as_text=True)
+            self.assertIn(f'<script src="./theme.js?v={ASSET_VERSION}"></script>', html, path)
+        script = self.client.get(f'/arena/theme.js?v={ASSET_VERSION}')
+        self.assertEqual(script.status_code, 200)
+        self.assertIn('text/javascript', script.headers['Content-Type'])
+        self.assertIn('data-theme', script.get_data(as_text=True))
+
     def test_only_exact_versioned_urls_are_cached_for_long(self):
         from arena_backend.app import ASSET_VERSION
         stamped = self.client.get(f'/arena/admin.js?v={ASSET_VERSION}')
