@@ -54,6 +54,7 @@ RATES = {
     'ranked_team': (env_rate('RANKED_TEAM', 30), 3600),
     'campaign_team': (env_rate('CAMPAIGN_TEAM', 30), 3600),
     'team_user': (env_rate('TEAM_USER', 20), 3600),
+    'tournament_code': (env_rate('TOURNAMENT_CODE', 20), 900),
 }
 
 
@@ -501,7 +502,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
     def tournament_list():
         with store.connect() as db:
             rows = db.execute('SELECT t.id,t.name,t.format,t.rounds,t.round,t.deadline,t.status,t.created,'
-                              't.auto_advance,t.description,t.seed_from,t.map,t.final_map,'
+                              't.auto_advance,t.description,t.seed_from,t.map,t.final_map,(t.join_code IS NOT NULL) locked,'
                               '(SELECT COUNT(*) FROM entries e WHERE e.tournament_id=t.id) entrants '
                               'FROM tournaments t ORDER BY t.created DESC LIMIT 100').fetchall()
         return [dict(r) for r in rows]
@@ -518,6 +519,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
             standings = store.standings(db, tid)
             unfinished = store.unfinished(db, tid)
         data = dict(row)
+        data['locked'] = data.pop('join_code') is not None      # the cache is shared: the code itself never goes in
         data['config'] = json.loads(data['config'])
         return {'tournament': data, 'standings': standings, 'unfinished': unfinished}
 
@@ -525,6 +527,10 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
     def tournament(tid):
         data = dict(cache.get(f'tournament:{tid}', 3, lambda: tournament_data(tid)))
         team = g.user['team_id'] if g.user else None
+        if g.user and g.user['role'] == 'admin':     # organisers read the code from the same call
+            with store.connect() as db:
+                code = db.execute('SELECT join_code FROM tournaments WHERE id=?', (tid,)).fetchone()
+            data['tournament'] = {**data['tournament'], 'join_code': code[0] if code else None}
         everyone = data['standings']
         data['mine'] = next((s for s in everyone if s['team_id'] == team), None)
         data['count'] = len(everyone)
@@ -574,7 +580,11 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
     @app.post('/api/tournaments/<tid>/join')
     def join(tid):
         user, team = team_required()
-        store.join(team, tid, text(body(), 'submission_id', 24, 24), user)
+        data = body()
+        code = str(data.get('code') or '')[:20]
+        if code:
+            rate('tournament_code', user)       # a wrong code can be guessed only so many times
+        store.join(team, tid, text(data, 'submission_id', 24, 24), user, code=code)
         return jsonify(ok=True)
 
     @app.post('/api/tournaments/<tid>/withdraw')
@@ -723,7 +733,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
             actor, text(data, 'name', 3, 80), data.get('format'), data.get('rounds', 5), data.get('deadline'),
             bool(data.get('auto_advance')), str(data.get('description') or '')[:500],
             data.get('seed_from') or None, data.get('seed_count'), data.get('map') or 'standard',
-            data.get('final_map') or None)
+            data.get('final_map') or None, bool(data.get('private')) and not data.get('seed_from'))
         return jsonify(id=tid), 201
 
     @app.post('/api/admin/tournaments/<tid>/update')
@@ -750,6 +760,14 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
     @app.post('/api/admin/tournaments/<tid>/freeze')
     def freeze(tid):
         return jsonify(store.freeze(tid, auth(True), bool(body().get('force'))))
+
+    @app.post('/api/admin/tournaments/<tid>/start')
+    def start_tournament(tid):
+        return jsonify(store.start_tournament(tid, auth(True), bool(body().get('force'))))
+
+    @app.post('/api/admin/tournaments/<tid>/code')
+    def tournament_code(tid):
+        return jsonify(code=store.set_join_code(tid, auth(True), body().get('action')))
 
     @app.post('/api/admin/tournaments/<tid>/next')
     def next_round(tid):

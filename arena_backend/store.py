@@ -90,7 +90,7 @@ BADGES = [
 # Columns added after a table first shipped; CREATE TABLE IF NOT EXISTS cannot add them.
 ADDED_COLUMNS = {'matches': ['plies INTEGER', "map TEXT NOT NULL DEFAULT 'standard'"],
                  'ranked_series': ['a_rating INTEGER', 'b_rating INTEGER'],
-                 'tournaments': ["map TEXT NOT NULL DEFAULT 'standard'", 'final_map TEXT']}
+                 'tournaments': ["map TEXT NOT NULL DEFAULT 'standard'", 'final_map TEXT', 'join_code TEXT']}
 
 SCHEMA = [
     '''CREATE TABLE IF NOT EXISTS teams (
@@ -367,6 +367,18 @@ def pieces_left(state):
             if piece and piece['owner']:
                 counts[piece['owner']] += 1
     return counts
+
+
+JOIN_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'      # no 0/O, 1/I/L look-alikes
+
+
+def join_code():
+    return ''.join(secrets.choice(JOIN_ALPHABET) for _ in range(6))
+
+
+def normalize_join_code(value):
+    """Teams type codes from a screen or a chat: ignore case, spaces and dashes."""
+    return ''.join(str(value or '').upper().replace('-', '').split())[:12]
 
 
 class Store:
@@ -1287,7 +1299,7 @@ class Store:
     # ---- tournaments ----------------------------------------------------
 
     def create_tournament(self, actor, name, fmt, rounds=5, deadline=None, auto_advance=False,
-                          description='', seed_from=None, seed_count=None, map_choice='standard', final_map=None):
+                          description='', seed_from=None, seed_count=None, map_choice='standard', final_map=None, private=False):
         if fmt not in ('swiss', 'round_robin', 'knockout'):
             raise Problem('Thể thức không hợp lệ.')
         map_choice = map_setting(map_choice)
@@ -1317,10 +1329,11 @@ class Store:
                 if type(deadline) not in (float, int) or not now()+60 <= deadline <= now()+86400*365:
                     raise Problem('Hạn đăng ký phải sau ít nhất một phút và trong một năm tới.')
                 db.execute('INSERT INTO tournaments(id,name,format,rounds,deadline,rules_hash,config,created,'
-                           'auto_advance,description,map,final_map) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+                           'auto_advance,description,map,final_map,join_code) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
                            (tid, name, fmt, rounds, deadline, RULES_HASH, json.dumps(LIMITS), now(),
-                            int(bool(auto_advance)), description, map_choice, final_map))
-                self.audit(db, actor, 'tournament.created', {'id': tid})
+                            int(bool(auto_advance)), description, map_choice, final_map,
+                            join_code() if private else None))
+                self.audit(db, actor, 'tournament.created', {'id': tid, 'private': bool(private)})
         if seed_from:
             self.freeze(tid, actor)
         return tid
@@ -1380,6 +1393,22 @@ class Store:
             self.audit(db, actor, 'tournament.cancelled', {'id': tid, 'games_cancelled': len(games)})
             return {'games_cancelled': len(games)}
 
+    def set_join_code(self, tid, actor, action):
+        """'new' makes (or replaces) the code teams must type to enter; 'off' opens the tournament to everyone.
+        Teams already entered stay entered: the code only guards new entries."""
+        if action not in ('new', 'off'):
+            raise Problem('Thao tác không hợp lệ.')
+        with self.connect(True) as db:
+            t = db.execute('SELECT * FROM tournaments WHERE id=?', (tid,)).fetchone()
+            if not t:
+                raise Problem('Không tìm thấy giải.', 404)
+            if t['status'] != 'open' or t['seed_from']:
+                raise Problem('Chỉ đổi mã khi giải còn nhận đăng ký.', 409)
+            code = join_code() if action == 'new' else None
+            db.execute('UPDATE tournaments SET join_code=? WHERE id=?', (code, tid))
+            self.audit(db, actor, 'tournament.code', {'id': tid, 'action': action})
+            return code
+
     def admin_add_entry(self, tid, reference, actor):
         """Enter a team by id, join code or exact name using its newest usable bot (also after the deadline)."""
         reference = str(reference or '').strip()
@@ -1417,10 +1446,10 @@ class Store:
             with self.connect(True) as db:
                 self.maybe_advance(db, tid)
 
-    def join(self, team, tid, sid, actor=None, db=None, admin=False):
+    def join(self, team, tid, sid, actor=None, db=None, admin=False, code=None):
         if db is None:
             with self.connect(True) as db:
-                return self.join(team, tid, sid, actor, db, admin)
+                return self.join(team, tid, sid, actor, db, admin, code)
         t = db.execute('SELECT * FROM tournaments WHERE id=?', (tid,)).fetchone()
         s = db.execute('SELECT * FROM submissions WHERE id=? AND team_id=?', (sid, team)).fetchone()
         # Organisers may still add entries after the deadline until the list is frozen.
@@ -1432,6 +1461,11 @@ class Store:
             raise Problem('Đội đã bị truất quyền thi đấu.', 403)
         count = db.execute('SELECT COUNT(*) FROM entries WHERE tournament_id=?', (tid,)).fetchone()[0]
         exists = db.execute('SELECT 1 FROM entries WHERE tournament_id=? AND team_id=?', (tid, team)).fetchone()
+        if t['join_code'] and not admin and not exists:     # a team already inside may still switch bots without the code
+            if not code:
+                raise Problem('Giải này cần mã tham gia do ban tổ chức cung cấp.', 403)
+            if not secrets.compare_digest(normalize_join_code(code), t['join_code']):
+                raise Problem('Mã tham gia không đúng.', 403)
         if count >= CAPACITY[t['format']] and not exists:
             raise Problem('Giải đã đủ số lượng đăng ký.', 409)
         db.execute('INSERT INTO entries(tournament_id,team_id,submission_id) VALUES(?,?,?) '
@@ -1452,40 +1486,65 @@ class Store:
     def freeze(self, tid, actor, force=False):
         with self.connect(True) as db:
             t = db.execute('SELECT * FROM tournaments WHERE id=?', (tid,)).fetchone()
-            if not t or t['status'] != 'open':
-                raise Problem('Giải không ở trạng thái nhận bài.', 409)
-            if now() < t['deadline']:
-                raise Problem('Chưa tới hạn đóng bài; không khóa sớm so với lịch công bố.', 409)
-            entries = db.execute('SELECT e.*,s.status bot_status,s.hash,tm.status team_status FROM entries e '
-                                 'JOIN submissions s ON s.id=e.submission_id JOIN teams tm ON tm.id=e.team_id '
-                                 'WHERE e.tournament_id=?', (tid,)).fetchall()
-            pending = [e for e in entries if e['bot_status'] in ('queued', 'running')]
-            if pending and not force:
-                raise Problem(f'Còn {len(pending)} bot đăng ký đang chờ kiểm tra. Đợi runner xử lý xong, '
-                              'hoặc khóa bắt buộc để loại các bot chưa có kết quả.', 409)
-            accepted = [e for e in entries if e['bot_status'] == 'valid' and e['team_status'] == 'active']
-            if len(accepted) < 2:
-                raise Problem('Cần ít nhất hai bot đã vượt kiểm tra.')
-            ratings = {r['team_id']: r['rating'] for r in db.execute('SELECT team_id,rating FROM ratings')}
+            return self._freeze(db, t, actor, force)
 
-            def order(entry):
-                tiebreak = hashlib.sha256((tid + entry['team_id']).encode()).hexdigest()
-                return (entry['seed'] or math.inf, -ratings.get(entry['team_id'], 1000), tiebreak)
-            accepted.sort(key=order)
-            for seed, e in enumerate(accepted, 1):
-                db.execute("UPDATE entries SET frozen_hash=?,seed=?,status='active' WHERE tournament_id=? AND team_id=?",
-                           (e['hash'], seed, tid, e['team_id']))
-            chosen = {e['team_id'] for e in accepted}
-            excluded = [e for e in entries if e['team_id'] not in chosen]
-            for e in excluded:
-                db.execute("UPDATE entries SET status='invalid',seed=NULL WHERE tournament_id=? AND team_id=?",
-                           (tid, e['team_id']))
-            n = len(accepted)
-            rounds = {'swiss': min(t['rounds'], n - 1 + n % 2), 'round_robin': n - 1 + n % 2,
-                      'knockout': max(1, math.ceil(math.log2(n)))}[t['format']]
-            db.execute("UPDATE tournaments SET status='frozen',rounds=? WHERE id=?", (rounds, tid))
-            self.audit(db, actor, 'tournament.frozen', {'id': tid, 'count': n, 'excluded': len(excluded)})
-            return {'accepted': n, 'excluded': len(excluded)}
+    def start_tournament(self, tid, actor, force=False):
+        """Close registration now (even before the announced deadline), lock the field and open round 1 in one
+        transaction, so a refusal at any step leaves the tournament exactly as it was."""
+        with self.connect(True) as db:
+            t = db.execute('SELECT * FROM tournaments WHERE id=?', (tid,)).fetchone()
+            if not t:
+                raise Problem('Không tìm thấy giải.', 404)
+            if t['status'] in ('completed', 'cancelled'):
+                raise Problem('Giải đã kết thúc hoặc đã hủy.', 409)
+            if t['status'] == 'running' or t['round'] > 0:
+                raise Problem('Giải đã bắt đầu rồi. Dùng “Mở vòng” để sang vòng tiếp theo.', 409)
+            early = t['status'] == 'open' and now() < t['deadline']
+            locked = {}
+            if t['status'] == 'open':
+                locked = self._freeze(db, t, actor, force, early=True)
+                t = db.execute('SELECT * FROM tournaments WHERE id=?', (tid,)).fetchone()
+            opened = self._next_round(db, t, actor)
+            self.audit(db, actor, 'tournament.started', {'id': tid, 'early': early, 'force': bool(force), **locked})
+            return {**locked, **opened, 'early': early}
+
+    def _freeze(self, db, t, actor, force=False, early=False):
+        tid = t['id'] if t else None
+        if not t or t['status'] != 'open':
+            raise Problem('Giải không ở trạng thái nhận bài.', 409)
+        if now() < t['deadline'] and not early:
+            raise Problem('Chưa tới hạn đóng bài; không khóa sớm so với lịch công bố.', 409)
+        entries = db.execute('SELECT e.*,s.status bot_status,s.hash,tm.status team_status FROM entries e '
+                             'JOIN submissions s ON s.id=e.submission_id JOIN teams tm ON tm.id=e.team_id '
+                             'WHERE e.tournament_id=?', (tid,)).fetchall()
+        pending = [e for e in entries if e['bot_status'] in ('queued', 'running')]
+        if pending and not force:
+            raise Problem(f'Còn {len(pending)} bot đăng ký đang chờ kiểm tra. Đợi runner xử lý xong, '
+                          'hoặc khóa bắt buộc để loại các bot chưa có kết quả.', 409)
+        accepted = [e for e in entries if e['bot_status'] == 'valid' and e['team_status'] == 'active']
+        if len(accepted) < 2:
+            raise Problem('Cần ít nhất hai bot đã vượt kiểm tra.')
+        ratings = {r['team_id']: r['rating'] for r in db.execute('SELECT team_id,rating FROM ratings')}
+
+        def order(entry):
+            tiebreak = hashlib.sha256((tid + entry['team_id']).encode()).hexdigest()
+            return (entry['seed'] or math.inf, -ratings.get(entry['team_id'], 1000), tiebreak)
+        accepted.sort(key=order)
+        for seed, e in enumerate(accepted, 1):
+            db.execute("UPDATE entries SET frozen_hash=?,seed=?,status='active' WHERE tournament_id=? AND team_id=?",
+                       (e['hash'], seed, tid, e['team_id']))
+        chosen = {e['team_id'] for e in accepted}
+        excluded = [e for e in entries if e['team_id'] not in chosen]
+        for e in excluded:
+            db.execute("UPDATE entries SET status='invalid',seed=NULL WHERE tournament_id=? AND team_id=?",
+                       (tid, e['team_id']))
+        n = len(accepted)
+        rounds = {'swiss': min(t['rounds'], n - 1 + n % 2), 'round_robin': n - 1 + n % 2,
+                  'knockout': max(1, math.ceil(math.log2(n)))}[t['format']]
+        db.execute("UPDATE tournaments SET status='frozen',rounds=?,deadline=MIN(deadline,?) WHERE id=?",
+                   (rounds, now(), tid))
+        self.audit(db, actor, 'tournament.frozen', {'id': tid, 'count': n, 'excluded': len(excluded), 'early': early})
+        return {'accepted': n, 'excluded': len(excluded)}
 
     @staticmethod
     def tournament_games(db, tid):

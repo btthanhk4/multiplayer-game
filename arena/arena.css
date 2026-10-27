@@ -521,3 +521,13 @@ input::placeholder,textarea::placeholder{color:var(--faint)}
 @media(max-width:700px){.masthead{padding-top:14px;padding-bottom:12px}.section-nav{top:62px;display:flex;overflow-x:auto;gap:20px}.section-nav button{white-space:nowrap}.tile{min-height:0}.hero .next-main h2{font-size:34px;letter-spacing:-1px}.theme-toggle .label{display:none}.theme-toggle{padding:8px 11px}}
 .masthead{gap:12px}.masthead nav{min-width:0}.masthead .small-button{min-width:0}
 @media(max-width:700px){.masthead .small-button{max-width:124px}.masthead nav{gap:8px}.brand{font-size:28px}}
+/* start button, join code and the team's waiting room */
+.start-box{display:grid;gap:8px;margin:18px 0;padding:18px;border:1px dashed var(--line2);border-radius:4px;background:var(--soft)}
+.start-box .button.big{width:100%;min-height:54px;font-size:16px}
+.start-box small{color:var(--muted);line-height:1.6}
+.manual-steps{margin:10px 0 14px}.manual-steps summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--green);padding:6px 0}
+#code-box strong{letter-spacing:5px}
+.waiting-room{margin:18px 0;padding:22px 24px;border:1px solid var(--line2);border-left:4px solid var(--gold);border-radius:4px;background:var(--paper)}
+.waiting-room h3{font:400 24px/1.35 'Literata',Georgia,serif;margin:2px 0 8px}
+.waiting-room p{margin:0 0 6px;color:var(--muted)}
+#join-code{text-transform:uppercase;letter-spacing:3px;font-family:Consolas,monospace}

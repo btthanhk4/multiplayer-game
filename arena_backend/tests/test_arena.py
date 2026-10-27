@@ -613,6 +613,212 @@ class Tournaments(Base):
         self.assertEqual(self.client.get('/api/admin/overview').json['teams'], 1)
 
 
+class StartAndCodes(Base):
+    """The organiser's one-click start, and join codes for private tournaments."""
+
+    def state(self, tid):
+        with self.store.connect() as db:
+            t = db.execute('SELECT * FROM tournaments WHERE id=?', (tid,)).fetchone()
+            pairs = db.execute('SELECT COUNT(*) FROM pairings WHERE tournament_id=?', (tid,)).fetchone()[0]
+            seeded = db.execute('SELECT COUNT(*) FROM entries WHERE tournament_id=? AND seed IS NOT NULL', (tid,)).fetchone()[0]
+            games = db.execute('SELECT COUNT(*) FROM matches m JOIN pairings p ON p.id=m.pairing_id WHERE p.tournament_id=?',
+                               (tid,)).fetchone()[0]
+        return t, pairs, seeded, games
+
+    def test_start_before_the_deadline_closes_registration_locks_the_field_and_opens_round_one(self):
+        tid = self.tournament('swiss', rounds=3)
+        teams = self.entrants(tid, 4)
+        before = now()
+        result = self.store.start_tournament(tid, 'admin')
+        t, pairs, seeded, games = self.state(tid)
+        self.assertEqual((result['round'], result['pairs'], result['accepted'], result['early']), (1, 2, 4, True))
+        self.assertEqual((t['status'], t['round'], pairs, seeded, games), ('running', 1, 2, 4, 4))
+        self.assertLessEqual(t['deadline'], now(), 'registration closed at the moment of the start')
+        self.assertGreaterEqual(t['deadline'], before - 1)
+        late, _ = self.team('late')
+        with self.assertRaises(Problem):
+            self.store.join(late, tid, self.valid(late))
+        with self.assertRaises(Problem):
+            self.store.withdraw(teams[0], tid)
+        with self.store.connect() as db:
+            actions = [r['action'] for r in db.execute("SELECT action FROM audit WHERE action LIKE 'tournament.%'")]
+        self.assertIn('tournament.started', actions)
+
+    def test_start_works_for_every_format_and_for_a_field_that_was_already_locked(self):
+        for fmt, count, pairs in (('knockout', 4, 2), ('round_robin', 4, 2), ('swiss', 5, 3)):
+            tid = self.tournament(fmt, rounds=2)
+            self.entrants(tid, count, f'{fmt}-')
+            self.assertEqual(self.store.start_tournament(tid, 'admin')['pairs'], pairs, fmt)
+        tid = self.tournament('swiss', rounds=2)
+        self.entrants(tid, 4, 'locked-')
+        self.close_deadline(tid)
+        self.store.freeze(tid, 'admin')
+        result = self.store.start_tournament(tid, 'admin')
+        self.assertEqual((result['round'], result['early']), (1, False))
+
+    def test_start_needs_two_valid_bots_and_changes_nothing_when_refused(self):
+        tid = self.tournament()
+        self.entrants(tid, 1)
+        with self.assertRaises(Problem):
+            self.store.start_tournament(tid, 'admin')
+        t, pairs, seeded, _ = self.state(tid)
+        self.assertEqual((t['status'], pairs, seeded), ('open', 0, 0))
+        self.assertGreater(t['deadline'], now() + 400, 'a refused start must not move the deadline')
+
+    def test_a_bot_still_being_checked_blocks_the_start_unless_forced_and_nothing_half_happens(self):
+        tid = self.tournament()
+        self.entrants(tid, 3)
+        waiting, _ = self.team('waiting')
+        self.store.join(waiting, tid, self.store.submit(waiting, None, 'slow', HUNTER, limit=False))
+        with self.assertRaises(Problem) as caught:
+            self.store.start_tournament(tid, 'admin')
+        self.assertEqual(caught.exception.status, 409)
+        t, pairs, seeded, _ = self.state(tid)
+        self.assertEqual((t['status'], pairs, seeded), ('open', 0, 0))
+        result = self.store.start_tournament(tid, 'admin', force=True)
+        self.assertEqual((result['accepted'], result['excluded'], result['round']), (3, 1, 1))
+
+    def test_a_round_that_cannot_open_rolls_the_whole_start_back(self):
+        tid = self.tournament()
+        self.entrants(tid, 4)
+        with self.store.connect(True) as db:
+            db.execute("UPDATE tournaments SET rules_hash='stale' WHERE id=?", (tid,))
+        with self.assertRaises(Problem):
+            self.store.start_tournament(tid, 'admin')
+        t, pairs, seeded, _ = self.state(tid)
+        self.assertEqual((t['status'], pairs, seeded), ('open', 0, 0), 'still open, still editable, nobody seeded')
+
+    def test_start_happens_once_even_when_two_organisers_click_together(self):
+        import threading
+        tid = self.tournament()
+        self.entrants(tid, 6)
+        outcomes = []
+
+        def click():
+            try:
+                self.store.start_tournament(tid, 'admin')
+                outcomes.append('ok')
+            except Problem as error:
+                outcomes.append(error.status)
+        threads = [threading.Thread(target=click) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(sorted(map(str, outcomes)), ['409', '409', '409', 'ok'])
+        self.assertEqual(self.state(tid)[1:], (3, 6, 6), 'one round, three pairs, six games')
+
+    def test_start_is_refused_once_the_tournament_runs_or_has_ended(self):
+        tid = self.tournament()
+        self.entrants(tid, 2)
+        self.store.start_tournament(tid, 'admin')
+        with self.assertRaises(Problem):
+            self.store.start_tournament(tid, 'admin')
+        done = self.tournament()
+        self.entrants(done, 2, 'done-')
+        self.store.cancel_tournament(done, 'admin')
+        with self.assertRaises(Problem):
+            self.store.start_tournament(done, 'admin')
+        with self.assertRaises(Problem) as missing:
+            self.store.start_tournament('nope', 'admin')
+        self.assertEqual(missing.exception.status, 404)
+
+    def test_private_tournament_asks_for_its_code_and_ignores_case_spaces_and_dashes(self):
+        tid = self.store.create_tournament('admin', 'Giải riêng', 'swiss', 3, now() + 300, private=True)
+        code = self.state(tid)[0]['join_code']
+        self.assertRegex(code, r'^[A-HJKMNP-Z2-9]{6}$')
+        team, _ = self.team('guest')
+        sid = self.valid(team)
+        for wrong, status in ((None, 403), ('', 403), ('AAAAAA', 403), (code[:5], 403)):
+            with self.assertRaises(Problem) as caught:
+                self.store.join(team, tid, sid, code=wrong)
+            self.assertEqual(caught.exception.status, status, wrong)
+        self.assertEqual(self.state(tid)[0]['status'], 'open')
+        self.store.join(team, tid, sid, code=f' {code[:3].lower()}-{code[3:].lower()} ')
+        other = self.valid(team, name='bot 2')
+        self.store.join(team, tid, other)        # already inside: switching bots needs no code
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT submission_id FROM entries WHERE team_id=?', (team,)).fetchone()[0], other)
+
+    def test_organiser_can_add_a_team_to_a_private_tournament_and_replace_or_remove_the_code(self):
+        tid = self.store.create_tournament('admin', 'Giải riêng', 'swiss', 3, now() + 300, private=True)
+        team, _ = self.team('admin-added')
+        self.valid(team)
+        self.store.admin_add_entry(tid, team, 'admin')
+        old = self.state(tid)[0]['join_code']
+        new = self.store.set_join_code(tid, 'admin', 'new')
+        self.assertNotEqual(old, new)
+        late, _ = self.team('late')
+        sid = self.valid(late)
+        with self.assertRaises(Problem):
+            self.store.join(late, tid, sid, code=old)
+        self.assertEqual(self.store.set_join_code(tid, 'admin', 'off'), None)
+        self.store.join(late, tid, sid)          # open to everyone again
+        with self.assertRaises(Problem):
+            self.store.set_join_code(tid, 'admin', 'sideways')
+        self.store.start_tournament(tid, 'admin')
+        with self.assertRaises(Problem) as caught:
+            self.store.set_join_code(tid, 'admin', 'new')
+        self.assertEqual(caught.exception.status, 409)
+
+    def test_open_and_seeded_tournaments_have_no_code(self):
+        plain = self.tournament()
+        self.assertIsNone(self.state(plain)[0]['join_code'])
+        source = self.tournament()
+        self.entrants(source, 4, 'src-')
+        self.store.start_tournament(source, 'admin')
+        self.finish_round(source, lambda m: 'p1')
+        self.store.next_round(source, 'admin')      # one more round, then the field is complete
+        with self.store.connect(True) as db:
+            db.execute("UPDATE tournaments SET status='completed' WHERE id=?", (source,))
+        seeded = self.store.create_tournament('admin', 'Top 2', 'knockout', seed_from=source, seed_count=2, private=True)
+        self.assertIsNone(self.state(seeded)[0]['join_code'])
+
+    def test_codes_are_never_sent_to_players_and_wrong_guesses_are_rate_limited(self):
+        admin_client, player_client = self.app.test_client(), self.app.test_client()
+        admin = self.register('organiser', admin_client)
+        admin_csrf = self.csrf
+        with self.store.connect(True) as db:
+            db.execute("UPDATE users SET role='admin' WHERE id=?", (admin,))
+        created = self.post('/admin/tournaments', {'name': 'Giải riêng', 'format': 'swiss', 'rounds': 3,
+                                                   'deadline': now() + 600, 'private': True}, admin_client, admin_csrf)
+        self.assertEqual(created.status_code, 201, created.json)
+        tid = created.json['id']
+        seen = admin_client.get(f'/api/tournaments/{tid}').json['tournament']
+        code = seen['join_code']
+        self.assertEqual(len(code), 6)
+        self.register('player', player_client)
+        self.post('/team', {'name': 'Khách'}, player_client)
+        sid = self.post('/submissions', {'name': 'mẫu', 'source': HUNTER}, player_client).json['id']
+        listing = player_client.get('/api/tournaments').get_data(as_text=True)
+        detail = player_client.get(f'/api/tournaments/{tid}').get_data(as_text=True)
+        self.assertNotIn(code, listing + detail)
+        self.assertNotIn('join_code', listing + detail)
+        self.assertTrue(player_client.get('/api/tournaments').json['items'][0]['locked'])
+        self.assertTrue(player_client.get(f'/api/tournaments/{tid}').json['tournament']['locked'])
+        self.assertEqual(self.post(f'/tournaments/{tid}/join', {'submission_id': sid}, player_client).status_code, 403)
+        for _ in range(25):
+            status = self.post(f'/tournaments/{tid}/join', {'submission_id': sid, 'code': 'ZZZZZZ'}, player_client).status_code
+        self.assertEqual(status, 429)
+        self.assertEqual(self.post(f'/tournaments/{tid}/join', {'submission_id': sid, 'code': code}, player_client).status_code, 429,
+                         'while limited, even the right code waits')
+        # players cannot start a tournament or read or change a code
+        self.assertEqual(self.post(f'/admin/tournaments/{tid}/start', {}, player_client).status_code, 403)
+        self.assertEqual(self.post(f'/admin/tournaments/{tid}/code', {'action': 'new'}, player_client).status_code, 403)
+
+    def test_http_start_needs_an_organiser_and_returns_the_opened_round(self):
+        admin = self.register('organiser')
+        with self.store.connect(True) as db:
+            db.execute("UPDATE users SET role='admin' WHERE id=?", (admin,))
+        tid = self.tournament()
+        self.entrants(tid, 4)
+        result = self.post(f'/admin/tournaments/{tid}/start', {})
+        self.assertEqual(result.status_code, 200, result.json)
+        self.assertEqual((result.json['round'], result.json['pairs'], result.json['early']), (1, 2, True))
+        self.assertEqual(self.post(f'/admin/tournaments/{tid}/start', {}).status_code, 409)
+        self.assertEqual(self.client.get(f'/api/tournaments/{tid}').json['tournament']['status'], 'running')
+
+
 class Ranked(Base):
     def test_ranked_queue_swaps_colors_and_settles_once(self):
         (a, _), (b, _) = self.team('Alice'), self.team('Bob')

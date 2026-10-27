@@ -395,7 +395,7 @@ try {
   await admin.locator('#admin-tournament option').filter({hasText:'Giải đã đổi tên'}).waitFor({state:'attached'});
   admin.once('dialog',dialog=>dialog.accept());
   await admin.locator('#close-now').click();
-  await admin.locator('#freeze-button:not([disabled])').waitFor({timeout:15000});
+  await admin.locator('#freeze-button:not([disabled])').waitFor({state:'attached',timeout:15000});
   await admin.locator('#add-entry-details summary').click();
   await admin.locator('#add-entry [name=team]').fill('Không có đội này');
   await admin.locator('#add-entry button').click();
@@ -404,6 +404,30 @@ try {
   await admin.locator('#cancel-tournament').click();
   await admin.locator('#admin-tournament option').filter({hasText:'Đã hủy'}).waitFor({state:'attached'});
   await admin.locator('#cancel-tournament:disabled').waitFor({timeout:15000});
+  // A private tournament: the organiser sees the code, a team must type it, then waits in the waiting room.
+  await admin.locator('#tournament-form [name=name]').fill('Giải mã riêng');
+  await admin.locator('#tournament-form [name=private]').check();
+  await admin.locator('#tournament-form button.primary').click();
+  await admin.locator('#code-box:not([hidden]) #join-code-value').filter({hasText:/^[A-Z2-9]{6}$/}).waitFor();
+  const joinCode=(await admin.locator('#join-code-value').textContent()).trim();
+  assert.equal(await admin.locator('#start-button').isDisabled(),false);
+  admin.once('dialog',dialog=>dialog.accept());
+  await admin.locator('#start-button').click();
+  await admin.locator('#notice.error').filter({hasText:'ít nhất hai bot'}).waitFor();     // one team is not a tournament; nothing changes
+  await admin.locator('#tournament-state').filter({hasText:'Đang nhận đăng ký'}).waitFor();
+  await page.locator('[role=tab][data-tab=competition]').click();
+  await page.locator('#competition-select option').filter({hasText:'🔒 Giải mã riêng'}).waitFor({state:'attached',timeout:15000});
+  await page.locator('#competition-select').selectOption({label:'🔒 Giải mã riêng'});
+  await page.locator('#join-code-field:not([hidden])').waitFor();
+  await page.locator('#join-code').fill('ZZZZZZ');
+  await page.locator('#join-form button.primary').click();
+  await page.locator('#notice.error').filter({hasText:'Mã tham gia không đúng'}).waitFor();
+  assert.equal(await page.locator('#waiting-room').isHidden(),true);
+  await page.locator('#join-code').fill(joinCode.toLowerCase());
+  await page.locator('#join-form button.primary').click();
+  await page.locator('#waiting-room:not([hidden])').filter({hasText:'chờ ban tổ chức bắt đầu'}).waitFor();
+  await page.locator('#join-code-field').waitFor({state:'hidden'});
+  await page.screenshot({path:'artifacts/arena-waiting-room.png',fullPage:true});
   await admin.screenshot({path:'artifacts/admin-events.png',fullPage:true});
   await admin.locator('[role=tab][data-tab=people]').click();
   await admin.locator('#team-list .job').filter({hasText:'Kéo Thần Tốc'}).waitFor();

@@ -53,9 +53,9 @@
           <summary>Hướng dẫn tổ chức một giải đấu <span class="caption">(đọc 1 phút, có thể thu gọn)</span></summary>
           <ol class="howto-steps">
             <li><b>Tạo giải.</b> Điền form “Mở giải” bên dưới: tên, thể thức, bản đồ và hạn đăng ký. Có thể bấm một <i>mẫu có sẵn</i> để điền nhanh.</li>
-            <li><b>Thí sinh đăng ký.</b> Đến hạn, mỗi đội giữ một bot đã chọn. Bạn chỉ cần chờ; có thể đăng thông báo ở tab Cài đặt.</li>
-            <li><b>Khóa danh sách.</b> Sau hạn, bấm <i>Khóa danh sách</i>: bot hợp lệ được đóng băng và xếp hạt giống theo Elo. Bot lỗi bị loại, không ảnh hưởng đội khác.</li>
-            <li><b>Mở vòng.</b> Bấm <i>Mở vòng</i> để ghép cặp và xếp hai ván mỗi cặp vào hàng chấm. Bật <i>Tự mở vòng</i> thì hệ thống tự sang vòng sau khi mọi ván xong.</li>
+            <li><b>Thí sinh đăng ký.</b> Giải mở thì mỗi đội tự chọn một bot. Muốn giải riêng, bật “Giải riêng” khi tạo: hệ thống sinh mã 6 ký tự, bạn gửi mã cho các đội (hiện trong bảng điều khiển, có thể đổi hoặc bỏ). Đội đã đăng ký thấy “Phòng chờ”.</li>
+            <li><b>Bắt đầu giải.</b> Khi đủ đội (hoặc tới hạn), bấm <i>▶ Bắt đầu giải</i>: một lần bấm đóng đăng ký, khóa danh sách (bot hợp lệ được đóng băng, xếp hạt giống theo Elo, bot lỗi bị loại) và mở vòng 1. Có thể bấm sớm hơn hạn; nếu còn bot đang chờ kiểm tra, hệ thống hỏi trước khi loại chúng. Các bước thủ công vẫn nằm trong mục gập bên dưới.</li>
+            <li><b>Các vòng sau.</b> Bật <i>Tự mở vòng</i> thì hệ thống tự sang vòng kế khi mọi ván xong; nếu không, bấm <i>Mở vòng</i> trong các bước thủ công.</li>
             <li><b>Hoàn tất.</b> Sau vòng cuối, bấm <i>Hoàn tất</i> (hoặc để tự động). Tải bảng điểm CSV để công bố.</li>
           </ol>
           <p class="tip"><b>Gợi ý cho ~1.000 tân sinh viên:</b> (1) giải <i>Swiss 7 vòng</i> làm vòng loại, bản đồ Ngẫu nhiên; (2) khi xong, tạo giải <i>Loại trực tiếp</i> với nguồn “Top N của giải Swiss” (N = 16 hoặc 32), bản đồ chung kết Chuẩn. Trước mỗi vòng lớn nên tắt đấu xếp hạng và đấu tập ở tab Cài đặt để máy chấm dành cho giải.</p>
@@ -87,6 +87,7 @@
               <p class="help">Bản đồ đổi cách xếp quân ban đầu, và với vài bản đồ còn đổi bàn cờ sang 8×8 hoặc thêm vật cản; luật đi quân không đổi. Mọi bản đồ đối xứng nên công bằng. Vòng chung kết nên dùng <i>Chuẩn</i> cho công bằng, hoặc <i>Hỗn loạn</i> để kịch tính.</p>
               <p class="help warn" id="map-warning" hidden><b>Lưu ý:</b> bản đồ 8×8 hoặc có vật cản sẽ làm thua kỹ thuật các bot viết cứng bàn 9×9 hoặc ô đích [0, 8]. Hãy thông báo cho thí sinh đọc Sổ tay mục 2.6 và cho họ thử ở mục Đấu tập trước khi mở vòng dùng bản đồ này.</p>
             </fieldset>
+            <label class="switch" id="private-field"><input type="checkbox" name="private"> Giải riêng: thí sinh phải nhập mã tham gia (hệ thống tự tạo mã sau khi tạo giải)</label>
             <label class="switch"><input type="checkbox" name="auto_advance" checked> Tự mở vòng tiếp khi mọi ván xong</label>
             <button class="button primary">Tạo giải</button>
           </form>
@@ -95,12 +96,15 @@
               <ol class="stepper" id="stepper" aria-label="Tiến trình giải"><li data-step="1">Tạo giải</li><li data-step="2">Đăng ký</li><li data-step="3">Khóa danh sách</li><li data-step="4">Thi đấu</li><li data-step="5">Hoàn tất</li></ol>
               <div id="next-action" class="next-action" role="status"></div>
               <div id="tournament-state" class="caption"></div><div id="admin-rules"></div>
+              <div id="code-box" class="code-box" hidden><span>MÃ THAM GIA</span><strong id="join-code-value"></strong><button class="button" id="copy-join-code" type="button">Sao chép</button><button class="button" id="new-join-code" type="button">Đổi mã</button><button class="button" id="off-join-code" type="button">Mở cho mọi đội</button></div>
+              <div class="start-box"><button id="start-button" class="button primary big">▶ Bắt đầu giải</button><small id="start-hint">Đóng đăng ký, khóa danh sách và mở vòng 1 chỉ bằng một lần bấm.</small></div>
+              <details class="manual-steps"><summary>Từng bước thủ công (khóa danh sách, mở vòng)</summary>
               <div class="action-grid">
                 <div><button id="freeze-button" class="button">Khóa danh sách</button><small>Sau hạn đăng ký: đóng băng bot và xếp hạt giống.</small></div>
                 <div><button id="force-freeze" class="button">Khóa bắt buộc</button><small>Khóa ngay, loại các bot còn chờ kiểm tra.</small></div>
                 <div><button id="next-round-button" class="button primary">Mở vòng / Hoàn tất</button><small id="next-hint">Ghép cặp vòng kế tiếp khi mọi ván đã xong.</small></div>
                 <div><button id="export-button" class="button">Tải bảng điểm CSV</button><small>Xuất hạng, xếp loại, điểm của mọi đội.</small></div>
-              </div>
+              </div></details>
               <label class="switch"><input type="checkbox" id="auto-toggle"> Tự mở vòng khi mọi ván xong</label>
             </div>
             <details class="paper-card fold" id="edit-details"><summary>Chỉnh sửa giải đang chọn</summary>

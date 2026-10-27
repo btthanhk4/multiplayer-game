@@ -87,6 +87,7 @@ async function renderEvents() {
   const rulesHtml = roundRulesHtml(t), rulesBox = $('#admin-rules');
   if (rulesBox.dataset.html !== rulesHtml) { rulesBox.dataset.html = rulesHtml; rulesBox.innerHTML = `<details class="more"><summary>Luật từng vòng (thí sinh cũng thấy nội dung này)</summary>${rulesHtml}</details>`; }
   $('#freeze-button').disabled = $('#force-freeze').disabled = t.status !== 'open' || t.deadline > Date.now()/1000;
+  renderStart(t, detail);
   $('#next-round-button').disabled = !['frozen','running'].includes(t.status) || detail.unfinished > 0;
   $('#auto-toggle').checked = Boolean(t.auto_advance);
   const form = $('#tournament-edit'), open = t.status === 'open', ended = ['completed', 'cancelled'].includes(t.status);
@@ -128,6 +129,7 @@ function syncTournamentForm() {
   const form = $('#tournament-form'), seeded = Boolean(form.elements.source.value), fmt = form.elements.format.value;
   $('#seed-count-field').hidden = !seeded;
   $('#deadline-field').hidden = seeded;
+  $('#private-field').hidden = seeded;
   form.elements.deadline.required = !seeded;
   $('#rounds-field').hidden = fmt !== 'swiss';
   $('#rounds-hint').textContent = 'Gợi ý: 7 vòng đủ chọn top 32 của 1.000 đội; 10–11 vòng để phân hạng toàn bộ.';
@@ -177,9 +179,9 @@ function nextAction(t, d) {
   const pending = d.pending ? ` Còn ${d.pending} bot đang chờ kiểm tra.` : '';
   if (t.status === 'cancelled') return {step: 0, text: 'Giải đã bị hủy; không còn thao tác nào.', hint: 'Giải đã kết thúc.'};
   if (t.status === 'completed') return {step: 5, text: 'Giải đã kết thúc. Bấm “Tải bảng điểm CSV” để công bố, hoặc tạo giải loại trực tiếp từ top N ở form bên trái.', hint: 'Giải đã hoàn tất.'};
-  if (open && t.deadline > now) return {step: 2, text: `Đang nhận đăng ký đến ${formatTime(t.deadline)} (${countdown(t.deadline)}). ${d.count} đội đã đăng ký.${pending} Bạn chưa cần làm gì; muốn khóa sớm hãy mở “Chỉnh sửa giải” và bấm “Đóng đăng ký ngay”.`, hint: 'Chưa mở được: giải còn đang nhận đăng ký.'};
-  if (open) return {step: 3, text: `Đã hết hạn đăng ký với ${d.count} đội.${pending} ${d.pending ? 'Chờ kiểm tra xong rồi bấm “Khóa danh sách”, hoặc bấm “Khóa bắt buộc” để loại các bot còn chờ.' : 'Bấm “Khóa danh sách” để chốt và xếp hạt giống.'}`, hint: 'Chưa mở được: hãy khóa danh sách trước.'};
-  if (t.status === 'frozen') return {step: 4, text: `Danh sách đã khóa (${d.active} đội thi đấu). Bấm “Mở vòng” để ghép cặp vòng 1.`, hint: 'Sẵn sàng: mở vòng 1.'};
+  if (open && t.deadline > now) return {step: 2, text: `Đang nhận đăng ký đến ${formatTime(t.deadline)} (${countdown(t.deadline)}). ${d.count} đội đã đăng ký.${pending} Khi đủ đội, bấm “Bắt đầu giải” để đóng đăng ký và mở vòng 1 ngay, không cần đợi hạn.`, hint: 'Giải còn đang nhận đăng ký. Bấm “Bắt đầu giải” khi đã sẵn sàng.'};
+  if (open) return {step: 3, text: `Đã hết hạn đăng ký với ${d.count} đội.${pending} ${d.pending ? 'Chờ kiểm tra xong rồi bấm “Bắt đầu giải”; bấm sớm sẽ hỏi có loại các bot còn chờ không.' : 'Bấm “Bắt đầu giải” để chốt danh sách, xếp hạt giống và mở vòng 1.'}`, hint: 'Bấm “Bắt đầu giải” để khóa danh sách và mở vòng 1.'};
+  if (t.status === 'frozen') return {step: 4, text: `Danh sách đã khóa (${d.active} đội thi đấu). Bấm “Bắt đầu giải” để ghép cặp vòng 1.`, hint: 'Sẵn sàng: bắt đầu giải.'};
   if (unfinished > 0) return {step: 4, text: `Vòng ${t.round}/${t.rounds} đang chấm: còn ${unfinished} ván. ${t.auto_advance ? 'Hệ thống sẽ tự mở vòng tiếp khi xong.' : 'Khi xong hãy bấm “Mở vòng”.'}`, hint: `Chưa mở được: còn ${unfinished} ván chưa xong.`};
   const ko = t.format === 'knockout';
   return {step: 4, text: last ? `Vòng cuối đã chấm xong. Bấm “Mở vòng / Hoàn tất” để kết thúc giải${ko ? ' (nếu có cặp hòa 1–1, bước này tạo ván quyết định trước)' : ''}.` : `Vòng ${t.round}/${t.rounds} đã xong. Bấm “Mở vòng” để sang vòng ${t.round + 1}${ko ? '; cặp hòa 1–1 sẽ đấu ván quyết định trước' : ''}.`, hint: 'Sẵn sàng: mở vòng tiếp theo.'};
@@ -190,6 +192,26 @@ function renderGuidance(t, d) {
   for (const li of $$('#stepper li')) { const n = Number(li.dataset.step); li.className = n < step ? 'done' : n === step ? 'current' : ''; if (n === step) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current'); }
   $('#next-action').innerHTML = `<strong>${step ? `Bước ${step}/5 · ` : ''}Việc cần làm tiếp theo</strong><p>${escape(text)}</p>`;
   $('#next-hint').textContent = hint;
+}
+
+// The one-click start: close registration, lock the field, open round 1. Offered while registering or once locked.
+function renderStart(t, d) {
+  const can = (t.status === 'open' && !t.seed_from) || (t.status === 'frozen' && t.round === 0);
+  const button = $('#start-button');
+  button.disabled = !can;
+  const ready = d.count - d.pending;
+  $('#start-hint').textContent = t.status === 'completed' || t.status === 'cancelled' ? 'Giải đã kết thúc.'
+    : t.status === 'running' || t.round > 0 ? 'Giải đang diễn ra. Dùng “Mở vòng” trong các bước thủ công để sang vòng tiếp theo.'
+    : t.status === 'frozen' ? `Danh sách đã khóa với ${d.active} đội. Bấm để mở vòng 1.`
+    : d.count < 2 ? `Cần ít nhất 2 đội có bot hợp lệ (hiện ${d.count} đã đăng ký).`
+    : `${d.count} đội đã đăng ký${d.pending ? `, ${d.pending} bot còn chờ kiểm tra` : ''}. Đóng đăng ký, khóa danh sách và mở vòng 1 ngay${t.deadline > Date.now()/1000 ? ` (sớm hơn hạn ${countdown(t.deadline)})` : ''}.`;
+  $('#start-button').dataset.ready = String(Math.max(ready, 0));
+  const box = $('#code-box'), locked = t.join_code != null;
+  box.hidden = !(t.status === 'open' && !t.seed_from);
+  $('#join-code-value').textContent = t.join_code || 'Không có mã';
+  $('#copy-join-code').hidden = !locked;
+  $('#off-join-code').hidden = !locked;
+  $('#new-join-code').textContent = locked ? 'Đổi mã' : 'Bật mã tham gia';
 }
 
 // ---- people, bots, queue, log -------------------------------------------
@@ -301,11 +323,11 @@ $('#tournament-form').addEventListener('input', event => { if (event.target.id =
 for (const button of $$('[data-preset]')) button.addEventListener('click', () => applyPreset(button.dataset.preset));
 $('#tournament-form').addEventListener('submit', event => { event.preventDefault(); action(event.submitter, async () => {
   const form = event.target, data = Object.fromEntries(new FormData(form));
-  const body = {name: data.name, format: data.format, rounds: Number(data.rounds), map: data.map, final_map: data.final_map || null, description: data.description, auto_advance: form.elements.auto_advance.checked};
+  const body = {name: data.name, format: data.format, rounds: Number(data.rounds), map: data.map, final_map: data.final_map || null, description: data.description, auto_advance: form.elements.auto_advance.checked, private: form.elements.private.checked && !data.source};
   if (data.source) Object.assign(body, {seed_from: data.source, seed_count: Number(data.seed_count)});
   else body.deadline = new Date(data.deadline).getTime() / 1000;
   const result = await api('/admin/tournaments', body);
-  adminTournament = result.id; notice(data.source ? 'Đã tạo vòng tiếp theo từ top đội và khóa danh sách. Bấm “Mở vòng” để bắt đầu.' : 'Đã mở giải. Thí sinh có thể đăng ký bot.');
+  adminTournament = result.id; notice(data.source ? 'Đã tạo vòng tiếp theo từ top đội và khóa danh sách. Bấm “Bắt đầu giải” để mở vòng 1.' : body.private ? 'Đã mở giải riêng. Gửi mã tham gia (hiện trong bảng điều khiển) cho các đội.' : 'Đã mở giải. Thí sinh có thể đăng ký bot.');
   await renderEvents(); }); });
 $('#tournament-edit').addEventListener('submit', event => { event.preventDefault(); action(event.submitter, async () => {
   const form = event.target, t = detail.tournament, body = {name: form.elements.name.value, description: form.elements.description.value};
@@ -331,6 +353,27 @@ $('#admin-round').addEventListener('change', () => action(null, renderAdminRound
 $('#admin-tournament').addEventListener('change', event => { adminTournament = event.target.value; action(null, renderEvents); });
 let entryTimer;
 $('#entry-search').addEventListener('input', () => { clearTimeout(entryTimer); entryTimer = setTimeout(() => action(null, renderEvents), 300); });
+$('#start-button').addEventListener('click', event => action(event.target, async () => {
+  const t = detail.tournament, soon = t.status === 'open' && t.deadline > Date.now()/1000;
+  const lines = [`Bắt đầu “${t.name}” ngay?`];
+  if (t.status === 'open') lines.push(`• Đóng đăng ký${soon ? ` (còn ${countdown(t.deadline).replace(/^còn /, '')} mới tới hạn)` : ''}: thí sinh không đổi bot được nữa.`, `• Khóa danh sách: ${detail.count} đội đã đăng ký.`);
+  lines.push('• Mở vòng 1 và ghép cặp. Việc này không hoàn tác được.');
+  let force = false;
+  if (detail.pending) {
+    lines.push('', `Còn ${detail.pending} bot đang chờ kiểm tra. Bấm OK sẽ LOẠI các đội đó khỏi giải.`);
+    force = true;
+  }
+  if (!confirm(lines.join('\n'))) return;
+  const r = await api(`/admin/tournaments/${adminTournament}/start`, {force});
+  notice(`Giải đã bắt đầu: ${r.accepted ?? detail.active} đội thi đấu${r.excluded ? `, ${r.excluded} đội bị loại do bot chưa hợp lệ` : ''}, vòng ${r.round} có ${r.pairs} cặp.`);
+  await renderEvents(); }));
+$('#copy-join-code').addEventListener('click', async () => { const code = detail?.tournament.join_code; try { await navigator.clipboard.writeText(code); notice('Đã sao chép mã tham gia.'); } catch { notice(`Mã tham gia: ${code}`); } });
+$('#new-join-code').addEventListener('click', event => action(event.target, async () => {
+  if (detail.tournament.join_code && !confirm('Đổi mã? Các đội đã đăng ký vẫn ở trong giải, nhưng mã cũ không dùng được nữa.')) return;
+  const r = await api(`/admin/tournaments/${adminTournament}/code`, {action: 'new'}); notice(`Mã tham gia mới: ${r.code}`); await renderEvents(); }));
+$('#off-join-code').addEventListener('click', event => action(event.target, async () => {
+  if (!confirm('Bỏ mã? Mọi đội đã đăng nhập đều có thể tham gia giải này.')) return;
+  await api(`/admin/tournaments/${adminTournament}/code`, {action: 'off'}); notice('Giải đã mở cho mọi đội.'); await renderEvents(); }));
 $('#freeze-button').addEventListener('click', event => action(event.target, async () => { const r = await api(`/admin/tournaments/${adminTournament}/freeze`, {}); notice(`Đã khóa: ${r.accepted} đội thi đấu, ${r.excluded} bị loại do bot không hợp lệ.`); await renderEvents(); }));
 $('#force-freeze').addEventListener('click', event => action(event.target, async () => { if (!confirm('Loại mọi đội có bot còn đang chờ kiểm tra?')) return; const r = await api(`/admin/tournaments/${adminTournament}/freeze`, {force: true}); notice(`Đã khóa: ${r.accepted} đội thi đấu, ${r.excluded} bị loại.`); await renderEvents(); }));
 $('#next-round-button').addEventListener('click', event => action(event.target, async () => { const r = await api(`/admin/tournaments/${adminTournament}/next`, {}); notice(r.completed ? 'Giải đã hoàn tất. Tải bảng điểm CSV để công bố.' : r.deciders ? `Có ${r.deciders} cặp hòa 1–1: đã tạo ván quyết định. Khi chúng xong, bấm “Mở vòng” lần nữa.` : `Đã mở vòng ${r.round} với ${r.pairs} cặp.`); await renderEvents(); }));

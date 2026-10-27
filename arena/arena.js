@@ -186,7 +186,7 @@ function renderDashboard(recent) {
   $('#dashboard-cards').innerHTML = tiles.map(([tabName, label, title, desc, hint]) => `<button class="tile" data-tab="${tabName}"><span class="eyebrow">${label}</span><strong>${title}</strong><span class="desc">${desc}</span><small>${escape(hint)}</small></button>`).join('');
   const open = openTournaments()[0];
   const registered = open && (team?.entries || []).some(e => e.tournament_id === open.id);
-  $('#open-tournament').innerHTML = open ? `<div class="banner"><div><p class="eyebrow">GIẢI ĐANG MỞ · ${escape(countdown(open.deadline).toUpperCase())}</p><h3>${escape(open.name)}</h3><p class="caption">${registered ? 'Đội đã đăng ký. Có thể đổi bot trước hạn.' : `Hạn chọn bot: ${formatTime(open.deadline)}`}</p></div><button class="button ${registered ? '' : 'primary'}" data-tournament="${open.id}">${registered ? 'Xem giải' : 'Đăng ký ngay'} ↗</button></div>` : '';
+  $('#open-tournament').innerHTML = open ? `<div class="banner"><div><p class="eyebrow">GIẢI ${open.locked ? 'RIÊNG (CẦN MÃ) ' : ''}ĐANG MỞ · ${escape(countdown(open.deadline).toUpperCase())}</p><h3>${escape(open.name)}</h3><p class="caption">${registered ? 'Đội đã đăng ký. Có thể đổi bot trước hạn.' : `Hạn chọn bot: ${formatTime(open.deadline)}`}</p></div><button class="button ${registered ? '' : 'primary'}" data-tournament="${open.id}">${registered ? 'Xem giải' : 'Đăng ký ngay'} ↗</button></div>` : '';
 }
 
 const TAGS = {upset:['hot','LẬT KÈO'], sweep:['','THẮNG TRẮNG'], final:['hot','TRÙM CUỐI'], champion:['gold','VÔ ĐỊCH']};
@@ -209,7 +209,7 @@ function badgeTiles(items) {
 }
 
 function tournamentCards() {
-  options('#competition-select', tournaments, 'Chưa có giải đấu');
+  options('#competition-select', tournaments, 'Chưa có giải đấu', t => `${t.locked ? '🔒 ' : ''}${t.name}`);
   if (!tournaments.some(t => t.id === selectedTournament)) selectedTournament = (openTournaments()[0] || tournaments[0])?.id || '';
   $('#competition-select').value = selectedTournament;
 }
@@ -320,6 +320,18 @@ function renderRanked(data) {
 
 // ---- competition --------------------------------------------------------
 
+// What a team sees between registering and the first game: it needs no clicks, the organiser starts the tournament.
+function renderWaitingRoom(t, result) {
+  const box = $('#waiting-room'), mine = result.mine;
+  const waiting = Boolean(team && mine && mine.entry_status === 'active' && (t.status === 'open' || (t.status === 'frozen' && t.round === 0)));
+  box.hidden = !waiting;
+  if (!waiting) return;
+  const checking = ['queued', 'running'].includes(mine.bot_status), broken = !checking && mine.bot_status !== 'valid';
+  box.innerHTML = t.status === 'open'
+    ? `<p class="eyebrow">PHÒNG CHỜ</p><h3>Đội đã đăng ký, chờ ban tổ chức bắt đầu giải</h3><p>${result.count} đội đã vào giải. Bạn không cần bấm gì thêm: khi giải bắt đầu, hệ thống tự ghép cặp và chạy bot của đội bạn. Trang này tự cập nhật.</p><p class="caption">Bot đã chọn: <strong>${escape(mine.bot)}</strong>${checking ? ' · <strong>đang chờ kiểm tra, cần hợp lệ để được thi đấu</strong>' : broken ? ' · <strong>bot không hợp lệ, đội sẽ bị loại nếu không chọn bot khác</strong>' : ' · hợp lệ'}. Trước hạn bạn vẫn đổi được bot.</p>`
+    : `<p class="eyebrow">SẮP BẮT ĐẦU</p><h3>Danh sách đã khóa, chờ mở vòng 1</h3><p>${result.active} đội được thi đấu. Ván đầu của đội bạn sẽ hiện ở đây ngay khi vòng 1 mở.</p>`;
+}
+
 async function renderCompetition() {
   if (!selectedTournament) {
     $('#competition-info').innerHTML = '<div class="empty">Chưa có giải đấu.</div>';
@@ -336,9 +348,12 @@ async function renderCompetition() {
   $('#join-form').hidden = !open || !me;
   const mine = result.mine;
   $('#withdraw').hidden = !mine || !open;
+  $('#join-code-field').hidden = !t.locked || Boolean(mine);       // a team already inside never needs the code again
   $('#entry-status').textContent = !team ? 'Lập đội để đăng ký.'
     : mine ? `Đội đã chọn: ${mine.bot}${mine.bot_status !== 'valid' ? ' (đang chờ kiểm tra — cần hợp lệ trước khi BTC khóa danh sách)' : ''}. Có thể đổi trước hạn.`
+    : t.locked ? 'Giải riêng: nhập mã tham gia do ban tổ chức gửi, rồi chọn một phiên bản để giữ suất của đội.'
     : 'Chọn một phiên bản để giữ suất của đội.';
+  renderWaitingRoom(t, result);
   const roundSelect = $('#round-select'), before = roundSelect.value;
   roundSelect.innerHTML = `<option value="">Bảng điểm tổng</option>${Array.from({length:t.round}, (_, i) => `<option value="${i+1}">Vòng ${i+1}</option>`).join('')}`;
   if ([...roundSelect.options].some(o => o.value === before)) roundSelect.value = before;
@@ -520,7 +535,10 @@ $('#ranked-form').addEventListener('submit', event => { event.preventDefault(); 
   notice(result.status === 'matched' ? 'Đã ghép đối thủ. Bấm “Xem trực tiếp” ở thanh phía trên để theo dõi hai ván.' : 'Đã vào hàng chờ. Khi ghép được đối thủ, thanh phía trên sẽ báo để bạn xem trực tiếp.'); await refresh(); }); });
 $('#ranked-cancel').addEventListener('click', event => action(event.target, async () => { const result = await api('/ranked/cancel', {}); notice(result.cancelled ? 'Đã hủy tìm trận.' : 'Đối thủ vừa được ghép; cặp trận đã bắt đầu.'); await refresh(); }));
 $('#join-form').addEventListener('submit', event => { event.preventDefault(); if (!requireTeam()) return; action(event.submitter, async () => {
-  await api(`/tournaments/${selectedTournament}/join`, {submission_id: $('#join-submission').value}); await loadMe();
+  const code = $('#join-code').value.trim();
+  if (!$('#join-code-field').hidden && !code) { notice('Nhập mã tham gia giải do ban tổ chức cung cấp.', true); $('#join-code').focus(); return; }
+  await api(`/tournaments/${selectedTournament}/join`, {submission_id: $('#join-submission').value, code}); await loadMe();
+  $('#join-code').value = '';
   notice('Đã lưu phiên bản thi đấu của đội.'); await refresh(); }); });
 $('#withdraw').addEventListener('click', event => action(event.target, async () => { if (!confirm('Rút đăng ký của đội khỏi giải này?')) return; await api(`/tournaments/${selectedTournament}/withdraw`, {}); await loadMe(); notice('Đã rút đăng ký.'); await refresh(); }));
 
