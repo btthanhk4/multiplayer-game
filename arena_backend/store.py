@@ -631,6 +631,65 @@ class Store:
             self.audit(db, user, 'team.created', {'team': tid})
             return tid
 
+    SOLO_FIRST = ('Búa', 'Bao', 'Kéo', 'Lá')
+    SOLO_SECOND = ('Thần Tốc', 'Bất Bại', 'Tinh Quái', 'Thầm Lặng', 'Rực Lửa', 'Sấm Sét', 'Bão Tố', 'Liều Lĩnh',
+                   'Lanh Lẹ', 'Kiên Cường', 'Gió Lốc', 'Mưu Lược')
+
+    def create_solo_team(self, user):
+        """A one-click team for someone playing alone: a fun neutral name (never the person's real name, since team
+        names are public), which the owner can rename at any time."""
+        with self.connect(True) as db:
+            if self.team_of(db, user):
+                raise Problem('Bạn đã ở trong một đội. Rời đội trước khi tạo đội mới.', 409)
+            label = None
+            for _ in range(60):
+                candidate = f'{secrets.choice(self.SOLO_FIRST)} {secrets.choice(self.SOLO_SECOND)} {secrets.randbelow(90) + 10}'
+                if not db.execute('SELECT 1 FROM teams WHERE name_key=?', (name_key(candidate),)).fetchone():
+                    label = candidate
+                    break
+            if label is None:       # every friendly name taken: fall back to a random suffix, which cannot collide in practice
+                label = f'Đội {secrets.token_hex(4).upper()}'
+            tid = self.insert_team(db, label, user)
+            db.execute('UPDATE users SET team_id=? WHERE id=?', (tid, user))
+            self.audit(db, user, 'team.created', {'team': tid, 'solo': True})
+            return tid
+
+    def my_tournament_path(self, tid, team):
+        """Every pairing of one team in a tournament, with the result of each game from that team's point of view."""
+        with self.connect() as db:
+            entry = db.execute('SELECT status,seed FROM entries WHERE tournament_id=? AND team_id=?', (tid, team)).fetchone()
+            pairs = db.execute('SELECT p.id,p.round,p.a,p.b,p.forfeit,ta.name a_name,tb.name b_name FROM pairings p '
+                               'JOIN teams ta ON ta.id=p.a LEFT JOIN teams tb ON tb.id=p.b '
+                               'WHERE p.tournament_id=? AND (p.a=? OR p.b=?) ORDER BY p.round,p.slot',
+                               (tid, team, team)).fetchall()
+            games = defaultdict(list)
+            for g in db.execute('SELECT m.id,m.pairing_id,m.status,m.winner,m.reason,s.team_id p1_team FROM matches m '
+                                'JOIN pairings p ON p.id=m.pairing_id JOIN submissions s ON s.id=m.p1 '
+                                'WHERE p.tournament_id=? AND (p.a=? OR p.b=?) ORDER BY m.created,m.rowid',
+                                (tid, team, team)):
+                games[g['pairing_id']].append(g)
+        rounds = []
+        for pair in pairs:
+            mine_is_a = pair['a'] == team
+            opponent = pair['b_name'] if mine_is_a else pair['a_name']
+            opponent_id = pair['b'] if mine_is_a else pair['a']
+            results = []
+            for g in games[pair['id']]:
+                if g['status'] == 'cancelled':
+                    continue
+                if g['status'] != 'done' or g['winner'] not in ('p1', 'p2', 'draw'):
+                    result = None
+                elif g['winner'] == 'draw':
+                    result = 'draw'
+                else:
+                    first_won = g['winner'] == 'p1'
+                    result = 'win' if first_won == (g['p1_team'] == team) else 'loss'
+                results.append({'id': g['id'], 'status': g['status'], 'result': result, 'reason': g['reason']})
+            rounds.append({'round': pair['round'], 'opponent': opponent, 'opponent_id': opponent_id,
+                           'bye': pair['b'] is None, 'forfeit': pair['forfeit'] and (
+                               'opponent' if pair['forfeit'] != team else 'self'), 'games': results})
+        return {'entry': dict(entry) if entry else None, 'rounds': rounds}
+
     def join_team(self, user, code):
         code = str(code or '').strip().upper()
         with self.connect(True) as db:

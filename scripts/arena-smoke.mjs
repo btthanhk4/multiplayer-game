@@ -103,7 +103,7 @@ async function practice(page){
 async function newPage(width=1440){
   const context=await browser.newContext({viewport:{width,height:1000}});
   const page=await context.newPage();
-  page.on('pageerror',e=>errors.push(e.message));
+  page.on('pageerror',e=>{errors.push(e.message);console.error('PAGEERROR',e.message)});
   page.on('console',m=>{if(m.type()==='error' && /Content Security Policy|Refused to/.test(m.text()))errors.push(m.text());});
   return page;
 }
@@ -352,6 +352,64 @@ try {
   await auditContrast(page,['overview','team','lab','campaign','ranked','competition','watch'],'student',process.env.ARENA_SHOTS);
   await page.setViewportSize({width:1440,height:1000});
 
+  // A newcomer who plays alone: one click makes the team, the no-code builder writes the bot, the lab explains the result.
+  const solo=await newPage();
+  await register(solo,'solo_walker','Người đi một mình');
+  await solo.locator('[role=tab][data-tab=overview]').click();
+  await solo.locator('#next-step [data-solo]').waitFor();                      // the dashboard offers the same shortcut
+  await solo.locator('[role=tab][data-tab=team]').click();
+  await solo.locator('#solo-team').click();
+  await solo.locator('#lab:not([hidden])').waitFor();
+  await solo.locator('#practice-a').waitFor({state:'attached'});
+  const original=await solo.locator('#source').inputValue();
+  assert.equal(await solo.locator('#undo-load').isHidden(),true);
+  await solo.locator('[data-preset=attack]').click();
+  assert.equal(await solo.locator('#slider-CAPTURE').inputValue(),'25');
+  await solo.locator('#slider-SAFETY').fill('7');
+  assert.equal(await solo.locator('#builder-presets [aria-pressed=true]').count(),0,'moving a slider leaves the preset');
+  await solo.locator('#builder-use').click();
+  await solo.waitForFunction(()=>document.querySelector('#source').value.includes('CAPTURE = 25'));
+  assert.match(await solo.locator('#source').inputValue(),/SAFETY = 7\b/);
+  assert.equal(await solo.locator('#bot-name').inputValue(),'Bot tùy chỉnh');
+  await solo.locator('#undo-load').waitFor();
+  await solo.locator('#undo-load').click();
+  assert.equal(await solo.locator('#source').inputValue(),original,'undo brings back what was in the editor');
+  assert.equal(await solo.locator('#undo-load').isHidden(),true);
+  // The smoke worker only runs unmodified examples, and the "balanced" preset is exactly sdk/examples/custom.py.
+  await solo.locator('[data-preset=balanced]').click();
+  await solo.locator('#builder-use').click();
+  await solo.waitForFunction(()=>document.querySelector('#bot-name').value==='Bot Cân bằng');
+  await solo.locator('#source').focus();
+  await solo.keyboard.press('Control+Enter');
+  await solo.locator('#lab-status.good').waitFor({timeout:90000});
+  await solo.locator('#lab-status [data-boss-bot]').waitFor();
+  await solo.screenshot({path:'artifacts/arena-lab-valid.png',fullPage:true});
+  // A rejected bot is explained in plain Vietnamese (the server answer is stubbed: the smoke worker cannot reject code).
+  await solo.route('**/api/submissions',async route=>{
+    const real=await route.fetch(), data=await real.json();
+    data.items[0]={...data.items[0],status:'rejected',log:'Không nạp được bot: SyntaxError: invalid syntax (<string>, line 2)'};
+    await route.fulfill({response:real,json:data});
+  });
+  await solo.locator('[role=tab][data-tab=overview]').click();
+  await solo.locator('[role=tab][data-tab=lab]').click();
+  await solo.locator('#lab-status.bad').filter({hasText:'Lỗi cú pháp Python'}).waitFor({timeout:60000});
+  await solo.locator('#lab-status').filter({hasText:'dòng 2'}).waitFor();
+  await solo.locator('#lab-status details summary').click();
+  await solo.locator('#lab-status .log-text').filter({hasText:'SyntaxError'}).waitFor();
+  await auditLayout(solo,['lab','team','overview'],'solo');
+  await solo.setViewportSize({width:390,height:900});
+  await solo.locator('[role=tab][data-tab=lab]').click();
+  await solo.screenshot({path:'artifacts/arena-lab-mobile.png',fullPage:true});
+  await solo.setViewportSize({width:1440,height:1000});
+  await auditContrast(solo,['lab'],'solo',process.env.ARENA_SHOTS);
+  await solo.locator('[role=tab][data-tab=lab]').click();
+  await solo.locator('#lab-status [data-dismiss-lab]').click();
+  await solo.locator('#lab-status').waitFor({state:'hidden'});
+  await solo.reload();
+  await solo.locator('#lab:not([hidden])').waitFor({state:'attached'});
+  await solo.locator('[role=tab][data-tab=lab]').click();
+  assert.equal(await solo.locator('#lab-status').isHidden(),true,'a dismissed notice stays dismissed after a reload');
+
   const admin=await newPage();
   await admin.goto(base+'/arena/admin');
   await admin.locator('#admin-login').waitFor();
@@ -428,6 +486,20 @@ try {
   await page.locator('#waiting-room:not([hidden])').filter({hasText:'chờ ban tổ chức bắt đầu'}).waitFor();
   await page.locator('#join-code-field').waitFor({state:'hidden'});
   await page.screenshot({path:'artifacts/arena-waiting-room.png',fullPage:true});
+  // The organiser starts the fixture tournament; every team follows it from the dashboard and the tournament tab.
+  await admin.locator('#admin-tournament').selectOption({label:'Khai màn · Mùa chiến thuật · Đang nhận đăng ký'});
+  await admin.locator('#tournament-state').filter({hasText:'4 đăng ký'}).waitFor();
+  await admin.locator('#start-button:not([disabled])').waitFor();
+  admin.once('dialog',dialog=>dialog.accept());
+  await admin.locator('#start-button').click();
+  await admin.locator('#notice').filter({hasText:'Giải đã bắt đầu'}).waitFor();
+  await page.locator('[role=tab][data-tab=overview]').click();
+  await page.locator('#open-tournament .banner.live').filter({hasText:'GIẢI ĐANG DIỄN RA'}).waitFor({timeout:60000});
+  await page.locator('#open-tournament .banner.live [data-tournament]').click();
+  await page.locator('#my-journey:not([hidden])').filter({hasText:'Vòng 1'}).waitFor({timeout:60000});
+  await page.locator('#my-journey .journey-list li').filter({hasText:/Thắng|Thua|Hòa|BYE|nghỉ/}).first().waitFor({timeout:120000});
+  assert.ok(await page.locator('#my-journey [data-watch]').count()>=1 || await page.locator('#my-journey').getByText('nghỉ').count()>=1);
+  await page.screenshot({path:'artifacts/arena-journey.png',fullPage:true});
   await admin.screenshot({path:'artifacts/admin-events.png',fullPage:true});
   await admin.locator('[role=tab][data-tab=people]').click();
   await admin.locator('#team-list .job').filter({hasText:'Kéo Thần Tốc'}).waitFor();

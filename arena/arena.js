@@ -1,6 +1,8 @@
 import {$, $$, escape, labels, formats, kinds, formatTime, badge, session, api, notice, action, options, countdown,
   poller, outcome, teamLink, starText, ago, sparkline, celebrate, mapLabel, roundRulesHtml, GEOMETRY_MAPS, mapPreview} from './common.js';
 import {createWatch} from './watch.js';
+import {explainBotError} from './explain.js';
+import {FIELDS, PRESETS, buildBot, readValues, clamp} from './builder.js';
 
 document.getElementById('boot-note')?.remove();   // reaching here means every module loaded
 
@@ -38,6 +40,7 @@ function setTab(value) {
   $$('.view').forEach(el => el.hidden = el.id !== tab);
   $$('[role=tab]').forEach(el => el.setAttribute('aria-selected', String(el.dataset.tab === tab)));
   history.replaceState(null, '', `${location.pathname}#${tab}`);
+  try { $('[role=tab][aria-selected=true]').scrollIntoView({block: 'nearest', inline: 'center'}); } catch { /* old browsers */ }
   refresher.now();
   watch.scheduleLive(100);
 }
@@ -162,7 +165,7 @@ function openTournaments() {
   return tournaments.filter(t => t.status === 'open' && t.deadline > Date.now()/1000 && !t.seed_from);
 }
 
-function renderDashboard(recent) {
+function renderDashboard(recent, run) {
   const valid = submissions.filter(s => s.status === 'valid');
   const latest = submissions[0];
   const entered = (team?.entries || []).length > 0;
@@ -175,7 +178,7 @@ function renderDashboard(recent) {
     {label: 'Xem replay', done: recent.some(m => m.status === 'done'), title: 'Xem một ván đấu', text: 'Mở khán đài để xem lại cách bot của bạn chơi.', cta: 'Mở khán đài', tab: 'watch'},
   ];
   const current = steps.find(step => !step.done);
-  $('#next-step').innerHTML = `<div class="next-main"><p class="eyebrow">${current ? `VIỆC TIẾP THEO · ${steps.filter(s => s.done).length}/${steps.length}` : 'XONG LỘ TRÌNH'}</p><h2>${escape(current?.title || 'Bạn đã sẵn sàng thi đấu')}</h2><p>${escape(current?.text || 'Tiếp tục leo bảng Elo, hoặc luyện thêm bằng các boss cao hơn.')}</p><button class="button primary" data-tab="${current?.tab || 'ranked'}">${escape(current?.cta || 'Đấu xếp hạng')} ↗</button></div><ol class="progress-dots" aria-label="Tiến độ">${steps.map(step => `<li class="${step.done ? 'done' : step === current ? 'now' : ''}"><span aria-hidden="true">${step.done ? '✓' : ''}</span>${escape(step.label)}</li>`).join('')}</ol>`;
+  $('#next-step').innerHTML = `<div class="next-main"><p class="eyebrow">${current ? `VIỆC TIẾP THEO · ${steps.filter(s => s.done).length}/${steps.length}` : 'XONG LỘ TRÌNH'}</p><h2>${escape(current?.title || 'Bạn đã sẵn sàng thi đấu')}</h2><p>${escape(current?.text || 'Tiếp tục leo bảng Elo, hoặc luyện thêm bằng các boss cao hơn.')}</p><div class="action-row"><button class="button primary" data-tab="${current?.tab || 'ranked'}">${escape(current?.cta || 'Đấu xếp hạng')} ↗</button>${current?.tab === 'team' ? '<button class="button" data-solo>Đi một mình · tạo đội cho tôi</button>' : ''}</div></div><ol class="progress-dots" aria-label="Tiến độ">${steps.map(step => `<li class="${step.done ? 'done' : step === current ? 'now' : ''}"><span aria-hidden="true">${step.done ? '✓' : ''}</span>${escape(step.label)}</li>`).join('')}</ol>`;
   const openCount = openTournaments().length;
   const tiles = [
     ['lab', 'TỰ LUYỆN', 'Xưởng bot', 'Viết bot Python, nộp để kiểm tra và đấu tập giữa các phiên bản trên mọi bản đồ.', latest ? `${latest.name} · ${labels[latest.status] || latest.status}` : 'Chưa có bot, nộp bot đầu tiên'],
@@ -186,7 +189,9 @@ function renderDashboard(recent) {
   $('#dashboard-cards').innerHTML = tiles.map(([tabName, label, title, desc, hint]) => `<button class="tile" data-tab="${tabName}"><span class="eyebrow">${label}</span><strong>${title}</strong><span class="desc">${desc}</span><small>${escape(hint)}</small></button>`).join('');
   const open = openTournaments()[0];
   const registered = open && (team?.entries || []).some(e => e.tournament_id === open.id);
-  $('#open-tournament').innerHTML = open ? `<div class="banner"><div><p class="eyebrow">GIẢI ${open.locked ? 'RIÊNG (CẦN MÃ) ' : ''}ĐANG MỞ · ${escape(countdown(open.deadline).toUpperCase())}</p><h3>${escape(open.name)}</h3><p class="caption">${registered ? 'Đội đã đăng ký. Có thể đổi bot trước hạn.' : `Hạn chọn bot: ${formatTime(open.deadline)}`}</p></div><button class="button ${registered ? '' : 'primary'}" data-tournament="${open.id}">${registered ? 'Xem giải' : 'Đăng ký ngay'} ↗</button></div>` : '';
+  const live = run?.path?.rounds.length ? run.path.rounds[run.path.rounds.length - 1] : null;
+  const runningBanner = run ? `<div class="banner live"><div><p class="eyebrow">GIẢI ĐANG DIỄN RA · VÒNG ${run.t.round}/${run.t.rounds}</p><h3>${escape(run.t.name)}</h3><p class="caption">${live ? `Vòng ${live.round}: ${live.bye ? '' : `gặp ${escape(live.opponent)} · `}${escape(pairSummary(live))}.` : 'Danh sách đã khóa, đang chờ ban tổ chức mở vòng 1. Bạn không cần bấm gì: máy tự chạy bot của đội.'}</p></div><button class="button primary" data-tournament="${run.t.id}">Xem hành trình ↗</button></div>` : '';
+  $('#open-tournament').innerHTML = runningBanner + (open ? `<div class="banner"><div><p class="eyebrow">GIẢI ${open.locked ? 'RIÊNG (CẦN MÃ) ' : ''}ĐANG MỞ · ${escape(countdown(open.deadline).toUpperCase())}</p><h3>${escape(open.name)}</h3><p class="caption">${registered ? 'Đội đã đăng ký. Có thể đổi bot trước hạn.' : `Hạn chọn bot: ${formatTime(open.deadline)}`}</p></div><button class="button ${registered ? '' : 'primary'}" data-tournament="${open.id}">${registered ? 'Xem giải' : 'Đăng ký ngay'} ↗</button></div>` : '');
 }
 
 const TAGS = {upset:['hot','LẬT KÈO'], sweep:['','THẮNG TRẮNG'], final:['hot','TRÙM CUỐI'], champion:['gold','VÔ ĐỊCH']};
@@ -247,7 +252,112 @@ function submissionRows() {
   for (const id of ['#practice-a','#practice-b','#ranked-submission','#campaign-submission']) options(id, valid);
   options('#join-submission', submissions.filter(s => ['valid','queued','running'].includes(s.status)), 'Chưa có bot hợp lệ',
     s => s.status === 'valid' ? s.name : `${s.name} (đang kiểm tra)`);
+  renderLabStatus();
+  watchPending();
 }
+
+// ---- lab: result of the last submission, quick polling while it is checked ----
+
+const isPending = s => ['queued', 'running'].includes(s.status);
+let pendingTimer, lastStatus = new Map();
+
+// A submission usually finishes in seconds, so while one is being checked only /submissions is polled (one cheap request
+// every ~4 s, paused in a hidden tab) instead of the whole dashboard refresh.
+function watchPending() {
+  clearTimeout(pendingTimer);
+  if (!team || !submissions.some(isPending)) return;
+  pendingTimer = setTimeout(async () => {
+    if (!document.hidden) {
+      try {
+        const before = lastStatus;
+        submissions = (await api('/submissions')).items;
+        const done = submissions.filter(s => before.get(s.id) && isPending({status: before.get(s.id)}) && !isPending(s));
+        submissionRows();
+        if (done.length) { forget(); if (tab !== 'lab') notice(done[0].status === 'valid' ? `Bot “${done[0].name}” đã hợp lệ.` : `Bot “${done[0].name}” chưa qua kiểm tra. Mở tab Viết & kiểm tra để xem lý do.`, done[0].status !== 'valid'); refresher.now(); return; }
+      } catch { /* the regular refresh reports connection problems */ }
+    }
+    watchPending();
+  }, 3500 + Math.random() * 1500);
+}
+
+function renderLabStatus() {
+  lastStatus = new Map(submissions.map(s => [s.id, s.status]));
+  const box = $('#lab-status'), latest = submissions[0];
+  const dismissed = storage('ottv2-lab-dismissed');
+  if (!me || !team || !latest || dismissed === `${latest.id}:${latest.status}`) { box.hidden = true; return; }
+  const close = '<button type="button" class="close-button" data-dismiss-lab aria-label="Ẩn thông báo">×</button>';
+  const open = openTournaments()[0];
+  let html, tone;
+  if (isPending(latest)) {
+    tone = 'wait';
+    html = `<span class="spinner" aria-hidden="true"></span><div><strong>Đang kiểm tra “${escape(latest.name)}”…</strong><p>${latest.position ? `Bạn đang ở vị trí #${latest.position} trong hàng chờ${etaText(latest.position, 'validate')}.` : 'Máy chấm đang chạy thử bot của bạn.'} Bạn không cần ở lại trang: kết quả được lưu, quay lại lúc nào cũng thấy.</p><div class="bar" aria-hidden="true"><i></i></div></div>`;
+  } else if (latest.status === 'valid') {
+    tone = 'good';
+    html = `<div><strong>✓ “${escape(latest.name)}” đã hợp lệ, sẵn sàng thi đấu</strong><p>Bước tiếp theo bạn muốn làm gì?</p><div class="action-row"><button class="button primary" data-boss-bot="${latest.id}">Thử sức với Boss ↗</button><button class="button" data-rank-bot="${latest.id}">Đấu xếp hạng với đội khác ↗</button>${open ? `<button class="button" data-tournament="${open.id}">Đăng ký giải “${escape(open.name)}” ↗</button>` : ''}</div></div>${close}`;
+  } else if (latest.status === 'failed') {
+    tone = 'wait';
+    html = `<div><strong>Máy chấm gặp sự cố, không phải lỗi của bạn</strong><p>Ban tổ chức sẽ xử lý và kiểm tra lại “${escape(latest.name)}”. Bạn không cần nộp lại.</p></div>${close}`;
+  } else {
+    tone = 'bad';
+    const why = explainBotError(latest.log);
+    html = `<div><strong>✗ “${escape(latest.name)}” chưa qua kiểm tra</strong>${why ? `<p><b>${escape(why.title)}.</b> ${escape(why.hint)}</p>` : ''}${latest.log ? `<details class="more"><summary>Chi tiết kỹ thuật</summary><pre class="log-text">${escape(latest.log)}</pre></details>` : ''}<div class="action-row"><button class="button primary" data-source="${latest.id}">Mở mã để sửa ↗</button><a class="button" href="./guide.html">Hướng dẫn viết bot ↗</a></div></div>${close}`;
+  }
+  box.className = `lab-status ${tone}`;
+  box.innerHTML = html;
+  box.hidden = false;
+}
+
+// ---- lab: the no-code bot builder ----
+
+let customTemplate = null;
+const builder = {preset: 'balanced', values: {...PRESETS[0].values}};
+
+function initBuilder() {
+  $('#builder-presets').innerHTML = PRESETS.map(p => `<button type="button" class="chip" data-preset="${p.id}" title="${escape(p.note)}" aria-pressed="${p.id === builder.preset}">${escape(p.label)}</button>`).join('');
+  $('#builder-sliders').innerHTML = FIELDS.map(f => `<label class="slider" for="slider-${f.key}"><span class="slider-top"><span>${escape(f.label)}</span><output id="out-${f.key}"></output></span><input type="range" id="slider-${f.key}" data-field="${f.key}" min="${f.min}" max="${f.max}" step="1"><span class="slider-ends"><small>${escape(f.low)}</small><small>${escape(f.high)}</small></span></label>`).join('');
+  syncBuilder();
+}
+
+function syncBuilder() {
+  for (const f of FIELDS) { $(`#slider-${f.key}`).value = builder.values[f.key]; $(`#out-${f.key}`).textContent = builder.values[f.key]; }
+  $$('#builder-presets .chip').forEach(chip => chip.setAttribute('aria-pressed', String(chip.dataset.preset === builder.preset)));
+}
+
+$('#builder-presets').addEventListener('click', event => {
+  const chip = event.target.closest('.chip'); if (!chip) return;
+  const preset = PRESETS.find(p => p.id === chip.dataset.preset);
+  builder.preset = preset.id; builder.values = {...preset.values}; syncBuilder();
+});
+$('#builder-sliders').addEventListener('input', event => {
+  const field = FIELDS.find(f => f.key === event.target.dataset.field); if (!field) return;
+  builder.values[field.key] = clamp(field, event.target.value); builder.preset = '';
+  syncBuilder();
+});
+$('#builder-use').addEventListener('click', event => action(event.currentTarget, async () => {
+  if (!customTemplate) {
+    const response = await fetch('../sdk/examples/custom.py');
+    if (!response.ok) throw new Error('Không tải được mẫu bot.');
+    customTemplate = await response.text();
+  }
+  const preset = PRESETS.find(p => p.id === builder.preset);
+  replaceEditor(buildBot(customTemplate, builder.values), preset ? `Bot ${preset.label}` : 'Bot tùy chỉnh');
+  notice('Đã tạo bot. Bấm “Nộp để kiểm tra” ở ô bên trái; chưa hài lòng thì chỉnh lại thanh trượt rồi tạo lại.');
+  $('#submit-form').scrollIntoView({block: 'center', behavior: 'smooth'});
+}));
+
+// Anything that overwrites the editor remembers what was there, so a misclick never destroys someone's work.
+let replaced = null;
+function replaceEditor(source, name) {
+  const current = {source: $('#source').value, name: $('#bot-name').value};
+  if (current.source.trim() && current.source !== source) { replaced = current; $('#undo-load').hidden = false; }
+  $('#source').value = source;
+  if (name !== undefined) $('#bot-name').value = name;
+  updateSize();
+}
+$('#undo-load').addEventListener('click', () => {
+  if (!replaced) return;
+  $('#source').value = replaced.source; $('#bot-name').value = replaced.name; replaced = null; $('#undo-load').hidden = true; updateSize();
+});
 
 function updateSize() {
   $('#source-size').textContent = `${new TextEncoder().encode($('#source').value).length.toLocaleString('vi-VN')} B`;
@@ -320,6 +430,43 @@ function renderRanked(data) {
 
 // ---- competition --------------------------------------------------------
 
+// ---- competition: the team's own path through the tournament ----
+
+const fmtScore = number => String(number).replace('.', ',');
+function pairScore(row) {
+  const done = row.games.filter(g => g.result), count = kind => done.filter(g => g.result === kind).length;
+  const w = count('win'), d = count('draw'), l = count('loss');
+  return {mine: w + d / 2, theirs: l + d / 2, played: done.length, finished: row.games.length > 0 && done.length === row.games.length};
+}
+function pairSummary(row) {
+  if (row.bye) return 'Được nghỉ vòng này (BYE), tính 1 điểm';
+  if (row.forfeit === 'opponent') return `${row.opponent} bị truất quyền, bạn được xử thắng cặp`;
+  if (row.forfeit === 'self') return 'Đội bị truất quyền ở cặp này';
+  if (!row.games.length) return 'Đang chờ máy chấm xếp ván';
+  const s = pairScore(row);
+  if (!s.finished) return `Đang đấu, đã xong ${s.played}/${row.games.length} ván`;
+  return `${s.mine > s.theirs ? 'Thắng' : s.mine < s.theirs ? 'Thua' : 'Hòa'} ${fmtScore(s.mine)}–${fmtScore(s.theirs)}`;
+}
+
+async function renderJourney(id, t, mine) {
+  const box = $('#my-journey');
+  let path = null;
+  if (team && mine && t.round > 0) { try { path = await api(`/tournaments/${id}/mine`); } catch { path = null; } }
+  if (id !== selectedTournament) return;
+  if (!path?.rounds.length) { box.hidden = true; return; }
+  const standing = mine.entry_status === 'disqualified' ? 'Đội đã bị truất quyền'
+    : mine.eliminated ? `Đã bị loại ở vòng ${mine.eliminated}`
+    : t.status === 'completed' ? `Kết thúc · hạng ${mine.rank ?? '—'} · ${mine.tier}`
+    : t.format === 'knockout' ? 'Còn trong giải'
+    : `Hạng ${mine.rank ?? '—'} · ${fmtScore(mine.points)} điểm`;
+  const rows = [...path.rounds].reverse().map((row, index) => {
+    const s = pairScore(row), tone = !s.finished && !row.bye ? 'wait' : row.bye || row.forfeit === 'opponent' || s.mine > s.theirs ? 'won' : s.mine < s.theirs || row.forfeit === 'self' ? 'lost' : '';
+    return `<li class="${tone} ${index === 0 ? 'now' : ''}"><span class="round-no">Vòng ${row.round}</span><div><strong>${row.bye ? 'Nghỉ vòng này' : teamLink(row.opponent_id, row.opponent)}</strong><small>${escape(pairSummary(row))}</small></div><div class="games">${row.games.map((g, i) => `<button class="text-link" data-watch="${g.id}">${i === 2 ? 'Ván quyết định' : `Ván ${i + 1}`} ▶</button>`).join('')}</div></li>`;
+  }).join('');
+  box.innerHTML = `<div class="card-top"><div><p class="eyebrow">HÀNH TRÌNH CỦA ĐỘI BẠN</p><h3>${escape(standing)}</h3></div><span class="caption">Bấm “Ván” để xem lại từng nước đi</span></div><ol class="journey-list">${rows}</ol>`;
+  box.hidden = false;
+}
+
 // What a team sees between registering and the first game: it needs no clicks, the organiser starts the tournament.
 function renderWaitingRoom(t, result) {
   const box = $('#waiting-room'), mine = result.mine;
@@ -354,6 +501,7 @@ async function renderCompetition() {
     : t.locked ? 'Giải riêng: nhập mã tham gia do ban tổ chức gửi, rồi chọn một phiên bản để giữ suất của đội.'
     : 'Chọn một phiên bản để giữ suất của đội.';
   renderWaitingRoom(t, result);
+  await renderJourney(id, t, result.mine);
   const roundSelect = $('#round-select'), before = roundSelect.value;
   roundSelect.innerHTML = `<option value="">Bảng điểm tổng</option>${Array.from({length:t.round}, (_, i) => `<option value="${i+1}">Vòng ${i+1}</option>`).join('')}`;
   if ([...roundSelect.options].some(o => o.value === before)) roundSelect.value = before;
@@ -455,9 +603,11 @@ async function refresh() {
     submissionRows(); renderTeam();
     await loadMineLive();
     if (tab === 'overview') {
-      const [recent, r, f, c] = await Promise.all([team ? api('/matches?mine=1') : {items:[]}, api('/ranked'),
-        cached('feed', 15000, () => api('/feed')), cached(`campaign:${team?.id}`, 30000, () => api('/campaign'))]);
-      ranked = r; campaign = c; renderFeed(f); renderDashboard(recent.items);
+      const running = team && tournaments.find(t => ['frozen', 'running'].includes(t.status) && (team.entries || []).some(e => e.tournament_id === t.id && e.status === 'active'));
+      const [recent, r, f, c, path] = await Promise.all([team ? api('/matches?mine=1') : {items:[]}, api('/ranked'),
+        cached('feed', 15000, () => api('/feed')), cached(`campaign:${team?.id}`, 30000, () => api('/campaign')),
+        running ? cached(`journey:${running.id}`, 8000, () => api(`/tournaments/${running.id}/mine`)).catch(() => null) : null]);
+      ranked = r; campaign = c; renderFeed(f); renderDashboard(recent.items, running ? {t: running, path} : null);
       announceSeries(r.mine); announceRuns(c.mine);
     }
     if (tab === 'campaign') renderCampaign(await api('/campaign'));
@@ -489,9 +639,14 @@ document.addEventListener('click', event => {
   if (button.dataset.sample) action(button, async () => {
     const response = await fetch(`../sdk/examples/${button.dataset.sample}.py`);
     if (!response.ok) throw new Error('Không tải được bot mẫu.');
-    $('#source').value = await response.text(); $('#bot-name').value = {first:'Nước đầu tiên',hunter:'Thợ săn',guardian:'Người gác',template:'Khung chiến thuật'}[button.dataset.sample]; updateSize();
+    replaceEditor(await response.text(), {first:'Nước đầu tiên',hunter:'Thợ săn',guardian:'Người gác',template:'Khung chiến thuật',pathfinder:'Người dẫn đường'}[button.dataset.sample] || button.dataset.sample);
   });
-  if (button.dataset.source) action(button, async () => { const result = await api(`/submissions/${button.dataset.source}/source`); $('#source').value = result.source; updateSize(); $('#source').focus(); });
+  if (button.dataset.source) action(button, async () => { const result = await api(`/submissions/${button.dataset.source}/source`); setTab('lab'); replaceEditor(result.source); $('#source').focus(); });
+  if (button.dataset.dismissLab !== undefined && submissions[0]) { storage('ottv2-lab-dismissed', `${submissions[0].id}:${submissions[0].status}`); renderLabStatus(); }
+  if (button.id === 'solo-team' || button.dataset.solo !== undefined) action(button, async () => {
+    const created = await api('/team/solo', {}); await loadMe(); forget();
+    notice('Đã tạo đội cho bạn. Đổi tên đội ở tab “Đội của tôi” nếu muốn. Giờ hãy viết hoặc tạo bot đầu tiên.'); setTab('lab'); await refresh(); return created;
+  });
   if (button.dataset.rankBot) { setTab('ranked'); $('#ranked-submission').value = button.dataset.rankBot; }
   watch.onClick(button);
   if (button.dataset.watch) { if ($('#team-dialog').open) $('#team-dialog').close(); action(button, async () => { await watch.toggle(button.dataset.watch); renderLiveBanner(); if (tab === 'watch') await watch.directory(); }); }
@@ -515,12 +670,12 @@ $('#watch-random').addEventListener('click', event => action(event.target, async
 document.addEventListener('input', watch.onInput);
 $('#source').addEventListener('input', updateSize);
 $('#bot-name').addEventListener('input', updateSize);
-$('#source').addEventListener('keydown', event => { if (event.key === 'Tab') { event.preventDefault(); const el = event.target; el.setRangeText('    ', el.selectionStart, el.selectionEnd, 'end'); updateSize(); } });
-$('#source-file').addEventListener('change', () => action(null, async () => { const file = $('#source-file').files[0]; if (!file) return; if (file.size > 65536) throw new Error('File vượt quá 64 KiB.'); $('#source').value = await file.text(); $('#bot-name').value = file.name.replace(/\.py$/i, '').slice(0, 50); updateSize(); }));
+$('#source').addEventListener('keydown', event => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); $('#submit-form').requestSubmit(); return; } if (event.key === 'Tab') { event.preventDefault(); const el = event.target; el.setRangeText('    ', el.selectionStart, el.selectionEnd, 'end'); updateSize(); } });
+$('#source-file').addEventListener('change', () => action(null, async () => { const file = $('#source-file').files[0]; if (!file) return; if (file.size > 65536) throw new Error('File vượt quá 64 KiB.'); replaceEditor(await file.text(), file.name.replace(/\.py$/i, '').slice(0, 50)); $('#source-file').value = ''; }));
 
 $('#submit-form').addEventListener('submit', event => { event.preventDefault(); if (!requireTeam()) return; action(event.submitter, async () => {
   await api('/submissions', {name: $('#bot-name').value, source: $('#source').value.replace(/\r\n/g, '\n')}); forget();
-  notice('Đã lưu phiên bản. Kết quả kiểm tra sẽ cập nhật trong danh sách bên dưới.'); await refresh(); }); });
+  notice('Đã nộp bot. Máy chấm đang kiểm tra: kết quả hiện ngay ở đầu trang này, thường sau vài giây.'); $('#lab-status').scrollIntoView({block: 'nearest', behavior: 'smooth'}); await refresh(); }); });
 $('#practice-form').addEventListener('submit', event => { event.preventDefault(); if (!requireTeam()) return; action(event.submitter, async () => {
   const result = await api('/practice', {p1: $('#practice-a').value, p2: $('#practice-b').value, map: $('#practice-map').value});
   notice('Đã xếp hai ván đổi màu vào hàng chờ.'); await watch.toggle(result.ids[0]); }); });
@@ -599,6 +754,7 @@ else {
   try { const sample = await fetch('../sdk/examples/first.py'); if (sample.ok) { $('#source').value = await sample.text(); $('#bot-name').value = 'Nước đầu tiên'; } } catch {}
 }
 $('#source-size').textContent = `${new TextEncoder().encode($('#source').value).length.toLocaleString('vi-VN')} B`;
+initBuilder();
 await loadMe();
 // Shared links: /#watch=<match> opens a replay, /#team=<team> opens a profile.
 function route() {

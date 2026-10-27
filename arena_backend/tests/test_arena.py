@@ -819,6 +819,107 @@ class StartAndCodes(Base):
         self.assertEqual(self.client.get(f'/api/tournaments/{tid}').json['tournament']['status'], 'running')
 
 
+class SoloAndJourney(Base):
+    def test_solo_team_gets_a_neutral_public_name_and_only_one_team_per_person(self):
+        user = self.user('lonely')
+        with self.store.connect(True) as db:
+            db.execute("UPDATE users SET name='Nguyễn Văn Riêng Tư' WHERE id=?", (user,))
+        team = self.store.create_solo_team(user)
+        with self.store.connect() as db:
+            row = db.execute('SELECT name,owner FROM teams WHERE id=?', (team,)).fetchone()
+            self.assertEqual(db.execute('SELECT team_id FROM users WHERE id=?', (user,)).fetchone()[0], team)
+        self.assertEqual(row['owner'], user)
+        self.assertRegex(row['name'], r'^(Búa|Bao|Kéo|Lá) [^\d]+ \d\d$')
+        self.assertNotIn('Riêng', row['name'], 'the real name must never become a public team name')
+        with self.assertRaises(Problem) as again:
+            self.store.create_solo_team(user)
+        self.assertEqual(again.exception.status, 409)
+
+    def test_a_crowd_of_solo_players_all_get_distinct_names(self):
+        for i in range(300):
+            self.store.create_solo_team(self.user(f'solo{i}'))
+        with self.store.connect() as db:
+            rows = [r[0] for r in db.execute("SELECT name FROM teams WHERE status='active'")]
+        self.assertEqual(len(rows), 300)
+        self.assertEqual(len({name.lower() for name in rows}), 300)
+
+    def test_http_solo_team_needs_login_and_returns_the_team(self):
+        self.assertEqual(self.post('/team/solo', {}).status_code, 401)
+        self.register('walker')
+        made = self.post('/team/solo', {})
+        self.assertEqual(made.status_code, 201, made.json)
+        self.assertEqual(self.post('/team/solo', {}).status_code, 409)
+        me = self.client.get('/api/me').json
+        self.assertEqual(me['team']['id'], made.json['id'])
+
+    def test_tournament_path_lists_each_round_from_my_side(self):
+        tid = self.tournament('swiss', rounds=2)
+        teams = self.entrants(tid, 4)
+        self.store.start_tournament(tid, 'admin')
+        mine = teams[0]
+        owner = {}
+        with self.store.connect() as db:
+            for r in db.execute('SELECT id,team_id FROM submissions'):
+                owner[r['id']] = r['team_id']
+        self.finish_round(tid, lambda m: 'p1' if owner[m['p1']] == mine else 'p2')
+        path = self.store.my_tournament_path(tid, mine)
+        self.assertEqual(path['entry']['status'], 'active')
+        self.assertEqual([r['round'] for r in path['rounds']], [1])
+        row = path['rounds'][0]
+        self.assertEqual([g['result'] for g in row['games']], ['win', 'win'])
+        self.assertFalse(row['bye'])
+        self.assertIsNone(row['forfeit'])
+        self.assertIn(row['opponent_id'], {team for team in teams if team != mine})
+        loser = row['opponent_id']
+        self.assertEqual([g['result'] for g in self.store.my_tournament_path(tid, loser)['rounds'][0]['games']], ['loss', 'loss'])
+        outsider, _ = self.team('outsider')
+        self.assertEqual(self.store.my_tournament_path(tid, outsider), {'entry': None, 'rounds': []})
+
+    def test_tournament_path_shows_byes_forfeits_and_games_still_waiting(self):
+        tid = self.tournament('swiss', rounds=2)
+        teams = self.entrants(tid, 5)
+        self.store.start_tournament(tid, 'admin')
+        bye = next(t for t in teams if self.store.my_tournament_path(tid, t)['rounds'][0]['bye'])
+        row = self.store.my_tournament_path(tid, bye)['rounds'][0]
+        self.assertEqual((row['games'], row['opponent']), ([], None))
+        playing = next(t for t in teams if t != bye)
+        waiting = self.store.my_tournament_path(tid, playing)['rounds'][0]
+        self.assertTrue(all(g['result'] is None for g in waiting['games']))
+        opponent = waiting['opponent_id']
+        self.store.disqualify(tid, opponent, 'admin', 'test')
+        self.assertEqual(self.store.my_tournament_path(tid, playing)['rounds'][0]['forfeit'], 'opponent')
+        self.assertEqual(self.store.my_tournament_path(tid, opponent)['rounds'][0]['forfeit'], 'self')
+
+    def test_http_tournament_path_needs_a_team_and_an_existing_tournament(self):
+        self.register('walker')
+        tid = self.tournament()
+        self.assertEqual(self.client.get(f'/api/tournaments/{tid}/mine').status_code, 409, 'no team yet')
+        self.post('/team/solo', {})
+        self.assertEqual(self.client.get('/api/tournaments/nope/mine').status_code, 404)
+        self.assertEqual(self.client.get(f'/api/tournaments/{tid}/mine').json, {'entry': None, 'rounds': []})
+
+    def test_custom_example_plays_every_map_at_both_extremes_of_its_settings(self):
+        import re
+        source = (ROOT / 'sdk/examples/custom.py').read_text(encoding='utf-8')
+        for key in ('CHASE_GOAL', 'CAPTURE', 'SAFETY', 'RANDOMNESS'):
+            self.assertEqual(len(re.findall(rf'^{key}\s*=\s*\d+', source, re.M)), 1, key)
+        local = Geometry.local(self)
+        low = {'CHASE_GOAL': 0, 'CAPTURE': 0, 'SAFETY': 0, 'RANDOMNESS': 0}
+        high = {'CHASE_GOAL': 10, 'CAPTURE': 30, 'SAFETY': 30, 'RANDOMNESS': 20}
+        for name in ('standard', 'river', 'maze8', 'pillars', 'chaos:3', 'chaos:9', 'arena8'):
+            for values in (low, high):
+                text = source
+                for key, value in values.items():
+                    text = re.sub(rf'^{key}\s*=\s*\d+', f'{key} = {value}', text, flags=re.M)
+                path = Path(tempfile.mkdtemp()) / 'custom.py'
+                path.write_text(text, encoding='utf-8')
+                bot = local.Player(*local.load_bot(str(path)))
+                for first, second in ((bot, local.Player('random', local.bot_random, None)),
+                                      (local.Player('random', local.bot_random, None), bot)):
+                    winner, reason, *_ = local.play(first, second, 5, False, name)
+                    self.assertFalse(str(reason).startswith('technical'), (name, values, reason))
+
+
 class Ranked(Base):
     def test_ranked_queue_swaps_colors_and_settles_once(self):
         (a, _), (b, _) = self.team('Alice'), self.team('Bob')

@@ -19,10 +19,10 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from .store import Store, Problem, ROOT, RULES_HASH, LIMITS, TEAM_SIZE, SYSTEM_TEAM, MAPS, GEOMETRY_MAPS, uid, now
 
 PUBLIC_FILES = {'rules.js', 'arena/arena.js', 'arena/admin.js', 'arena/common.js', 'arena/watch.js', 'arena/arena.css',
-                'arena/theme.js', 'arena/guide.html'}
+                'arena/theme.js', 'arena/explain.js', 'arena/builder.js', 'arena/guide.html'}
 # Every script and stylesheet is requested as <name>?v=<hash of all of them>. A browser or CDN that still holds
 # an older copy can then never pair it with a newer page: a new deploy changes every URL.
-VERSIONED_FILES = ('arena/arena.js', 'arena/admin.js', 'arena/common.js', 'arena/watch.js', 'arena/arena.css', 'arena/theme.js', 'rules.js')
+VERSIONED_FILES = ('arena/arena.js', 'arena/admin.js', 'arena/common.js', 'arena/watch.js', 'arena/arena.css', 'arena/theme.js', 'arena/explain.js', 'arena/builder.js', 'rules.js')
 ASSET_VERSION = hashlib.sha256(b''.join((ROOT / name).read_bytes() for name in VERSIONED_FILES)).hexdigest()[:10]
 JS_IMPORT = re.compile(r"(from\s+')(\.{1,2}/[\w./-]+\.js)(')")
 HTML_ASSET = re.compile(r'((?:src|href)=")(\./[\w.-]+\.(?:js|css))(")')
@@ -35,7 +35,7 @@ NO_SCRIPT_PAGE = (
     '<p><a class="button primary" href="/">Quay lại trang chính</a></p></main></body></html>')
 
 SAMPLES = {'sdk/examples/first.py', 'sdk/examples/hunter.py', 'sdk/examples/guardian.py',
-           'sdk/examples/pathfinder.py', 'sdk/examples/template.py', 'sdk/local_arena.py'}
+           'sdk/examples/pathfinder.py', 'sdk/examples/custom.py', 'sdk/examples/template.py', 'sdk/local_arena.py'}
 SESSION_SECONDS = int(os.getenv('ARENA_SESSION_DAYS', '7')) * 86400
 
 
@@ -371,6 +371,12 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         rate('team_user', user)
         return jsonify(id=store.create_team(user, text(body(), 'name', 2, 40))), 201
 
+    @app.post('/api/team/solo')
+    def solo_team():
+        user = auth()
+        rate('team_user', user)
+        return jsonify(id=store.create_solo_team(user)), 201
+
     @app.post('/api/team/join')
     def join_team():
         user = auth()
@@ -576,6 +582,14 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         offset, limit = paging(100, 2000)
         return jsonify(items=rows[offset:offset + limit], total=len(rows), count=len(everyone),
                        mine=next((p for p in everyone if team and team in (p['a'], p['b'])), None))
+
+    @app.get('/api/tournaments/<tid>/mine')
+    def tournament_path(tid):
+        user, team = team_required()
+        with store.connect() as db:
+            if not db.execute('SELECT 1 FROM tournaments WHERE id=?', (tid,)).fetchone():
+                raise Problem('Không tìm thấy giải.', 404)
+        return jsonify(store.my_tournament_path(tid, team))
 
     @app.post('/api/tournaments/<tid>/join')
     def join(tid):
