@@ -3,12 +3,11 @@
 //   states : trạng thái bàn cờ sau từng nước (states[0] là thế ban đầu)
 //   follow : đang bám theo nước mới nhất của ván trực tiếp
 import {$, escape, api, notice, kinds, formatTime, badge, board, outcome, newGame, pieceCounts, teamLink, mapLabel,
-  extendStates, compactMoves} from './common.js';
+  extendStates, compactMoves, pieceIcon, PIECE_NAMES} from './common.js';
 
 // Live viewing is a luxury for the grader and the API, so each person watches at most two boards.
 const MAX_WATCH = 2;
 const LIVE = ['queued', 'running', 'failed'];
-const SHORT = {rock: 'Đ', paper: 'L', scissors: 'K'};
 const SIDE = {p1: 'Xanh', p2: 'Đỏ'};
 const EMPTY = '<div class="empty">Chọn một ván ở bên trái để theo dõi hoặc xem lại.<br>Đội bạn đang đấu? Ván sẽ hiện ở đầu danh sách.</div>';
 
@@ -23,7 +22,7 @@ export function createWatch(ctx) {
 
   function material(state) {
     const counts = pieceCounts(state.board);
-    const side = (who, label) => `<span class="side ${who}">${label} ${['rock', 'paper', 'scissors'].map(t => `<b class="${counts[who][t] <= 1 ? 'low' : ''}" title="${counts[who][t]} quân ${{rock: 'Đấm', paper: 'Lá', scissors: 'Kéo'}[t]}">${SHORT[t]}${counts[who][t]}</b>`).join('')}</span>`;
+    const side = (who, label) => `<span class="side ${who}">${label} ${['rock', 'paper', 'scissors'].map(t => `<b class="${counts[who][t] <= 1 ? 'low' : ''}" title="${counts[who][t]} quân ${PIECE_NAMES[t]}">${pieceIcon(t)}${counts[who][t]}</b>`).join('')}</span>`;
     return `${side('p1', 'Xanh')}${side('p2', 'Đỏ')}`;
   }
 
@@ -82,8 +81,15 @@ export function createWatch(ctx) {
     set('strip', strip(item));
     set('material', material(state));
     const finished = item.status === 'done' && at === end;
-    el.querySelector('[data-r=board]').innerHTML = board(state, {flip: item.flip}) +
-      (finished ? `<div class="result-banner ${m.winner}">${escape(outcome(m))}</div>` : item.status === 'cancelled' ? '<div class="result-banner">Ván đã bị hủy</div>' : '');
+    // Redraw the board only when the picture changes; one ply forward slides the moved piece instead of jumping.
+    const shown = `${item.gen}|${at}|${item.flip}|${finished}|${item.status === 'cancelled'}`, wrap = el.querySelector('[data-r=board]');
+    if (wrap.dataset.shown !== shown) {
+      const animate = item.drawn?.at === at - 1 && item.drawn.flip === item.flip && item.drawn.gen === item.gen;
+      wrap.style.setProperty('--move-ms', `${item.follow ? (at < end ? 120 : 220) : Math.min(260, Math.round(520 / item.speed))}ms`);
+      wrap.innerHTML = board(state, {flip: item.flip, animate}) +
+        (finished ? `<div class="result-banner ${m.winner}"><span class="result-mark" aria-hidden="true">${m.winner === 'draw' ? '🤝' : '🏆'}</span>${escape(outcome(m))}</div>` : item.status === 'cancelled' ? '<div class="result-banner">Ván đã bị hủy</div>' : '');
+      wrap.dataset.shown = shown; item.drawn = {at, flip: item.flip, gen: item.gen};
+    }
     set('caption', caption(item));
     const range = el.querySelector('[data-replay]');
     range.max = end; range.value = at; range.disabled = end === 0;
@@ -105,12 +111,13 @@ export function createWatch(ctx) {
       <p class="watch-note" data-r="note"></p>
       <details class="moves-box"${item.large || innerWidth >= 900 ? ' open' : ''}><summary>Nước đi (<span data-r="count">0</span>)</summary><ol class="move-list" data-r="moves"></ol><button class="text-link" data-copymoves="${id}">Sao chép danh sách nước đi</button></details>
       ${m.sibling ? `<div class="action-row"><button class="button" data-sibling="${id}">${m.game_number === 1 ? 'Xem ván 2' : 'Xem ván 1'} ↗</button></div>` : ''}</div>`;
-    item.listed = -1; item.active = null;
+    item.listed = -1; item.active = null; item.drawn = null;
     paint(id);
   }
 
   function setMoves(item, compact) {
     item.moves = compact.slice();
+    item.gen = (item.gen || 0) + 1;   // a rebuilt move list may differ at the same ply, so the board must redraw
     item.states = [newGame(item.meta?.map)];
     extendStates(item.states, item.moves);
     item.position = Math.min(item.position, last(item));

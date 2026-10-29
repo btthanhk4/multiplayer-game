@@ -93,17 +93,37 @@ export function poller(work, interval) {
   return {now: run, schedule};
 }
 
-export function board(state, {flip = false} = {}) {
+// Line icons for the three pieces (24×24, drawn with the side's colour): a fist, a sheet of paper, scissors.
+const PIECE_PATHS = {
+  rock: 'M6.5 12V8.6a1.75 1.75 0 0 1 3.5 0V11M10 10.6V7.4a1.75 1.75 0 0 1 3.5 0v3.2M13.5 10.6V8a1.75 1.75 0 0 1 3.5 0v3M17 11.4v-1a1.75 1.75 0 0 1 3.5 0v4.1a7 7 0 0 1-7 7H12a6.5 6.5 0 0 1-6.5-6.5v-1.6a2 2 0 0 1 2-2H12a2 2 0 0 1 0 4H9.6',
+  paper: 'M14.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5zM14.5 3v4.5H19M8.5 12h7M8.5 15.5h7M8.5 19h4',
+  scissors: 'M9.5 6.5a3 3 0 1 1-6 0a3 3 0 1 1 6 0M9.5 17.5a3 3 0 1 1-6 0a3 3 0 1 1 6 0M8.6 8.6 12 12M20.5 3.5 8.6 15.4M14.6 14.6l5.9 5.9',
+};
+export const PIECE_NAMES = {rock: 'Đấm', paper: 'Lá', scissors: 'Kéo'};
+export const pieceIcon = type => `<svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="${PIECE_PATHS[type]}"/></svg>`;
+const stone = (piece, extra = '') => `<span class="stone ${piece.owner} ${piece.type}${extra}">${pieceIcon(piece.type)}</span>`;
+
+export function board(state, {flip = false, animate = false} = {}) {
   // Flipping turns the board 180 degrees so the viewer's own side is at the bottom. The board may be 8×8 or 9×9.
-  const n = state.board.length;
+  // `animate` means the previous picture was the ply just before: the moved piece slides in and a captured one fades out.
+  const n = state.board.length, move = state.lastMove;
   const order = Array.from({length: n}, (_, i) => flip ? n - 1 - i : i);
+  const at = (square, r, c) => square && square[0] === r && square[1] === c;
+  const sign = flip ? -1 : 1;
   return `<div class="mini-board n${n}${flip ? ' flipped' : ''}" role="img" aria-label="Bàn cờ ${n} nhân ${n}, ${state.revision} nước">${order.flatMap((r, i) => order.map((c, j) => {
     const p = state.board[r][c], wall = p?.type === 'wall';
     const goal=r===0&&c===n-1?'goal-blue':r===n-1&&c===0?'goal-red':'';
-    const last=state.lastMove&&[state.lastMove.from,state.lastMove.to].some(x=>x[0]===r&&x[1]===c);
-    const labels=`${j===0&&!goal?`<small class="rank">${n-r}</small>`:''}${i===n-1?`<small class="file">${'abcdefghi'[c]}</small>`:''}`;
+    const from=at(move?.from,r,c), to=at(move?.to,r,c);
+    const labels=`${j===0&&!goal?`<small class="rank">${n-r}</small>`:''}${i===n-1&&!goal?`<small class="file">${'abcdefghi'[c]}</small>`:''}`;
     if (wall) return `<div class="square wall" title="${squareName(r,c,n)} · Vật cản"><span class="block"></span></div>`;
-    return `<div class="square ${(r+c)%2?'dark':''} ${goal} ${last?'last':''}" title="${squareName(r,c,n)}${p?` · ${p.owner==='p1'?'Xanh':'Đỏ'} · ${{rock:'Đấm',paper:'Lá',scissors:'Kéo'}[p.type]}`:''}">${p?`<span class="stone ${p.owner}">${{rock:'Đ',paper:'L',scissors:'K'}[p.type]}</span>`:goal?`<small>${squareName(r,c,n)}</small>`:''}${labels}</div>`;
+    let pieces = '';
+    if (p) {
+      const slide = animate && to && p.owner === move.side
+        ? ` slide fx${(move.from[1] - c) * sign} fy${(move.from[0] - r) * sign}` : '';
+      const taken = slide && move.captured ? stone({owner: move.side === 'p1' ? 'p2' : 'p1', type: move.captured}, ' ghost') : '';
+      pieces = taken + stone(p, slide);
+    } else if (goal) pieces = `<small>${squareName(r,c,n)}</small>`;
+    return `<div class="square ${(r+c)%2?'dark':''} ${goal} ${from?'last from':to?'last to':''}" title="${squareName(r,c,n)}${p?` · ${p.owner==='p1'?'Xanh':'Đỏ'} · ${PIECE_NAMES[p.type]}`:''}">${pieces}${labels}</div>`;
   })).join('')}</div>`;
 }
 

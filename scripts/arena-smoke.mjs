@@ -291,6 +291,20 @@ try {
   const flippedBefore=await page.locator('.mini-board.flipped').count();
   await page.locator('[data-flip]').click();
   assert.equal(await page.locator('.mini-board.flipped').count(),flippedBefore?0:1,'flip toggles the board orientation');
+  // Stepping one ply forward slides the moved piece; pieces are drawn as icons, not letters.
+  await page.locator('[data-step="1"]').click();
+  assert.equal(await page.locator('.mini-board .stone.slide').count(),1,'one ply forward animates exactly one piece');
+  assert.ok(await page.locator('.mini-board .stone .glyph').count()>=6);
+  await page.locator('[data-step="-1"]').click();
+  assert.equal(await page.locator('.mini-board .stone.slide').count(),0,'stepping back does not animate');
+  // The board picker restyles every board at once and is remembered after a reload.
+  assert.equal(await page.evaluate(()=>document.documentElement.dataset.skin),'wood');
+  await page.locator('.masthead .skin-picker select').selectOption('marble');
+  assert.equal(await page.evaluate(()=>document.documentElement.dataset.skin),'marble');
+  assert.equal(await page.locator('.watch-skin select').inputValue(),'marble','every picker on the page follows the choice');
+  assert.equal(await page.evaluate(()=>localStorage.getItem('ottv2-skin')),'marble','the choice is saved for the next visit');
+  await page.locator('.masthead .skin-picker select').selectOption('wood');
+  await page.evaluate(()=>document.activeElement.blur());
   await page.keyboard.press('Home');
   assert.match(await page.locator('.watch-note').textContent(),/Nước 0\//);
   await page.keyboard.press('End');

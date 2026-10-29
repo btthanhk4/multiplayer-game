@@ -55,3 +55,37 @@ test('mỗi tính cách có sẵn nằm trong giới hạn và có tên khác nh
     assert.equal(clamp(field, preset.values[field.key]), preset.values[field.key], `${preset.id}.${field.key}`);
   }
 });
+
+test('bàn cờ vẽ quân bằng biểu tượng và chỉ trượt quân khi được yêu cầu', async () => {
+  const {board, newGame, pieceIcon} = await import('../arena/common.js');
+  const {applyMove} = await import('../rules.js');
+  const start = newGame();
+  const html = board(start);
+  assert.doesNotMatch(html, /class="stone[^"]*">[ĐLK]</, 'không còn quân chữ cái');
+  assert.equal((html.match(/<svg class="glyph"/g) || []).length, 18, 'mỗi quân một biểu tượng');
+  for (const type of ['rock', 'paper', 'scissors']) assert.match(pieceIcon(type), /<path d="M/);
+  const moved = applyMove(start, 'p1', [6, 0], [5, 0]).state;
+  assert.doesNotMatch(board(moved), /slide/, 'không có hiệu ứng nếu không yêu cầu');
+  assert.match(board(moved, {animate: true}), /stone p1 \w+ slide fx0 fy1"/, 'quân Xanh đi lên một ô: trượt từ ô bên dưới');
+  assert.match(board(moved, {animate: true, flip: true}), /slide fx0 fy-1"/, 'bàn xoay thì hướng trượt đảo lại');
+  assert.equal((board(moved, {animate: true}).match(/ghost/g) || []).length, 0, 'không ăn quân thì không có quân mờ');
+});
+
+test('ăn quân để lại quân bị ăn mờ dần đúng màu và loại', async () => {
+  const {board} = await import('../arena/common.js');
+  const state = {revision: 5, board: Array.from({length: 9}, () => Array(9).fill(null)),
+    lastMove: {side: 'p2', from: [3, 3], to: [4, 4], type: 'scissors', captured: 'paper'}};
+  state.board[4][4] = {owner: 'p2', type: 'scissors'};
+  const html = board(state, {animate: true});
+  assert.match(html, /stone p1 paper ghost/);
+  assert.match(html, /stone p2 scissors slide fx-1 fy-1/);
+  assert.match(html, /class="square [^"]*last to"/);
+  assert.match(html, /class="square [^"]*last from"/);
+});
+
+test('ô đích không bị chồng nhãn tọa độ', async () => {
+  const {board, newGame} = await import('../arena/common.js');
+  const html = board(newGame());
+  const goal = html.match(/<div class="square [^"]*goal-red[^"]*"[^>]*>(.*?)<\/div>/)[1];
+  assert.doesNotMatch(goal, /class="(rank|file)"/);
+});
