@@ -3,7 +3,7 @@
 // Linux: ARENA_PYTHON=.venv/bin/python node scripts/arena-smoke.mjs
 import {chromium} from 'playwright';
 import {spawn,spawnSync} from 'node:child_process';
-import {mkdirSync,mkdtempSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {randomBytes} from 'node:crypto';
 import assert from 'node:assert/strict';
@@ -311,6 +311,25 @@ try {
   assert.match(await page.locator('.watch-note').textContent(),new RegExp(`Nước ${compact.length}/`));
   if(real.sibling) await page.locator('[data-sibling]').waitFor();
   await page.screenshot({path:'artifacts/arena-watch-live.png',fullPage:true});
+  // A finished game saves as a file; a file from local_arena.py --replay opens in the browser without the server.
+  await page.evaluate(()=>document.querySelectorAll('.moves-box').forEach(box=>{box.open=true;}));
+  const [download]=await Promise.all([page.waitForEvent('download'),page.locator('[data-download]').click()]);
+  const saved=JSON.parse(readFileSync(await download.path(),'utf8'));
+  assert.equal(saved.format,'ottv2-replay');
+  assert.equal(saved.moves.length,compact.length,'the saved replay holds every move');
+  await page.locator('#replay-file').setInputFiles({name:'van-1.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(saved))});
+  const local=page.locator('.watch-card').filter({hasText:'TỪ MÁY BẠN'});
+  await local.waitFor();
+  assert.equal(await local.locator('[data-r=count]').textContent(),String(compact.length),'every move of the file is listed');
+  assert.equal(await local.locator('[data-share]').count(),0,'a file from this computer has no share link');
+  await local.locator(`[data-r=moves] button[data-ply="${compact.length}"]`).click();
+  await local.locator('.result-banner').waitFor();
+  await local.locator('.close-button').click();
+  await page.locator('#replay-file').setInputFiles({name:'hong.json',mimeType:'application/json',buffer:Buffer.from('{"moves":[{"from":[0,0],"to":[5,5]}]}')});
+  await page.locator('#notice.error').filter({hasText:'không khớp luật'}).waitFor();
+  await page.locator('#replay-file').setInputFiles({name:'rac.json',mimeType:'application/json',buffer:Buffer.from('not json')});
+  await page.locator('#notice.error').filter({hasText:'không phải JSON'}).waitFor();
+  assert.equal(await page.locator('.watch-card').count(),1,'refused files open no board');
   await page.unroute(new RegExp(`/api/matches/${target}$`));
   await page.unroute(new RegExp(`/api/matches/${target}/live`));
 

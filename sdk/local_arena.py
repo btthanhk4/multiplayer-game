@@ -6,11 +6,13 @@
     python local_arena.py bot.py --vs khac.py       # đấu với một file bot khác
     python local_arena.py bot.py --trace            # in từng nước đi và bàn cờ
     python local_arena.py bot.py --map river        # thử trên bản đồ khác (xem --help): bàn 8×8, vật cản...
+    python local_arena.py bot.py --replay           # ghi replays/van-1.json...; xem lại ở Khán đài → Mở replay từ máy
 
 Luật, giới hạn thời gian và dữ liệu `observation` giống hệt Arena. Mỗi ván đổi màu luân phiên.
 Kết quả ở đây chỉ để tham khảo: máy chấm thật chạy trong sandbox và có thể chậm hơn máy bạn.
 """
 import argparse
+import json
 import random
 import runpy
 import sys
@@ -354,7 +356,7 @@ class Fault(Exception):
     pass
 
 
-def play(first, second, seed, trace=False, map_name='standard'):
+def play(first, second, seed, trace=False, map_name='standard', record=None):
     players = {'p1': first, 'p2': second}
     budget = {'p1': GAME_SECONDS, 'p2': GAME_SECONDS}
     slowest = {'p1': 0.0, 'p2': 0.0}
@@ -393,6 +395,8 @@ def play(first, second, seed, trace=False, map_name='standard'):
         if error:
             return other, f'technical: {error} {answer}', plies, slowest, spent
         state, plies = new_state, plies + 1
+        if record is not None:
+            record.append({key: state['lastMove'][key] for key in ('side', 'from', 'to', 'notation')})
         if trace:
             print(f"{plies:>3}. {side} {state['lastMove']['notation']}  ({used*1000:.0f} ms)")
             print(show_board(state), end='\n\n')
@@ -411,6 +415,8 @@ def main():
     parser.add_argument('--map', default='standard',
                         help=' | '.join(MAP_NAMES) + ' | random | chaos (hai loại cuối khác nhau mỗi cặp ván)')
     parser.add_argument('--trace', action='store_true', help='in từng nước đi')
+    parser.add_argument('--replay', nargs='?', const='replays', metavar='THƯ_MỤC',
+                        help='ghi mỗi ván thành một file JSON (mặc định replays/) để xem lại ở Khán đài của Arena')
     args = parser.parse_args()
     mine, theirs = Player(*load_bot(args.bot)), Player(*load_bot(args.vs))
     score = {'win': 0, 'draw': 0, 'loss': 0}
@@ -420,14 +426,36 @@ def main():
         first, second = (mine, theirs) if mine_first else (theirs, mine)
         seeded = args.map in ('random', 'chaos')
         map_name = f'{args.map}:{(args.seed + game // 2 * 7919) & 0xFFFFFFF:x}' if seeded else args.map
-        winner, reason, plies, slowest, spent = play(first, second, args.seed + game * 101, args.trace, map_name)
+        record = [] if args.replay else None
+        winner, reason, plies, slowest, spent = play(first, second, args.seed + game * 101, args.trace, map_name, record)
         mine_side = 'p1' if mine_first else 'p2'
         result = 'draw' if winner == 'draw' else 'win' if winner == mine_side else 'loss'
         score[result] += 1
         label = {'win': 'THẮNG', 'draw': 'HÒA', 'loss': 'THUA'}[result]
         print(f"ván {game + 1} ({'Xanh' if mine_first else 'Đỏ '}, {map_name}): {label:<5} {reason}, {plies} nửa lượt, "
               f"nước chậm nhất của bạn {slowest[mine_side]*1000:.0f} ms, tổng {spent[mine_side]:.1f}s")
+        if record is not None:
+            print(f'    replay: {save_replay(args.replay, game + 1, map_name, first, second, mine, winner, reason, record, spent)}')
     print(f"\nKết quả: {score['win']} thắng · {score['draw']} hòa · {score['loss']} thua")
+    if args.replay:
+        print('Xem lại: mở Arena → Khán đài → "Mở replay từ máy" rồi chọn file .json. '
+              'File chỉ được đọc trên trình duyệt, không gửi lên máy chủ.')
+
+
+def save_replay(folder, number, map_name, first, second, mine, winner, reason, moves, spent):
+    """Một ván thành JSON cùng dạng replay của Arena (map, winner, reason, moves) để Khán đài phát lại."""
+    names = {'p1': first.name, 'p2': second.name}
+    names['p1' if first is mine else 'p2'] += ' (bạn)'
+    technical = reason.startswith('technical')
+    replay = {'format': 'ottv2-replay', 'version': 1, 'map': map_name, 'p1': names['p1'], 'p2': names['p2'],
+              'winner': winner, 'reason': 'technical:local' if technical else reason,
+              'detail': reason.split(':', 1)[1].strip() if technical else None,
+              'moves': moves, 'time_used': {side: round(spent[side], 3) for side in ('p1', 'p2')}}
+    path = Path(folder)
+    path.mkdir(parents=True, exist_ok=True)
+    path /= f'van-{number}.json'
+    path.write_text(json.dumps(replay, ensure_ascii=False), encoding='utf-8')
+    return path
 
 
 if __name__ == '__main__':

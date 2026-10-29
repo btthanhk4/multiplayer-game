@@ -698,3 +698,10 @@ input::placeholder,textarea::placeholder{color:var(--faint)}
   .stone.ghost{display:none}
   .tile:hover,.tournament-card:hover,.hero-art:hover .hero-stone{transform:none}
 }
+/* V9: replay files opened from this computer */
+.match-directory .replay-file{margin:0 0 12px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.match-directory #replay-open{width:100%;min-height:40px;font-size:12px}
+.replay-file .caption{margin:6px 0 0}
+.live-pill.local{background:var(--solid);animation:none}
+.moves-actions{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:6px}
+.watch-grid.dropping{outline:2px dashed var(--green);outline-offset:4px}

@@ -531,7 +531,9 @@ def choose_move(observation):
 python local_arena.py bot.py --vs random --games 10
 python local_arena.py bot.py --vs first            # đối thủ luôn đi nước hợp lệ đầu tiên
 python local_arena.py bot.py --vs template.py      # đấu với một file bot khác
-python local_arena.py bot.py --trace --games 1     # in từng nước và bàn cờ để gỡ lỗi</pre>
+python local_arena.py bot.py --trace --games 1     # in từng nước và bàn cờ để gỡ lỗi
+python local_arena.py bot.py --replay              # ghi replays/van-1.json, van-2.json… để xem lại trên web</pre>
+        <p><b>Xem lại ván chạy ở máy bằng bàn cờ của Arena:</b> chạy với <code>--replay</code>, rồi vào tab <i>Khán đài</i> → <i>Mở replay từ máy</i> (hoặc kéo thả file .json vào bàn cờ). File chỉ được đọc trên trình duyệt của bạn, không gửi lên máy chủ và không tốn lượt đấu tập. Ván trên Arena cũng tải về được bằng nút <i>Tải file replay</i> trong hộp <i>Nước đi</i>.</p>
         <p>Công cụ in kết quả từng ván (thắng/hòa/thua, lý do, số nửa lượt, <b>nước chậm nhất</b> của bạn). Lỗi trong bot hiện ngay với tên lỗi, ví dụ <code>technical: Bot lỗi thực thi: KeyError: 'owner'</code>. Ván đổi màu luân phiên để bạn thấy bot chơi tốt ở cả hai phe.</p>
         <p class="callout">Máy chấm chạy trong sandbox, có thể <b>chậm hơn máy bạn</b> khoảng 2–3 lần. Nếu nước chậm nhất ở máy bạn đã gần 1 giây, hãy giảm độ sâu tìm kiếm.</p>
         <h3>9.1. "Hợp lệ" nghĩa là gì?</h3>

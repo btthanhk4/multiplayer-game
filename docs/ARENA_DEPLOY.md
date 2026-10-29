@@ -98,7 +98,7 @@ Docker Compose: xem [deploy/README.md](../deploy/README.md).
 
 ## 5. Public qua Cloudflare Tunnel
 
-Trỏ hostname về `http://127.0.0.1:8080`. Đặt `ARENA_ORIGIN=https://…` đúng với URL trình duyệt dùng, và bật `ARENA_TRUST_CLOUDFLARE=1` khi API chỉ bind loopback, để giới hạn tần suất dùng IP thật. Mã mời (`ARENA_REGISTRATION_CODE`) là bắt buộc khi public. Đây là lớp chặn chính, vì giới hạn theo IP được đặt rộng (mặc định 3.000 lượt đăng ký/giờ/IP) cho cả trường chung NAT. Giới hạn theo tài khoản/đội vẫn chặt: 20 lần đăng nhập sai/15 phút/tài khoản, 20 bài nộp/giờ/đội, tối đa 3 bài chờ kiểm tra/đội. Tất cả đều chỉnh được bằng biến `ARENA_RATE_*`.
+Trỏ hostname về `http://127.0.0.1:8080`. Đặt `ARENA_ORIGIN=https://…` đúng với URL trình duyệt dùng, và bật `ARENA_TRUST_CLOUDFLARE=1` khi API chỉ bind loopback, để giới hạn tần suất dùng IP thật. Nếu cloudflared gọi API qua địa chỉ LAN của chính máy chủ (ví dụ `http://192.168.10.185:8091`), hãy đặt `ARENA_TRUSTED_PROXIES=192.168.10.185`: thiếu biến này, mọi người vào qua Cloudflare bị tính chung **một** IP, và một người spam có thể dùng hết hạn mức đăng ký/đăng nhập của cả trường. Chỉ request đến từ đúng địa chỉ đó mới được tin header `CF-Connecting-IP`. Mã mời (`ARENA_REGISTRATION_CODE`) là bắt buộc khi public. Đây là lớp chặn chính, vì giới hạn theo IP được đặt rộng (mặc định 3.000 lượt đăng ký/giờ/IP) cho cả trường chung NAT. Giới hạn theo tài khoản/đội vẫn chặt: 20 lần đăng nhập sai/15 phút cho mỗi tài khoản từ mỗi địa chỉ (và 100 lần từ mọi địa chỉ cộng lại, để người khác không khóa được tài khoản của bạn chỉ bằng 20 lần đoán sai), 20 bài nộp/giờ/đội, tối đa 3 bài chờ kiểm tra/đội. Tất cả đều chỉnh được bằng biến `ARENA_RATE_*`.
 
 ## 6. Nộp bài
 

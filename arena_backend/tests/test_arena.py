@@ -6,6 +6,7 @@ import sqlite3
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from arena_backend.app import create_app
@@ -597,7 +598,7 @@ class Tournaments(Base):
         admin = self.register('organiser')
         with self.store.connect(True) as db:
             db.execute("UPDATE users SET role='admin' WHERE id=?", (admin,))
-        self.post('/team', {'name': 'BTC'})
+        self.post('/team', {'name': '=1+2 BTC'})   # a formula-looking name must stay text in Excel
         response = self.post('/admin/tournaments', {'name': 'Giải tân sinh viên', 'format': 'swiss', 'rounds': 3,
                                                     'deadline': now()+120, 'auto_advance': True})
         self.assertEqual(response.status_code, 201, response.json)
@@ -610,6 +611,7 @@ class Tournaments(Base):
         export = self.client.get(f'/api/admin/tournaments/{tid}/export')
         self.assertEqual(export.status_code, 200)
         self.assertIn('Xếp loại', export.get_data(as_text=True))
+        self.assertIn(",'=1+2 BTC,", export.get_data(as_text=True))
         self.assertEqual(self.client.get('/api/admin/overview').json['teams'], 1)
 
 
@@ -1198,6 +1200,33 @@ class SignInCornerCases(Base):
         self.assertEqual(codes[20:], [429, 429])
         self.assertEqual(self.attempt('/login', {'username': 'bystander', 'password': self.PASSWORD}).status_code, 200)
 
+    def login_from(self, address, password, username='target', **headers):
+        return self.app.test_client().post('/api/login', json={'username': username, 'password': password},
+                                           headers={'Origin': 'http://localhost:8080', **headers},
+                                           environ_base={'REMOTE_ADDR': address})
+
+    def test_wrong_guesses_from_one_address_do_not_lock_the_owner_out_elsewhere(self):
+        self.signup(username='target')
+        codes = [self.login_from('10.1.1.1', 'wrong-password-1').status_code for _ in range(21)]
+        self.assertEqual(codes[-1], 429)
+        self.assertEqual(self.login_from('10.2.2.2', self.PASSWORD).status_code, 200)
+        # Guesses spread over many addresses still hit the per-account ceiling.
+        for n in range(100):
+            self.login_from(f'10.3.{n // 200}.{n % 200}', 'wrong-password-1')
+        self.assertEqual(self.login_from('10.4.4.4', self.PASSWORD).status_code, 429)
+
+    def test_real_visitor_address_is_read_only_from_a_trusted_proxy(self):
+        with unittest.mock.patch.dict('os.environ', {'ARENA_TRUSTED_PROXIES': '192.168.10.185'}):
+            app = create_app(self.tmp.name, origin='http://localhost:8080', registration_code='test-invite', bosses=False)
+        self.store.close()
+        self.app, self.store = app, app.extensions['store']
+        self.login_from('192.168.10.185', 'x', username='nobody', **{'CF-Connecting-IP': '203.0.113.7'})
+        self.login_from('192.168.10.99', 'x', username='nobody', **{'CF-Connecting-IP': '203.0.113.8'})
+        self.login_from('192.168.10.185', 'x', username='nobody', **{'CF-Connecting-IP': 'not-an-ip'})
+        with self.store.connect() as db:
+            keys = {r[0] for r in db.execute("SELECT key FROM rate_limits WHERE key LIKE 'login_ip:%'")}
+        self.assertEqual(keys, {'login_ip:203.0.113.7', 'login_ip:192.168.10.99', 'login_ip:192.168.10.185'})
+
     def test_registration_closed_logout_and_stale_cookie(self):
         self.store.set_settings('admin', {'registration_open': False})
         self.app.extensions['cache'].clear()
@@ -1324,6 +1353,33 @@ class LocalArena(unittest.TestCase):
             referee.close()
         self.assertEqual(len({str(local.new_game(n)['board']) for n in names[:len(local.MAP_NAMES)]}), len(local.MAP_NAMES), 'the named maps differ')
         self.assertGreater(len({str(local.new_game(n)['board']) for n in names[len(local.MAP_NAMES):]}), 200, 'random and chaos maps vary with the seed')
+
+    def test_replay_files_written_locally_replay_on_the_referee(self):
+        import subprocess
+        import sys
+        with tempfile.TemporaryDirectory() as folder:
+            for name in ('standard', 'river', 'chaos'):
+                subprocess.run([sys.executable, str(ROOT / 'sdk/local_arena.py'), str(ROOT / 'sdk/examples/hunter.py'),
+                                '--vs', str(ROOT / 'sdk/examples/pathfinder.py'), '--games', '2', '--map', name,
+                                '--replay', str(Path(folder) / name)], check=True, capture_output=True, timeout=120)
+            files = sorted(Path(folder).glob('*/van-*.json'))
+            self.assertEqual(len(files), 6)
+            referee = Referee()
+            try:
+                for path in files:
+                    replay = json.loads(path.read_text(encoding='utf-8'))
+                    self.assertEqual((replay['format'], replay['version']), ('ottv2-replay', 1))
+                    self.assertTrue(replay['moves'], path)
+                    packet = referee.call('new', map=replay['map'])
+                    for move in replay['moves']:
+                        self.assertEqual(move['side'], packet['state']['turn'])
+                        packet = referee.call('move', **{'from': move['from'], 'to': move['to']})
+                        self.assertEqual(packet['state']['lastMove']['notation'], move['notation'])
+                    self.assertEqual(packet['state']['winner'], replay['winner'], path)
+                    self.assertEqual(packet['state']['winReason'], replay['reason'], path)
+                    self.assertIn('(bạn)', replay['p1'] + replay['p2'])
+            finally:
+                referee.close()
 
     def test_a_stalled_game_is_decided_by_material_then_advancement(self):
         local, referee = self.load_local(), Referee()

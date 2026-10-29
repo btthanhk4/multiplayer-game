@@ -48,7 +48,11 @@ def env_rate(name, default):
 RATES = {
     'register_ip': (env_rate('REGISTER_IP', 3000), 3600),
     'login_ip': (env_rate('LOGIN_IP', 10000), 900),
+    # Guessing one account's password from one address stops after 20 tries. The looser per-account cap still
+    # bounds guessing spread over many addresses, while a prankster on another network can no longer lock a
+    # student out with 20 wrong tries of their username.
     'login_user': (env_rate('LOGIN_USER', 20), 900),
+    'login_account': (env_rate('LOGIN_ACCOUNT', 100), 900),
     'submit_team': (env_rate('SUBMIT_TEAM', 20), 3600),
     'practice_team': (env_rate('PRACTICE_TEAM', 10), 3600),
     'ranked_team': (env_rate('RANKED_TEAM', 30), 3600),
@@ -56,6 +60,21 @@ RATES = {
     'team_user': (env_rate('TEAM_USER', 20), 3600),
     'tournament_code': (env_rate('TOURNAMENT_CODE', 20), 900),
 }
+
+
+def sheet_cell(value):
+    """Names are typed by players: a team called '=HYPERLINK(...)' must open in Excel as text, not as a formula."""
+    value = str(value)
+    return "'" + value if value[:1] in ('=', '+', '-', '@', '\t', '\r') else value
+
+
+def trusted_proxies():
+    """Addresses allowed to tell us the visitor's real IP in CF-Connecting-IP (the host running cloudflared)."""
+    networks = [ipaddress.ip_network(part.strip(), strict=False)
+                for part in os.getenv('ARENA_TRUSTED_PROXIES', '').split(',') if part.strip()]
+    if os.getenv('ARENA_TRUST_CLOUDFLARE') == '1':
+        networks += [ipaddress.ip_network('127.0.0.1/32'), ipaddress.ip_network('::1/128')]
+    return networks
 
 
 def temp_password():
@@ -131,6 +150,13 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         store.ensure_bosses()
     cache = TTLCache()
     app.extensions['cache'] = cache
+    proxies = trusted_proxies()
+
+    def from_proxy(address):
+        try:
+            return any(ipaddress.ip_address(address) in network for network in proxies)
+        except ValueError:
+            return False
 
     def settings():
         return cache.get('settings', 2, store.settings)
@@ -139,7 +165,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
     def before():
         g.user, g.session = None, None
         g.client_ip = request.remote_addr or 'unknown'
-        if os.getenv('ARENA_TRUST_CLOUDFLARE') == '1' and g.client_ip in ('127.0.0.1', '::1'):
+        if proxies and from_proxy(g.client_ip):
             try:
                 g.client_ip = str(ipaddress.ip_address(request.headers.get('CF-Connecting-IP', '')))
             except ValueError:
@@ -323,7 +349,8 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
     def login():
         data = body()
         username = text(data, 'username', 3, 32).lower()
-        rate('login_user', username)
+        rate('login_user', f'{username}@{g.client_ip}')
+        rate('login_account', username)
         rate('login_ip', g.client_ip)
         text(data, 'password', 1, 128)
         with store.connect() as db:
@@ -346,7 +373,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
     @app.post('/api/me/password')
     def change_password():
         user, data = auth(), body()
-        rate('login_user', g.user['username'])
+        rate('login_user', f"{g.user['username']}@{g.client_ip}")
         new = text(data, 'password', 12, 128)
         if len(set(new)) < 4 or g.user['username'] in new.lower():
             raise Problem('Mật khẩu quá dễ đoán: cần ít nhất 4 ký tự khác nhau và không chứa tên đăng nhập.')
@@ -814,7 +841,8 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         writer.writerow(['Hạng', 'Xếp loại', 'Đội', 'Thành viên', 'Bot', 'Điểm cặp', 'Buchholz', 'Điểm ván',
                          'Thắng', 'Hòa', 'Thua', 'BYE', 'Hạt giống', 'Trạng thái'])
         for s in rows:
-            writer.writerow([s['rank'] or '', s['tier'], s['name'], '; '.join(members.get(s['team_id'], [])), s['bot'],
+            writer.writerow([s['rank'] or '', s['tier'], sheet_cell(s['name']),
+                             sheet_cell('; '.join(members.get(s['team_id'], []))), sheet_cell(s['bot']),
                              s['points'], s['buchholz'], s['game_points'], s['wins'], s['draws'], s['losses'],
                              s['byes'], s['seed'] or '', s['entry_status']])
         filename = re.sub(r'[^A-Za-z0-9_-]+', '-', t['name']).strip('-') or 'ket-qua'

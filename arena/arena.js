@@ -667,6 +667,22 @@ for (const id of ['#match-filter', '#match-kind']) $(id).addEventListener('chang
 let directoryTimer;
 $('#match-search').addEventListener('input', () => { clearTimeout(directoryTimer); directoryTimer = setTimeout(() => action(null, watch.directory), 300); });
 $('#watch-random').addEventListener('click', event => action(event.target, async () => { await watch.randomLive(); await watch.directory(); }));
+$('#replay-open').addEventListener('click', () => $('#replay-file').click());
+$('#replay-file').addEventListener('change', event => {
+  const file = event.target.files[0];
+  event.target.value = '';      // choosing the same file again must fire again
+  if (file) action(null, () => watch.openFile(file));
+});
+$('#watch-grid').addEventListener('dragover', event => {
+  if (!event.dataTransfer.types.includes('Files')) return;
+  event.preventDefault(); $('#watch-grid').classList.add('dropping');
+});
+$('#watch-grid').addEventListener('dragleave', event => { if (!event.currentTarget.contains(event.relatedTarget)) $('#watch-grid').classList.remove('dropping'); });
+$('#watch-grid').addEventListener('drop', event => {
+  $('#watch-grid').classList.remove('dropping');
+  const file = event.dataTransfer.files[0];
+  if (file) { event.preventDefault(); action(null, () => watch.openFile(file)); }
+});
 document.addEventListener('input', watch.onInput);
 $('#source').addEventListener('input', updateSize);
 $('#bot-name').addEventListener('input', updateSize);

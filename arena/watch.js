@@ -29,6 +29,7 @@ export function createWatch(ctx) {
   function strip(item) {
     const m = item.meta, l = item.live || {};
     if (item.offline) return '<span class="live-pill off">MẤT KẾT NỐI</span> Đang thử lại…';
+    if (m.local) return `<span class="live-pill local">TỪ MÁY BẠN</span> ${escape(m.file)} · chỉ mở trên trình duyệt này${item.status === 'done' ? '' : ' · ván chưa kết thúc trong file'}`;
     const viewers = item.viewers > 1 ? ` <span class="viewers">· ${item.viewers} người đang xem</span>` : '';
     if (item.status === 'queued') return `<span class="live-pill wait">ĐANG CHỜ</span> Máy chấm sẽ nhận ván này sớm${l.position ? ` · vị trí #${l.position}` : ''}${viewers}`;
     if (item.status === 'running' && item.liveOff) return `<span class="live-pill wait">ĐANG CHẠY</span> Xem trực tiếp đang tắt để ưu tiên chấm bài · bản phát lại sẽ có khi ván kết thúc${viewers}`;
@@ -44,10 +45,11 @@ export function createWatch(ctx) {
 
   function caption(item) {
     const m = item.meta, used = m.replay?.time_used;
-    const parts = [`${m.bot1} (Xanh) / ${m.bot2} (Đỏ)`];
+    const parts = m.local ? [] : [`${m.bot1} (Xanh) / ${m.bot2} (Đỏ)`];
     if (m.map && m.map !== 'standard') parts.push(`Bản đồ ${mapLabel(m.map)}`);
     if (item.status === 'done' && used) parts.push(`nghĩ ${used.p1}s / ${used.p2}s`);
     if (m.replay?.execution_mode && m.replay.execution_mode !== 'docker') parts.push('Trận thử nội bộ');
+    if (m.detail) parts.push(m.detail);
     return `${item.status === 'done' ? `<strong>${escape(outcome(m))}</strong><br>` : ''}<span class="caption">${parts.map(escape).join(' · ')}</span>`;
   }
 
@@ -105,11 +107,11 @@ export function createWatch(ctx) {
     const item = watched.get(id), el = card(id), m = item?.meta;
     if (!item || !m || !el) return;
     el.classList.toggle('large', item.large);
-    el.innerHTML = `<div class="watch-card-head"><strong>${teamLink(m.team1_id, m.team1)} <span class="red">×</span> ${teamLink(m.team2_id, m.team2)}${m.sibling ? ` <span class="game-no">${m.game_number > 2 ? 'Ván quyết định' : `Ván ${m.game_number}/2`}</span>` : ''}</strong><span class="watch-tools"><button class="text-link" data-flip="${id}" title="Xoay bàn cờ">Xoay</button><button class="text-link" data-share="${id}" title="Sao chép link ván này">Chia sẻ</button><button class="text-link" data-expand="${id}">${item.large ? 'Thu nhỏ' : 'Phóng to'}</button><button class="close-button" data-watch="${id}" aria-label="Bỏ xem trận">×</button></span></div>
+    el.innerHTML = `<div class="watch-card-head"><strong>${teamLink(m.team1_id, m.team1)} <span class="red">×</span> ${teamLink(m.team2_id, m.team2)}${m.sibling ? ` <span class="game-no">${m.game_number > 2 ? 'Ván quyết định' : `Ván ${m.game_number}/2`}</span>` : ''}</strong><span class="watch-tools"><button class="text-link" data-flip="${id}" title="Xoay bàn cờ">Xoay</button>${m.local ? '' : `<button class="text-link" data-share="${id}" title="Sao chép link ván này">Chia sẻ</button>`}<button class="text-link" data-expand="${id}">${item.large ? 'Thu nhỏ' : 'Phóng to'}</button><button class="close-button" data-watch="${id}" aria-label="Bỏ xem trận">×</button></span></div>
       <div class="watch-card-body"><div class="live-strip" data-r="strip"></div><div class="material" data-r="material"></div><div class="board-wrap" data-r="board"></div><div class="replay-caption" data-r="caption"></div>
       <div class="replay-controls"><button data-step="-1" data-id="${id}" aria-label="Nước trước">‹</button><input type="range" min="0" max="0" value="0" data-replay="${id}" aria-label="Chọn nước trong ván"><button data-step="1" data-id="${id}" aria-label="Nước tiếp">›</button><button data-play="${id}" aria-label="Phát hoặc dừng">▷</button><button data-speed="${id}" aria-label="Tốc độ phát">1×</button><button class="golive" data-golive="${id}" hidden>● Trực tiếp</button></div>
       <p class="watch-note" data-r="note"></p>
-      <details class="moves-box"${item.large || innerWidth >= 900 ? ' open' : ''}><summary>Nước đi (<span data-r="count">0</span>)</summary><ol class="move-list" data-r="moves"></ol><button class="text-link" data-copymoves="${id}">Sao chép danh sách nước đi</button></details>
+      <details class="moves-box"${item.large || innerWidth >= 900 ? ' open' : ''}><summary>Nước đi (<span data-r="count">0</span>)</summary><ol class="move-list" data-r="moves"></ol><div class="moves-actions"><button class="text-link" data-copymoves="${id}">Sao chép danh sách nước đi</button>${m.replay?.moves && !m.local ? `<button class="text-link" data-download="${id}" title="File .json mở lại được ở nút “Mở replay từ máy”">Tải file replay</button>` : ''}</div></details>
       ${m.sibling ? `<div class="action-row"><button class="button" data-sibling="${id}">${m.game_number === 1 ? 'Xem ván 2' : 'Xem ván 1'} ↗</button></div>` : ''}</div>`;
     item.listed = -1; item.active = null; item.drawn = null;
     paint(id);
@@ -226,7 +228,7 @@ export function createWatch(ctx) {
     const item = watched.get(id);
     if (!item?.meta) return;
     if (item.follow) { item.follow = false; return paint(id); }
-    if (item.position === last(item) && item.status === 'done') item.position = 0;
+    if (item.position === last(item) && (item.status === 'done' || item.meta.local)) item.position = 0;
     item.playing = !item.playing; paint(id);
   }
   function goLive(id) { const item = watched.get(id); if (item?.status === 'running') { item.follow = true; item.playing = false; paint(id); } }
@@ -242,8 +244,7 @@ export function createWatch(ctx) {
     return lines.join('\n');
   }
 
-  async function toggle(id, opts = {}) {
-    if (watched.has(id)) { drop(id); return; }
+  function mount(id) {
     if (watched.size >= MAX_WATCH) throw new Error('Bạn đang xem hai bàn. Bỏ một bàn để mở trận khác.');
     if (ctx.tab() !== 'watch') ctx.setTab('watch');
     if (!watched.size) $('#watch-grid').replaceChildren();
@@ -254,12 +255,54 @@ export function createWatch(ctx) {
     el.className = 'watch-card'; el.id = `watch-${id}`; el.textContent = 'Đang tải bàn cờ…';
     $('#watch-grid').append(el);
     count();
+    return item;
+  }
+
+  async function toggle(id, opts = {}) {
+    if (watched.has(id)) { drop(id); return; }
+    mount(id);
     try { await load(id, true, opts); }
     catch (error) { drop(id); throw error; }
     scheduleLive(800);
   }
 
   async function replace(from, to) { drop(from); await toggle(to); }
+
+  // ---- replay files --------------------------------------------------------
+  // A file from `local_arena.py --replay`, or one saved below, is read in this browser only: nothing is uploaded.
+  let localCount = 0;
+
+  async function openFile(file) {
+    if (file.size > 2_000_000) throw new Error('File quá lớn để là một replay (tối đa 2 MB).');
+    let data;
+    try { data = JSON.parse(await file.text()); }
+    catch { throw new Error('File không phải JSON. Hãy chọn file .json do local_arena.py --replay tạo ra.'); }
+    const point = p => Array.isArray(p) && p.length === 2 && p.every(Number.isInteger);
+    const moves = Array.isArray(data?.moves) && data.moves.length <= 2000 && data.moves.every(m => point(m?.from) && point(m?.to)) ? data.moves : null;
+    if (!moves) throw new Error('File thiếu danh sách nước đi hợp lệ (moves).');
+    const map = typeof data.map === 'string' ? data.map : 'standard', states = [];
+    try { states.push(newGame(map)); extendStates(states, compactMoves(moves)); }
+    catch { throw new Error('Nước đi trong file không khớp luật hoặc bản đồ hiện tại. Hãy tải local_arena.py mới nhất rồi chạy lại.'); }
+    const end = states.at(-1), winner = ['p1', 'p2', 'draw'].includes(data.winner) ? data.winner : end.winner;
+    const label = (value, fallback) => typeof value === 'string' && value.trim() ? value.trim().slice(0, 60) : fallback;
+    const used = data.time_used, item = mount(`local-${++localCount}`);
+    item.meta = {local: true, file: file.name.slice(0, 80), status: winner ? 'done' : 'stopped', kind: 'local', map, winner,
+                 reason: winner ? (typeof data.reason === 'string' ? data.reason : end.winReason) : null,
+                 detail: typeof data.detail === 'string' ? data.detail.slice(0, 300) : null,
+                 team1: label(data.p1, 'Xanh'), team2: label(data.p2, 'Đỏ'),
+                 replay: {time_used: Number.isFinite(used?.p1) && Number.isFinite(used?.p2) ? used : null}};
+    Object.assign(item, {status: item.meta.status, moves: compactMoves(moves), states, gen: 1, playing: true});
+    skeleton(item.id);
+  }
+
+  function saveReplay(m) {
+    const data = {format: 'ottv2-replay', version: 1, match: m.id, map: m.map || 'standard', p1: `${m.team1} · ${m.bot1}`,
+                  p2: `${m.team2} · ${m.bot2}`, winner: m.winner, reason: m.reason, moves: m.replay.moves, time_used: m.replay.time_used};
+    const link = Object.assign(document.createElement('a'), {download: `replay-${m.id}.json`,
+      href: URL.createObjectURL(new Blob([JSON.stringify(data)], {type: 'application/json'}))});
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+  }
 
   // ---- directory ---------------------------------------------------------
   function row(m) {
@@ -310,6 +353,7 @@ export function createWatch(ctx) {
       const item = watched.get(d.share), ply = item && item.status === 'done' && item.position > 0 && item.position < last(item) ? `&ply=${item.position}` : '';
       copyText(`${location.origin}/#watch=${d.share}${ply}`, 'link ván đấu');
     } else if (d.copymoves) { const item = watched.get(d.copymoves); if (item) copyText(moveText(item), 'danh sách nước đi'); }
+    else if (d.download) { const item = watched.get(d.download); if (item?.meta?.replay) saveReplay(item.meta); }
     else if (d.sibling) { const item = watched.get(d.sibling); if (item?.meta?.sibling) replace(d.sibling, item.meta.sibling).catch(error => notice(error.message, true)); }
   }
 
@@ -342,7 +386,7 @@ export function createWatch(ctx) {
   });
 
   return {
-    toggle, replace, directory, randomLive, onClick, onInput, onKey, scheduleLive,
+    toggle, replace, directory, randomLive, onClick, onInput, onKey, scheduleLive, openFile,
     has: id => watched.has(id), size: () => watched.size,
     clear() { for (const id of [...watched.keys()]) drop(id); },
   };
