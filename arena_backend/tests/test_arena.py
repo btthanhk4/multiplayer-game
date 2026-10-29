@@ -690,6 +690,20 @@ class StartAndCodes(Base):
         t, pairs, seeded, _ = self.state(tid)
         self.assertEqual((t['status'], pairs, seeded), ('open', 0, 0), 'still open, still editable, nobody seeded')
 
+    def test_a_tournament_locked_before_maps_were_added_still_runs(self):
+        from arena_backend.store import RULES_COMPATIBLE
+        older = next(h for h in RULES_COMPATIBLE if h != RULES_HASH)
+        tid = self.tournament()
+        self.entrants(tid, 4)
+        with self.store.connect(True) as db:
+            db.execute('UPDATE tournaments SET rules_hash=? WHERE id=?', (older, tid))
+        self.assertEqual(self.store.start_tournament(tid, 'admin')['round'], 1)
+        with self.store.connect(True) as db:
+            db.execute('UPDATE matches SET rules_hash=?', (older,))
+        Worker(self.store, TrustedExecutor()).run_once()
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM matches WHERE status='done'").fetchone()[0], 1)
+
     def test_start_happens_once_even_when_two_organisers_click_together(self):
         import threading
         tid = self.tournament()
@@ -908,7 +922,7 @@ class SoloAndJourney(Base):
         local = Geometry.local(self)
         low = {'CHASE_GOAL': 0, 'CAPTURE': 0, 'SAFETY': 0, 'RANDOMNESS': 0}
         high = {'CHASE_GOAL': 10, 'CAPTURE': 30, 'SAFETY': 30, 'RANDOMNESS': 20}
-        for name in ('standard', 'river', 'maze8', 'pillars', 'chaos:3', 'chaos:9', 'arena8'):
+        for name in ('standard', 'river', 'maze8', 'pillars', 'chaos:3', 'chaos:9', 'arena8', 'hexagon', 'hourglass', 'lake', 'triangle', 'zigzag'):
             for values in (low, high):
                 text = source
                 for key, value in values.items():
@@ -1337,13 +1351,18 @@ class LocalArena(unittest.TestCase):
                 theirs = {(r, c): p['type'] for r, row in enumerate(board) for c, p in enumerate(row) if p and p['owner'] == 'p2'}
                 self.assertEqual(len(mine), 9, name)
                 self.assertEqual(sorted(mine.values()), ['paper'] * 3 + ['rock'] * 3 + ['scissors'] * 3, name)
-                self.assertEqual({(size - 1 - r, size - 1 - c): t for (r, c), t in mine.items()}, theirs, f'{name}: Đỏ là bản quay 180° của Xanh')
-                self.assertTrue(all(r >= size - 3 for r, _ in mine), f'{name}: Xanh ở ba hàng cuối')
+                if local.SHAPES.get(name, (None, 'rotate'))[1] == 'transpose':
+                    # Tam giác: Đỏ là ảnh của Xanh qua đường chéo nối hai ô đích; Xanh ở ba cột đầu.
+                    self.assertEqual({(c, r): t for (r, c), t in mine.items()}, theirs, f'{name}: Đỏ là ảnh lật của Xanh')
+                    self.assertTrue(all(c <= 2 for _, c in mine), f'{name}: Xanh ở ba cột đầu')
+                else:
+                    self.assertEqual({(size - 1 - r, size - 1 - c): t for (r, c), t in mine.items()}, theirs, f'{name}: Đỏ là bản quay 180° của Xanh')
+                    self.assertTrue(all(r >= size - 3 for r, _ in mine), f'{name}: Xanh ở ba hàng cuối')
                 for side in ('p1', 'p2'):
                     goal = local.goal_of(side, size)
                     self.assertIsNone(board[goal[0]][goal[1]], f'{name}: ô đích để trống')
                 gap = min(max(abs(a[0] - b[0]), abs(a[1] - b[1])) for a in mine for b in theirs)
-                self.assertGreaterEqual(gap, 4 if size == 9 else 3, f'{name}: không có ăn quân ngay từ nước đầu')
+                self.assertGreaterEqual(gap, 4 if size == 9 and name != 'triangle' else 3, f'{name}: không có ăn quân ngay từ nước đầu')
                 self.assertTrue(local.legal_moves(local.new_game(name)))
             with self.assertRaises(ValueError):
                 local.new_game('khong-co')
@@ -1358,12 +1377,12 @@ class LocalArena(unittest.TestCase):
         import subprocess
         import sys
         with tempfile.TemporaryDirectory() as folder:
-            for name in ('standard', 'river', 'chaos'):
+            for name in ('standard', 'river', 'chaos', 'triangle', 'hexagon'):
                 subprocess.run([sys.executable, str(ROOT / 'sdk/local_arena.py'), str(ROOT / 'sdk/examples/hunter.py'),
                                 '--vs', str(ROOT / 'sdk/examples/pathfinder.py'), '--games', '2', '--map', name,
                                 '--replay', str(Path(folder) / name)], check=True, capture_output=True, timeout=120)
             files = sorted(Path(folder).glob('*/van-*.json'))
-            self.assertEqual(len(files), 6)
+            self.assertEqual(len(files), 10)
             referee = Referee()
             try:
                 for path in files:
@@ -2052,7 +2071,7 @@ class MapsAndAdjudication(Base):
 
     def test_bots_are_told_the_map_and_it_is_recorded_in_the_replay(self):
         for name in ('standard', 'wall', 'flank', 'block', 'random:1a2b3c4d', 'arena8', 'pillars', 'river', 'maze8',
-                     'chaos:1a2b3c4d', 'chaos:7', 'chaos:ff00ff00'):
+                     'hexagon', 'hourglass', 'lake', 'triangle', 'zigzag', 'chaos:1a2b3c4d', 'chaos:7', 'chaos:ff00ff00'):
             row, replay = self.play_one(self.EXPECT.format(expected=name), self.EXPECT.format(expected=name), name)
             self.assertEqual(row['status'], 'done')
             self.assertFalse(row['reason'].startswith('technical'), (name, row['reason']))
@@ -2062,7 +2081,8 @@ class MapsAndAdjudication(Base):
         local = self.load_local()
         first, last = local.Player('first', local.bot_first, None), local.Player('last', lambda o: {
             'from': o['legalMoves'][-1]['from'], 'to': o['legalMoves'][-1]['to']}, None)
-        for name in ('standard', 'wall', 'flank', 'block', 'arena8', 'pillars', 'river', 'maze8', 'chaos:1', 'chaos:2', 'chaos:9'):
+        for name in ('standard', 'wall', 'flank', 'block', 'arena8', 'pillars', 'river', 'maze8', 'hexagon', 'hourglass', 'lake', 'triangle', 'zigzag',
+                     'chaos:1', 'chaos:2', 'chaos:9'):
             row, replay = self.play_one(self.FIRST_MOVE, self.LAST_MOVE, name)
             winner, reason, plies, *_ = local.play(first, last, 1, False, name)
             self.assertEqual((row['winner'], row['reason']), (winner, reason), name)
@@ -2108,8 +2128,9 @@ class MapsAndAdjudication(Base):
                                                 'invite': 'test-invite'}, headers={'Origin': 'http://localhost:8080'})
         health = self.client.get('/api/health').json
         self.assertEqual([m['id'] for m in health['maps']], ['standard', 'wall', 'flank', 'block', 'arena8', 'pillars', 'river',
-                                                             'maze8', 'random', 'chaos'])
-        self.assertEqual({m['id'] for m in health['maps'] if m['geometry']}, {'arena8', 'pillars', 'river', 'maze8', 'chaos'})
+                                                             'maze8', 'hexagon', 'hourglass', 'lake', 'triangle', 'zigzag', 'random', 'chaos'])
+        self.assertEqual({m['id'] for m in health['maps'] if m['geometry']},
+                         {'arena8', 'pillars', 'river', 'maze8', 'hexagon', 'hourglass', 'lake', 'triangle', 'zigzag', 'chaos'})
 
     def test_tournament_map_applies_per_round_and_can_change_between_rounds(self):
         tid = self.tournament('swiss', rounds=3)
@@ -2553,7 +2574,7 @@ class Geometry(Base):
         referee = Referee()
         try:
             from arena_backend.runner import observation
-            for name in ('river', 'pillars', 'maze8', 'chaos:5', 'chaos:6', 'arena8', 'standard'):
+            for name in ('river', 'pillars', 'maze8', 'chaos:5', 'chaos:6', 'arena8', 'standard', 'hexagon', 'hourglass', 'lake', 'triangle', 'zigzag'):
                 packet = referee.call('new', map=name)
                 obs = observation(packet, 1, None, name)
                 walls = {tuple(w) for w in obs['obstacles']}
@@ -2574,7 +2595,7 @@ class Geometry(Base):
 
     def test_the_example_bots_play_every_new_map_without_a_technical_loss(self):
         local = self.local()
-        for name in ('arena8', 'pillars', 'river', 'maze8', 'chaos:3', 'chaos:4', 'chaos:11'):
+        for name in ('arena8', 'pillars', 'river', 'maze8', 'chaos:3', 'chaos:4', 'chaos:11', 'hexagon', 'hourglass', 'lake', 'triangle', 'zigzag'):
             for example in ('hunter', 'guardian', 'template', 'pathfinder'):
                 bot = local.Player(*local.load_bot(str(ROOT / f'sdk/examples/{example}.py')))
                 for first, second in ((bot, local.Player('random', local.bot_random, None)),
@@ -2644,6 +2665,10 @@ class Geometry(Base):
                 self.assertIn(f'<code>[{r}, {c}]</code>', card, f'{name}: piece {r},{c}')
             self.assertIn(f'{size} × {size}', card)
             self.assertEqual(card.count('#') >= len(walls), True)
+            board = local.new_game(name)['board']
+            voids = sum(1 for line in board for cell in line if cell and cell.get('void'))
+            if voids:
+                self.assertIn(f'{voids} ô ngoài bàn', card, name)
 
     def test_the_pathfinder_example_handles_walls_and_beats_the_straight_line_hunter(self):
         local = self.local()

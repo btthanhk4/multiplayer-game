@@ -103,7 +103,7 @@ test('đi tới ô đích i9 hoặc a1 sẽ thắng', () => {
 
 // ---- bàn 8×8 và vật cản --------------------------------------------------------------------------------------------
 
-import { MAP_NAMES, WALL, adjudicate, goalOf, layoutOf, squareName } from '../rules.js';
+import { MAP_NAMES, WALL, VOID, adjudicate, goalOf, layoutOf, mirrorOf, nearestToGoal, squareName } from '../rules.js';
 
 const SEEDS = Array.from({ length: 300 }, (_, i) => ((i + 1) * 2654435761 >>> 0).toString(16));
 const ALL_MAPS = [...MAP_NAMES, ...SEEDS.map((s) => `random:${s}`), ...SEEDS.map((s) => `chaos:${s}`)];
@@ -131,9 +131,12 @@ test('mọi bản đồ: đối xứng quay 180°, 3 quân mỗi loại, đích 
     const board = makeBoard(map), n = board.length;
     assert.ok(n === 8 || n === 9, map);
     assert.ok(board.every((line) => line.length === n), map);
+    const mirror = layoutOf(map).mirror;
     for (let r = 0; r < n; r += 1) for (let c = 0; c < n; c += 1) {
-      const a = board[r][c], b = board[n - 1 - r][n - 1 - c];
+      const [mr, mc] = mirrorOf(r, c, n, mirror);
+      const a = board[r][c], b = board[mr][mc];
       assert.equal(isWallCell(a), isWallCell(b), `${map} vật cản đối xứng ${r},${c}`);
+      assert.equal(Boolean(a?.void), Boolean(b?.void), `${map} ô ngoài bàn đối xứng ${r},${c}`);
       if (a && !isWallCell(a)) assert.deepEqual([b.owner, b.type], [a.owner === 'p1' ? 'p2' : 'p1', a.type], map);
     }
     const counts = pieceCounts(board);
@@ -149,11 +152,36 @@ test('mọi bản đồ: đối xứng quay 180°, 3 quân mỗi loại, đích 
 });
 
 test('bản đồ cố định: kích thước và số vật cản đúng như mô tả', () => {
-  const shape = Object.fromEntries(MAP_NAMES.map((m) => [m, [layoutOf(m).size, layoutOf(m).walls.length]]));
+  const shape = Object.fromEntries(MAP_NAMES.map((m) => [m, [layoutOf(m).size, layoutOf(m).walls.length, layoutOf(m).voids?.length ?? 0]]));
   assert.deepEqual(shape, {
-    standard: [9, 0], wall: [9, 0], flank: [9, 0], block: [9, 0],
-    arena8: [8, 0], pillars: [9, 4], river: [9, 7], maze8: [8, 4],
+    standard: [9, 0, 0], wall: [9, 0, 0], flank: [9, 0, 0], block: [9, 0, 0],
+    arena8: [8, 0, 0], pillars: [9, 4, 0], river: [9, 7, 0], maze8: [8, 4, 0],
+    hexagon: [9, 0, 20], hourglass: [9, 0, 18], lake: [9, 0, 13], triangle: [9, 0, 36], zigzag: [9, 14, 0],
   });
+});
+
+test('bàn có hình dạng: ô ngoài bàn chặn như vật cản, hai bên cách đích bằng nhau, đường thật dài hơn đường thẳng', () => {
+  for (const map of ['hexagon', 'hourglass', 'lake', 'triangle']) {
+    const board = makeBoard(map);
+    const voids = board.flat().filter((cell) => cell === VOID).length;
+    assert.equal(voids, layoutOf(map).voids.length, map);
+    assert.equal(nearestToGoal(board, 'p1'), nearestToGoal(board, 'p2'), map);
+    for (let r = 0; r < 9; r += 1) for (let c = 0; c < 9; c += 1) {
+      if (board[r][c]?.owner) assert.ok(legalMoves(board, r, c).every((m) => board[m.row][m.col] !== VOID), map);
+    }
+  }
+  // Tam giác: Đỏ là ảnh của Xanh khi đổi hàng với cột, ô đích là hai đầu cạnh dài.
+  const tri = makeBoard('triangle');
+  assert.deepEqual(tri[4][0], { owner: 'p1', type: 'rock' });
+  assert.deepEqual(tri[0][4], { owner: 'p2', type: 'rock' });
+  assert.equal(tri[8][8], VOID);
+  assert.equal(nearestToGoal(makeBoard('zigzag'), 'p1'), 10);
+  // Đi thử vào ô ngoài bàn bị từ chối như đi vào vật cản.
+  const game = newGame('hexagon');
+  game.board = game.board.map((line) => line.slice());
+  game.board[4][0] = { owner: 'p1', type: 'rock' };
+  assert.equal(applyMove(game, 'p1', [4, 0], [3, 0]).ok, false);
+  assert.equal(applyMove(game, 'p1', [4, 0], [3, 1]).ok, true);
 });
 
 test('bản đồ hỗn loạn: cùng seed cùng bàn, có cả 8×8 và 9×9, 2–4 cặp vật cản, seed khác thì khác', () => {

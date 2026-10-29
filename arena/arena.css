@@ -705,3 +705,11 @@ input::placeholder,textarea::placeholder{color:var(--faint)}
 .live-pill.local{background:var(--solid);animation:none}
 .moves-actions{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:6px}
 .watch-grid.dropping{outline:2px dashed var(--green);outline-offset:4px}
+
+/* V10: shaped boards and a watch board that fits the screen */
+.square.void{background:transparent;box-shadow:none}
+.square.void::before,.square.void::after{display:none}
+.square.void small,.square.void .rank,.square.void .file{color:var(--b-frame-hi);opacity:.75}
+.watch-grid:has(>.watch-card:only-child){grid-template-columns:minmax(0,620px)}
+.watch-card-body{width:100%;max-width:max(300px,min(560px,100vh - 320px));max-width:max(300px,min(560px,100svh - 320px));margin-inline:auto}
+.watch-card.large .watch-card-body{max-width:max(320px,min(760px,100vh - 230px));max-width:max(320px,min(760px,100svh - 230px))}

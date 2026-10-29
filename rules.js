@@ -7,6 +7,8 @@ export const GOALS = { p1: [0, 8], p2: [8, 0] };
 // Vật cản: ô đặc, không quân nào đi vào hay ăn được. Trong `board` nó là hằng số WALL (owner null).
 export const WALL = Object.freeze({ owner: null, type: 'wall' });
 export const isWall = (piece) => piece?.type === 'wall';
+// Ô ngoài bàn của các bàn có hình dạng (lục giác, tam giác...): với luật và với bot nó y hệt vật cản, chỉ khác cách vẽ.
+export const VOID = Object.freeze({ owner: null, type: 'wall', void: true });
 
 // Ô đích của một bên trên bàn cờ `size` × `size`: Xanh ở góc trên phải, Đỏ ở góc dưới trái.
 export function goalOf(side, size = BOARD_SIZE) {
@@ -15,8 +17,9 @@ export function goalOf(side, size = BOARD_SIZE) {
 
 // Quân Xanh xuất phát quanh a1; quân Đỏ quay 180° quanh tâm bàn cờ.
 // Mỗi bên có đúng ba quân của từng loại. Hai ô đích lúc đầu để trống.
-// "Bản đồ" là cách xếp quân ban đầu, và với vài bản đồ còn là kích thước bàn cờ (8×8) và các ô vật cản. Luật đi quân
-// không đổi. Mọi bản đồ đối xứng quay 180° (quân và vật cản), nên hai bên luôn công bằng; ô đích lúc đầu để trống,
+// "Bản đồ" là cách xếp quân ban đầu, và với vài bản đồ còn là kích thước bàn cờ (8×8), các ô vật cản và hình dạng bàn
+// (ô ngoài bàn). Luật đi quân không đổi. Mọi bản đồ đối xứng quay 180° (riêng tam giác: lật qua đường chéo nối hai ô
+// đích), nên hai bên luôn công bằng; ô đích lúc đầu để trống,
 // hai bên cách nhau ít nhất 2 hàng trống và không có ăn quân ngay. Bản đồ 9×9 cũ giữ nguyên từng ô.
 const FORMATIONS = {
   standard: [
@@ -44,6 +47,16 @@ const ARENA8 = [
   [7, 1, 'paper'], [6, 2, 'paper'], [6, 3, 'paper'],
   [5, 0, 'scissors'], [6, 1, 'scissors'], [5, 2, 'scissors'],
 ];
+const TRIANGLE = [
+  [4, 0, 'rock'], [7, 0, 'rock'], [6, 1, 'rock'],
+  [5, 0, 'paper'], [7, 1, 'paper'], [5, 2, 'paper'],
+  [6, 0, 'scissors'], [5, 1, 'scissors'], [6, 2, 'scissors'],
+];
+function cellsWhere(size, keep) {
+  const cells = [];
+  for (let r = 0; r < size; r += 1) for (let c = 0; c < size; c += 1) if (keep(r, c)) cells.push([r, c]);
+  return cells;
+}
 const LAYOUTS = {
   standard: { size: 9, pieces: FORMATIONS.standard, walls: [] },
   wall: { size: 9, pieces: FORMATIONS.wall, walls: [] },
@@ -58,6 +71,18 @@ const LAYOUTS = {
     walls: [[4, 0], [4, 1], [4, 2], [4, 4], [4, 6], [4, 7], [4, 8]] },
   // 8×8 với bốn vật cản ở giữa xếp chéo.
   maze8: { size: 8, pieces: ARENA8, walls: [[3, 2], [3, 4], [4, 3], [4, 5]] },
+  // Bàn có hình dạng: `voids` là các ô ngoài bàn. Lục giác: khoét hai góc không có ô đích.
+  hexagon: { size: 9, pieces: FORMATIONS.standard, walls: [], voids: cellsWhere(9, (r, c) => r + c <= 3 || r + c >= 13) },
+  // Đồng hồ cát: hai tam giác chụm đỉnh, eo giữa chỉ rộng ba ô.
+  hourglass: { size: 9, pieces: FORMATIONS.wall, walls: [],
+    voids: cellsWhere(9, (r, c) => Math.min(c, 8 - c) < 3 - Math.abs(r - 4)) },
+  // Hồ giữa: một hồ hình thoi 13 ô chiếm tâm bàn, phải đi vòng hai bên.
+  lake: { size: 9, pieces: FORMATIONS.standard, walls: [], voids: cellsWhere(9, (r, c) => Math.abs(r - 4) + Math.abs(c - 4) <= 2) },
+  // Tam giác: nửa bàn trên đường chéo, hai ô đích là hai đầu cạnh dài. Đỏ là ảnh của Xanh qua đường chéo đó
+  // (đổi hàng với cột) thay vì quay 180°, vì tam giác không đối xứng khi quay.
+  triangle: { size: 9, pieces: TRIANGLE, walls: [], voids: cellsWhere(9, (r, c) => r + c > 8), mirror: 'transpose' },
+  // Ziczac: hai bức tường so le, đường tới đích uốn hình chữ S qua hàng giữa.
+  zigzag: { size: 9, pieces: FORMATIONS.standard, walls: [...cellsWhere(9, (r, c) => r === 3 && c <= 6), ...cellsWhere(9, (r, c) => r === 5 && c >= 2)] },
 };
 export const MAP_NAMES = Object.keys(LAYOUTS);
 
@@ -158,14 +183,21 @@ export function squareName(row, col, size = BOARD_SIZE) {
   return `${'abcdefghi'[col]}${size - row}`;
 }
 
+// Ô của Đỏ ứng với ô (row, col) của Xanh: quay 180° quanh tâm, hoặc lật qua đường chéo nối hai ô đích (`transpose`).
+export function mirrorOf(row, col, size, mirror) {
+  return mirror === 'transpose' ? [col, row] : [size - 1 - row, size - 1 - col];
+}
+
 export function makeBoard(map = 'standard') {
-  const { size, pieces, walls } = layoutOf(map);
+  const { size, pieces, walls, voids = [], mirror } = layoutOf(map);
   const board = Array.from({ length: size }, () => Array(size).fill(null));
   for (const [row, col, type] of pieces) {
+    const [r, c] = mirrorOf(row, col, size, mirror);
     board[row][col] = { owner: 'p1', type };
-    board[size - 1 - row][size - 1 - col] = { owner: 'p2', type };
+    board[r][c] = { owner: 'p2', type };
   }
   for (const [row, col] of walls) board[row][col] = WALL;
+  for (const [row, col] of voids) board[row][col] = VOID;
   return board;
 }
 

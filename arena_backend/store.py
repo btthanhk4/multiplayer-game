@@ -14,14 +14,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RULES_HASH = hashlib.sha256((ROOT / 'rules.js').read_bytes()).hexdigest()
+# Earlier rules.js versions that play every map they knew exactly like this one (the later versions only added maps), so
+# a tournament locked or a game queued under them still runs after an upgrade. Add a hash here only for such changes.
+RULES_COMPATIBLE = {RULES_HASH, '27fd0303d8beacc971f2cef8e8725dc990067dbd3540e9e1508669013679c760'}
 # Protocol 2: one sandbox per bot per game. turn_seconds is wall time per move,
 # game_seconds is each bot's thinking budget for the whole game.
 LIMITS = {'protocol': 2, 'turn_seconds': 3, 'game_seconds': 60, 'init_seconds': 5,
           'memory_mib': 256, 'source_bytes': 65536, 'output_bytes': 4096,
           'max_plies': 400, 'no_legal_moves': 'adjudicate', 'ply_limit': 'adjudicate'}
 ENGINE_KEY = hashlib.sha256((RULES_HASH + json.dumps(LIMITS, sort_keys=True)).encode()).hexdigest()
-# Maps: how the pieces start and, for some, the board size and the obstacles. Movement rules never change and every map is
-# symmetric under a 180° turn; ids match rules.js. `random` and `chaos` give every pair its own board (both games of
+# Maps: how the pieces start and, for some, the board size, the obstacles and the shape (squares outside the board, which
+# bots see as obstacles). Movement rules never change and every map is symmetric under a 180° turn (the triangle under a
+# flip across the diagonal between the goals); ids match rules.js. `random` and `chaos` give every pair its own board (both games of
 # the pair share it). Maps with `geometry` change the board size or add obstacles, so a bot must read `size`, `goal`
 # and `obstacles` from the observation instead of assuming a 9×9 board.
 MAPS = [
@@ -33,12 +37,18 @@ MAPS = [
     ('pillars', 'Bốn trụ', 'Bàn 9×9 có bốn trụ đá quanh tâm bàn cờ.'),
     ('river', 'Dòng sông', 'Bàn 9×9 có bức tường ngang giữa bàn, chỉ còn hai cây cầu để qua.'),
     ('maze8', 'Mê cung 8×8', 'Bàn 8×8 có bốn vật cản xếp chéo ở giữa.'),
+    ('hexagon', 'Lục giác', 'Bàn 9×9 khoét hai góc thành hình lục giác.'),
+    ('hourglass', 'Đồng hồ cát', 'Hai tam giác chụm đỉnh, eo giữa bàn chỉ rộng ba ô.'),
+    ('lake', 'Hồ giữa', 'Một hồ hình thoi chiếm tâm bàn, phải đi vòng hai bên.'),
+    ('triangle', 'Tam giác', 'Nửa bàn 9×9 hình tam giác, hai ô đích ở hai đầu cạnh dài.'),
+    ('zigzag', 'Ziczac', 'Hai bức tường so le, đường tới đích uốn hình chữ S.'),
     ('random', 'Ngẫu nhiên', 'Mỗi cặp đấu một cách xếp quân khác nhau, bàn 9×9, đối xứng hai bên.'),
     ('chaos', 'Hỗn loạn', 'Mỗi cặp đấu một bàn khác nhau: 8×8 hoặc 9×9, quân và vật cản đặt ngẫu nhiên, đối xứng.'),
 ]
 MAP_IDS = {item[0] for item in MAPS}
 SEEDED_MAPS = {'random', 'chaos'}               # concrete id is `<name>:<seed>` per pair of games
-GEOMETRY_MAPS = {'arena8', 'pillars', 'river', 'maze8', 'chaos'}   # board size or obstacles differ from 9×9 open
+GEOMETRY_MAPS = {'arena8', 'pillars', 'river', 'maze8', 'hexagon', 'hourglass', 'lake', 'triangle', 'zigzag', 'chaos'}
+# board size, obstacles or shape differ from the open 9×9
 SCHEMA_VERSION = 3
 PRIORITY = {'validate': 0, 'tournament': 1, 'ranked': 2, 'campaign': 3, 'friendly': 3, 'practice': 3}
 TEAM_SIZE = int(os.getenv('ARENA_TEAM_SIZE', '4'))
@@ -1705,7 +1715,7 @@ class Store:
         tid = t['id']
         if t['status'] not in ('frozen', 'running'):
             raise Problem('Cần khóa danh sách trước khi mở vòng.', 409)
-        if t['rules_hash'] != RULES_HASH:
+        if t['rules_hash'] not in RULES_COMPATIBLE:
             raise Problem('Engine đã thay đổi so với giải; cần dùng đúng phiên bản.', 409)
         if json.loads(t['config']) != LIMITS:
             raise Problem('Giới hạn runtime đã thay đổi so với thể lệ của giải.', 409)

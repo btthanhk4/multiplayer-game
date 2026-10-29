@@ -115,6 +115,7 @@ export function board(state, {flip = false, animate = false} = {}) {
     const goal=r===0&&c===n-1?'goal-blue':r===n-1&&c===0?'goal-red':'';
     const from=at(move?.from,r,c), to=at(move?.to,r,c);
     const labels=`${j===0&&!goal?`<small class="rank">${n-r}</small>`:''}${i===n-1&&!goal?`<small class="file">${'abcdefghi'[c]}</small>`:''}`;
+    if (p?.void) return `<div class="square void" title="${squareName(r,c,n)} · Ngoài bàn cờ">${labels}</div>`;
     if (wall) return `<div class="square wall" title="${squareName(r,c,n)} · Vật cản"><span class="block"></span></div>`;
     let pieces = '';
     if (p) {
@@ -144,9 +145,9 @@ export function extendStates(states, compact) {
 }
 export const compactMoves = moves => moves.map(m => [...m.from, ...m.to]);
 
-export const MAP_LABELS = {standard: 'Chuẩn', wall: 'Bức tường', flank: 'Hai cánh', block: 'Khối vuông', arena8: 'Đấu trường 8×8', pillars: 'Bốn trụ', river: 'Dòng sông', maze8: 'Mê cung 8×8', random: 'Ngẫu nhiên', chaos: 'Hỗn loạn'};
-export const MAP_DETAIL = {arena8: 'bàn 8×8, hai bên chạm trán sớm', pillars: 'bàn 9×9 có bốn trụ đá quanh tâm', river: 'bàn 9×9 có tường ngang giữa bàn, chỉ qua được hai cây cầu ở cột d và f', maze8: 'bàn 8×8 có bốn vật cản xếp chéo ở giữa', random: 'mỗi cặp một cách xếp quân ngẫu nhiên, hai ván của cặp giống nhau', chaos: 'mỗi cặp một bàn 8×8 hoặc 9×9 với quân và vật cản đặt ngẫu nhiên (đối xứng); hai ván của cặp giống nhau'};
-export const GEOMETRY_MAPS = ['arena8', 'pillars', 'river', 'maze8', 'chaos'];   // size or obstacles differ from open 9×9
+export const MAP_LABELS = {standard: 'Chuẩn', wall: 'Bức tường', flank: 'Hai cánh', block: 'Khối vuông', arena8: 'Đấu trường 8×8', pillars: 'Bốn trụ', river: 'Dòng sông', maze8: 'Mê cung 8×8', hexagon: 'Lục giác', hourglass: 'Đồng hồ cát', lake: 'Hồ giữa', triangle: 'Tam giác', zigzag: 'Ziczac', random: 'Ngẫu nhiên', chaos: 'Hỗn loạn'};
+export const MAP_DETAIL = {arena8: 'bàn 8×8, hai bên chạm trán sớm', pillars: 'bàn 9×9 có bốn trụ đá quanh tâm', river: 'bàn 9×9 có tường ngang giữa bàn, chỉ qua được hai cây cầu ở cột d và f', maze8: 'bàn 8×8 có bốn vật cản xếp chéo ở giữa', hexagon: 'bàn 9×9 khoét hai góc không có ô đích thành hình lục giác', hourglass: 'hai tam giác chụm đỉnh, eo giữa bàn chỉ rộng ba ô', lake: 'hồ hình thoi 13 ô chiếm tâm bàn, phải đi vòng hai bên', triangle: 'nửa bàn 9×9 hình tam giác, hai ô đích ở hai đầu cạnh dài, quân đông nên chạm trán sớm', zigzag: 'hai bức tường so le, đường tới đích uốn hình chữ S (10 nước thay vì 6)', random: 'mỗi cặp một cách xếp quân ngẫu nhiên, hai ván của cặp giống nhau', chaos: 'mỗi cặp một bàn 8×8 hoặc 9×9 với quân và vật cản đặt ngẫu nhiên (đối xứng); hai ván của cặp giống nhau'};
+export const GEOMETRY_MAPS = ['arena8', 'pillars', 'river', 'maze8', 'hexagon', 'hourglass', 'lake', 'triangle', 'zigzag', 'chaos'];   // size, obstacles or shape differ from open 9×9
 export const mapLabel = map => MAP_LABELS[String(map || 'standard').split(':')[0]] || 'Chuẩn';
 
 const stalls = {quiet: '80 nửa lượt không ăn quân', repetition: 'Lặp thế ba lần', ply_limit: 'Đủ 400 nửa lượt', no_legal_moves: 'Không còn nước đi'};
@@ -235,7 +236,7 @@ export function roundRules(t) {
     `Ván quá ${t.config.max_plies || 400} nửa lượt hoặc hết nước đi hợp lệ không hòa ngay: xử theo số quân còn lại, rồi quân nào gần ô đích hơn; vẫn bằng nhau mới hòa.`,
     `Bản đồ ${mapLabel(t.map)}${MAP_DETAIL[t.map] ? `: ${MAP_DETAIL[t.map]}` : ''}.`,
   ];
-  if ([t.map, t.final_map].some(m => GEOMETRY_MAPS.includes(m))) everyGame.push('Bản đồ này có bàn 8×8 hoặc vật cản (ô đặc, không đi vào được). Bot cần đọc <code>observation["size"]</code>, <code>["goal"]</code> và <code>["obstacles"]</code> thay vì giả định bàn 9×9 — xem Sổ tay mục 2.6.');
+  if ([t.map, t.final_map].some(m => GEOMETRY_MAPS.includes(m))) everyGame.push('Bản đồ này có bàn 8×8, vật cản hoặc hình dạng khác (ô vật cản và ô ngoài bàn đều không đi vào được). Bot cần đọc <code>observation["size"]</code>, <code>["goal"]</code> và <code>["obstacles"]</code> thay vì giả định bàn 9×9 — xem Sổ tay mục 2.6.');
   const byFormat = {
     swiss: [
       `Mỗi vòng hệ thống ghép các đội gần điểm nhau, tránh gặp lại đối thủ cũ. Vòng sau khó hơn vì đối thủ mạnh hơn.`,
@@ -267,15 +268,16 @@ export function mapCardHtml(map) {
   const board_ = makeBoard(seeded ? (map === 'random' ? 'random:1a2b3c4d' : 'chaos:7') : map), n = board_.length;
   const spot = (r, c) => `${squareName(r, c, n)} [${r}, ${c}]`;
   const walls = [], mine = {rock: [], paper: [], scissors: []};
+  let outside = 0;
   board_.forEach((line, r) => line.forEach((cell, c) => {
-    if (cell?.type === 'wall') walls.push(spot(r, c)); else if (cell?.owner === 'p1') mine[cell.type].push(spot(r, c));
+    if (cell?.void) outside += 1; else if (cell?.type === 'wall') walls.push(spot(r, c)); else if (cell?.owner === 'p1') mine[cell.type].push(spot(r, c));
   }));
   const names = {rock: 'Đấm', paper: 'Lá', scissors: 'Kéo'};
   const rows = [
-    ['Bàn cờ', map === 'chaos' ? '8×8 hoặc 9×9, đổi mỗi cặp' : `${n}×${n}`],
+    ['Bàn cờ', map === 'chaos' ? '8×8 hoặc 9×9, đổi mỗi cặp' : `${n}×${n}${outside ? `, ${outside} ô ngoài bàn (bot thấy như vật cản trong observation["obstacles"])` : ''}`],
     ['Ô đích', map === 'chaos' ? 'Xanh [0, size−1], Đỏ [size−1, 0] — đọc observation["goal"]' : `Xanh ${spot(...goalOf('p1', n))} · Đỏ ${spot(...goalOf('p2', n))}`],
     ['Vật cản', map === 'chaos' ? '2–4 cặp đối xứng, đổi mỗi cặp — đọc observation["obstacles"]' : walls.length ? `${walls.length} ô: ${walls.join(', ')}` : 'Không có'],
-    ['Quân Xanh lúc đầu', seeded ? 'Ngẫu nhiên mỗi cặp (xem bàn mẫu)' : Object.entries(mine).map(([type, cells]) => `${names[type]}: ${cells.join(', ')}`).join(' · ')],
+    ['Quân Xanh lúc đầu', seeded ? 'Ngẫu nhiên mỗi cặp (xem bàn mẫu)' : Object.entries(mine).map(([type, cells]) => `${names[type]}: ${cells.join(', ')}`).join(' · ') + (map === 'triangle' ? ' (Đỏ: đổi hàng với cột)' : '')],
   ];
   if (!seeded) rows.push(['Quân Xanh gần đích nhất', `${nearestToGoal(board_, 'p1')} nước (đường đi thật)`]);
   return `<div class="map-card"><div class="map-previews">${mapPreview(map)}</div><table class="small-table"><tbody>${rows.map(([a, b]) => `<tr><td><b>${escape(a)}</b></td><td>${escape(b)}</td></tr>`).join('')}</tbody></table><p class="caption"><a href="./guide.html#map-${escape(map)}">Lưu ý chiến thuật và cách viết bot cho bản đồ này (Sổ tay) ↗</a></p></div>`;

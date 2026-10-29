@@ -8,7 +8,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from .store import Problem, ROOT, RULES_HASH, LIMITS, uid, now
+from .store import Problem, ROOT, RULES_HASH, RULES_COMPATIBLE, LIMITS, uid, now
 
 STARTUP_SECONDS = 20
 STDERR_LIMIT = 1_048_576
@@ -429,14 +429,14 @@ class Worker:
             if match['pairing_id']:
                 tournament = db.execute('SELECT t.config,t.rules_hash FROM tournaments t JOIN pairings p '
                                         'ON p.tournament_id=t.id WHERE p.id=?', (match['pairing_id'],)).fetchone()
-                if tournament['rules_hash'] != RULES_HASH or json.loads(tournament['config']) != LIMITS:
+                if tournament['rules_hash'] not in RULES_COMPATIBLE or json.loads(tournament['config']) != LIMITS:
                     raise InfrastructureError('Engine hoặc giới hạn runtime không khớp thể lệ đã khóa.', retry=False)
                 frozen = db.execute('SELECT e.submission_id,e.frozen_hash FROM entries e JOIN pairings p '
                                     'ON e.tournament_id=p.tournament_id WHERE p.id=?', (match['pairing_id'],)).fetchall()
                 hashes = {e['submission_id']: e['frozen_hash'] for e in frozen}
                 if any(hashes.get(s['id']) != s['hash'] for s in submissions.values()):
                     raise InfrastructureError('Snapshot của giải không khớp bài nộp.', retry=False)
-        if match['rules_hash'] != RULES_HASH:
+        if match['rules_hash'] not in RULES_COMPATIBLE:
             raise InfrastructureError('Phiên bản engine không khớp ván đấu.', retry=False)
         for s in submissions.values():
             if hashlib.sha256(s['source'].encode()).hexdigest() != s['hash']:

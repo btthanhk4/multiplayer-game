@@ -46,8 +46,33 @@ LAYOUTS = {
     'river': (9, FORMATIONS['standard'], [(4, 0), (4, 1), (4, 2), (4, 4), (4, 6), (4, 7), (4, 8)]),
     'maze8': (8, ARENA8, [(3, 2), (3, 4), (4, 3), (4, 5)]),
 }
+TRIANGLE = [(4, 0, 'rock'), (7, 0, 'rock'), (6, 1, 'rock'),
+            (5, 0, 'paper'), (7, 1, 'paper'), (5, 2, 'paper'),
+            (6, 0, 'scissors'), (5, 1, 'scissors'), (6, 2, 'scissors')]
+
+
+def cells_where(keep, size=9):
+    return [(r, c) for r in range(size) for c in range(size) if keep(r, c)]
+
+
+# Bàn có hình dạng: name -> (ô ngoài bàn, cách đối xứng). Ô ngoài bàn với luật và với bot y hệt vật cản.
+# Tam giác lật qua đường chéo nối hai ô đích (đổi hàng với cột) thay vì quay 180°.
+LAYOUTS.update({
+    'hexagon': (9, FORMATIONS['standard'], []),
+    'hourglass': (9, FORMATIONS['wall'], []),
+    'lake': (9, FORMATIONS['standard'], []),
+    'triangle': (9, TRIANGLE, []),
+    'zigzag': (9, FORMATIONS['standard'], cells_where(lambda r, c: r == 3 and c <= 6) + cells_where(lambda r, c: r == 5 and c >= 2)),
+})
+SHAPES = {
+    'hexagon': (cells_where(lambda r, c: r + c <= 3 or r + c >= 13), 'rotate'),
+    'hourglass': (cells_where(lambda r, c: min(c, 8 - c) < 3 - abs(r - 4)), 'rotate'),
+    'lake': (cells_where(lambda r, c: abs(r - 4) + abs(c - 4) <= 2), 'rotate'),
+    'triangle': (cells_where(lambda r, c: r + c > 8), 'transpose'),
+}
 MAP_NAMES = list(LAYOUTS)            # bản đồ cố định; thêm `random` và `chaos` (mỗi ván một bàn khác theo seed)
 WALL = {'owner': None, 'type': 'wall'}
+VOID = {'owner': None, 'type': 'wall', 'void': True}
 
 
 def lcg(seed_hex):
@@ -142,12 +167,16 @@ def square_name(row, col, size=BOARD_SIZE):
 
 def new_game(map_name='standard'):
     size, pieces, walls = layout_of(map_name)
+    voids, mirror = SHAPES.get(map_name, ([], 'rotate'))
     board = [[None] * size for _ in range(size)]
     for row, col, kind in pieces:
         board[row][col] = {'owner': 'p1', 'type': kind}
-        board[size - 1 - row][size - 1 - col] = {'owner': 'p2', 'type': kind}
+        r, c = (col, row) if mirror == 'transpose' else (size - 1 - row, size - 1 - col)
+        board[r][c] = {'owner': 'p2', 'type': kind}
     for row, col in walls:
         board[row][col] = WALL
+    for row, col in voids:
+        board[row][col] = VOID
     return {'board': board, 'turn': 'p1', 'winner': None, 'winReason': None, 'revision': 0, 'quietPly': 0,
             'repetitions': {position_key(board, 'p1'): 1}, 'lastMove': None}
 
@@ -287,10 +316,11 @@ def show_board(state):
     files = ' '.join('abcdefghi'[:size])
     lines = [f'    {files}']
     for r, line in enumerate(state['board']):
-        cells = ' '.join('#' if p and p['type'] == 'wall' else (LETTER[p['type']].lower() if p['owner'] == 'p1' else LETTER[p['type']])
+        cells = ' '.join(' ' if p and p.get('void') else '#' if p and p['type'] == 'wall' else (LETTER[p['type']].lower() if p['owner'] == 'p1' else LETTER[p['type']])
                          if p else '·' for p in line)
         lines.append(f'{size - r:>2}  {cells}  {size - r}')
-    lines.append(f'    {files}      chữ thường = Xanh (p1), chữ hoa = Đỏ (p2), # = vật cản')
+    shaped = any(p and p.get('void') for line in state['board'] for p in line)
+    lines.append(f'    {files}      chữ thường = Xanh (p1), chữ hoa = Đỏ (p2), # = vật cản' + (', ô trống = ngoài bàn' if shaped else ''))
     return '\n'.join(lines)
 
 
