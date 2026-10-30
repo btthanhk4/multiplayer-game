@@ -27,6 +27,21 @@ python -m venv .venv
 
 Mở `http://localhost:8080/`. Runner `samples` chỉ chạy **bot mẫu nguyên bản**. Runner production cần Docker và gVisor để chạy mã tùy ý của người chơi. Xem [triển khai và vận hành cho ~1.000 sinh viên](docs/ARENA_DEPLOY.md) và [Compose](deploy/README.md).
 
+## Email xác minh
+
+Tạo tài khoản cần email đã xác minh bằng mã 6 số gửi qua SMTP. Thêm vào file env của server (không commit mật khẩu):
+
+```
+ARENA_SMTP_HOST=smtp.gmail.com
+ARENA_SMTP_PORT=587
+ARENA_SMTP_USER=tai-khoan-gui@gmail.com
+ARENA_SMTP_PASSWORD=mat-khau-ung-dung-16-ky-tu
+ARENA_EMAIL_DOMAINS=vnu.edu.vn        # chỉ nhận email @vnu.edu.vn
+ARENA_RATE_EMAIL_DAY=450              # dưới hạn mức ~500 email/ngày của Gmail cá nhân
+```
+
+Bật hoặc tắt "Bắt buộc xác minh email" trong trang quản trị. Sinh viên quên mật khẩu tự đặt lại bằng mã gửi về email. Chi tiết ở [docs/ARENA_DEPLOY.md](docs/ARENA_DEPLOY.md).
+
 ## Kiểm thử
 
 ```powershell
