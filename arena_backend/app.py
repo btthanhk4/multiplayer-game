@@ -307,7 +307,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True,
         if not email:
             raise Problem('Hãy nhập email.')
         if len(email) > 254 or not EMAIL.fullmatch(email):
-            raise Problem('Email không hợp lệ. Ví dụ đúng: ten.ban@gmail.com')
+            raise Problem(f'Email không hợp lệ. Ví dụ đúng: {"mssv@" + email_domains[0] if email_domains else "ten.ban@gmail.com"}')
         domain = email.rsplit('@', 1)[1]
         if email_domains and not any(domain == d or domain.endswith('.' + d) for d in email_domains):
             raise Problem(f'Chỉ nhận email {" hoặc ".join("@" + d for d in email_domains)}.')

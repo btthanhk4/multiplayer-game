@@ -83,9 +83,14 @@ function renderEmailFields() {
   const required = Boolean(health?.email?.required), domains = health?.email?.domains || [];
   $('#email-fields').hidden = !(register && emailOn());
   $('#auth-form').elements.email.required = register && required;
-  $('#email-optional').textContent = required ? `(bắt buộc${domains.length ? ` · ${domains.map(d => '@' + d).join(', ')}` : ''})`
-    : '(không bắt buộc · dùng để lấy lại mật khẩu khi quên)';
+  const only = domains.map(d => '@' + d).join(', ');
+  $('#email-optional').textContent = required ? `(bắt buộc${only ? ` · chỉ nhận ${only}` : ''})`
+    : `(không bắt buộc${only ? ` · chỉ nhận ${only}` : ''} · dùng để lấy lại mật khẩu khi quên)`;
+  for (const field of ['#register-email', '#account-email-input']) $(field).placeholder = domains.length ? `mssv@${domains[0]}` : 'ten.ban@gmail.com';
   $('#forgot-password').hidden = register || !emailOn();
+  // Accounts made before email became required are reminded on every page until they add one.
+  $('#email-banner').hidden = !(me && !me.email && required);
+  $('#email-banner-domain').textContent = only ? ` ${only}` : '';
 }
 // After a code goes out the button counts down to the next allowed resend.
 function cooldown(button, seconds) {
@@ -127,6 +132,7 @@ function renderAccount() {
   $('#account-button').textContent = me ? `${me.name}${team ? ` · ${team.name}` : ''}` : 'Đăng nhập';
   $('#admin-link').hidden = me?.role !== 'admin';
   $('#password-banner').hidden = !me?.must_change;
+  renderEmailFields();
 }
 
 const skew = () => health ? health.server_time - Date.now()/1000 : 0;
@@ -764,14 +770,16 @@ $('#account-button').addEventListener('click', () => {
   $('#open-email').textContent = me.email ? 'Đổi email' : 'Gắn email';
   $('#account-dialog').showModal();
 });
-$('#open-email').addEventListener('click', () => {
-  $('#account-dialog').close();
+function openEmailDialog() {
+  if ($('#account-dialog').open) $('#account-dialog').close();
   const form = $('#email-form');
   form.reset(); resetCode($('#email-send'));
   $('#email-code-field').hidden = $('#email-submit').hidden = true;
   $('#email-status').textContent = $('#email-error').textContent = '';
   $('#email-dialog').showModal();
-});
+}
+$('#open-email').addEventListener('click', openEmailDialog);
+$('#open-email-banner').addEventListener('click', openEmailDialog);
 $('#email-send').addEventListener('click', event => sendCode(event.currentTarget, '/me/email/code', {email: $('#email-form').elements.email.value},
   $('#email-status'), $('#email-error'), () => { $('#email-code-field').hidden = $('#email-submit').hidden = false; $('#email-form').elements.code.focus(); }));
 $('#email-form').addEventListener('submit', async event => {
