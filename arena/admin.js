@@ -28,7 +28,7 @@ const sum = object => Object.values(object || {}).reduce((a, b) => a + b, 0);
 // ---- dashboard ----------------------------------------------------------
 
 async function renderDashboard() {
-  const [o, settings] = await Promise.all([api('/admin/overview'), api('/admin/settings')]);
+  const [o, settings, health] = await Promise.all([api('/admin/overview'), api('/admin/settings'), api('/health')]);
   const queued = sum(Object.fromEntries(Object.entries(o.jobs).map(([k, v]) => [k, count(v, 'queued')])));
   const failed = sum(Object.fromEntries(Object.entries(o.jobs).map(([k, v]) => [k, count(v, 'failed')])));
   const running = sum(Object.fromEntries(Object.entries(o.jobs).map(([k, v]) => [k, count(v, 'running')])));
@@ -55,8 +55,12 @@ async function renderDashboard() {
   $('#boss-status').innerHTML = o.bosses.length ? `<div class="table-scroll"><table><thead><tr><th>ẢI</th><th>BOSS</th><th>TRẠNG THÁI</th></tr></thead><tbody>${o.bosses.map(b => `<tr><td>${b.level}</td><td>${escape(b.name)}</td><td>${badge(b.status)}</td></tr>`).join('')}</tbody></table></div><p class="caption">Boss được kiểm tra như bài nộp thường khi server khởi động hoặc khi file boss thay đổi. Thí sinh chỉ vào được ải khi boss đã “Hợp lệ”.</p>`
     : '<p class="caption">Chưa đăng ký boss. Khởi động lại server API để tạo.</p>';
   const form = $('#settings-form');
+  form.elements.email_required.disabled = !health.email.enabled;
+  $('#email-setting-note').textContent = health.email.enabled
+    ? `Gửi email đang bật${health.email.domains.length ? ` · chỉ nhận ${health.email.domains.map(d => '@' + d).join(', ')}` : ''}. Khi tắt bắt buộc, sinh viên vẫn có thể gắn email để tự lấy lại mật khẩu.`
+    : 'Máy chủ chưa cấu hình SMTP (ARENA_SMTP_* trong file env), nên chưa gửi được mã qua email.';
   if (!form.contains(document.activeElement)) {
-    for (const key of ['registration_open','submissions_open','ranked_open','practice_open','campaign_open','live_open','read_only']) form.elements[key].checked = settings[key] === '1';
+    for (const key of ['registration_open','email_required','submissions_open','ranked_open','practice_open','campaign_open','live_open','read_only']) form.elements[key].checked = settings[key] === '1';
     form.elements.announcement.value = settings.announcement;
   }
 }
@@ -224,7 +228,7 @@ async function renderTeams() {
 
 async function renderUsers() {
   const {items} = await api(`/admin/users?q=${encodeURIComponent($('#user-search').value)}`);
-  $('#user-list').innerHTML = items.length ? items.map(u => `<div class="job"><div><strong>${escape(u.name)}</strong> <small>@${escape(u.username)}</small> ${u.role === 'admin' ? '<span class="badge">BTC</span>' : ''} ${u.disabled ? badge('disqualified') : ''}<p>${escape(u.team || 'Chưa có đội')}${u.student_id ? ` · MSSV ${escape(u.student_id)}` : ''} · tạo ${formatTime(u.created)}${u.must_change ? ' · đang dùng mật khẩu tạm' : ''}</p></div><div class="action-row"><button class="button" data-user-action="reset_password" data-user="${u.id}">Cấp lại mật khẩu</button>${u.team ? `<button class="button" data-user-action="remove_from_team" data-user="${u.id}">Rời đội</button>` : ''}<button class="button" data-user-action="${u.disabled ? 'enable' : 'disable'}" data-user="${u.id}">${u.disabled ? 'Mở khóa' : 'Khóa'}</button><button class="button" data-user-action="${u.role === 'admin' ? 'remove_admin' : 'make_admin'}" data-user="${u.id}">${u.role === 'admin' ? 'Bỏ quyền BTC' : 'Cấp quyền BTC'}</button><button class="button danger" data-user-action="delete" data-user="${u.id}" data-username="${escape(u.username)}" data-team-size="${u.team_size || 0}" data-team-name="${escape(u.team || '')}">Xóa tài khoản</button></div></div>`).join('')
+  $('#user-list').innerHTML = items.length ? items.map(u => `<div class="job"><div><strong>${escape(u.name)}</strong> <small>@${escape(u.username)}</small> ${u.role === 'admin' ? '<span class="badge">BTC</span>' : ''} ${u.disabled ? badge('disqualified') : ''}<p>${escape(u.team || 'Chưa có đội')}${u.student_id ? ` · MSSV ${escape(u.student_id)}` : ''}${u.email ? ` · ${escape(u.email)}` : ''} · tạo ${formatTime(u.created)}${u.must_change ? ' · đang dùng mật khẩu tạm' : ''}</p></div><div class="action-row"><button class="button" data-user-action="reset_password" data-user="${u.id}">Cấp lại mật khẩu</button>${u.team ? `<button class="button" data-user-action="remove_from_team" data-user="${u.id}">Rời đội</button>` : ''}<button class="button" data-user-action="${u.disabled ? 'enable' : 'disable'}" data-user="${u.id}">${u.disabled ? 'Mở khóa' : 'Khóa'}</button><button class="button" data-user-action="${u.role === 'admin' ? 'remove_admin' : 'make_admin'}" data-user="${u.id}">${u.role === 'admin' ? 'Bỏ quyền BTC' : 'Cấp quyền BTC'}</button><button class="button danger" data-user-action="delete" data-user="${u.id}" data-username="${escape(u.username)}" data-team-size="${u.team_size || 0}" data-team-name="${escape(u.team || '')}">Xóa tài khoản</button></div></div>`).join('')
     : '<p class="caption">Không tìm thấy tài khoản.</p>';
 }
 
@@ -314,7 +318,7 @@ document.addEventListener('click', event => {
 
 $('#settings-form').addEventListener('submit', event => { event.preventDefault(); action(event.submitter, async () => {
   const form = event.target, values = {announcement: form.elements.announcement.value};
-  for (const key of ['registration_open','submissions_open','ranked_open','practice_open','campaign_open','live_open','read_only']) values[key] = form.elements[key].checked;
+  for (const key of ['registration_open','email_required','submissions_open','ranked_open','practice_open','campaign_open','live_open','read_only']) values[key] = form.elements[key].checked;
   if (values.read_only && !confirm('Chế độ chỉ xem chặn mọi thao tác ghi của thí sinh. Bật?')) return;
   await api('/admin/settings', values); notice('Đã lưu cài đặt.'); await renderDashboard(); }); });
 

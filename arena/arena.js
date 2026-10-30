@@ -73,6 +73,38 @@ function setMode(asRegister) {
   $('#auth-submit').textContent = register ? 'Tạo tài khoản' : 'Đăng nhập';
   $('#toggle-auth').textContent = register ? 'Đã có tài khoản? Đăng nhập' : 'Chưa có tài khoản? Tạo tài khoản miễn phí';
   $('#auth-error').textContent = '';
+  renderEmailFields();
+}
+
+// ---- email codes ----------------------------------------------------------
+
+const emailOn = () => Boolean(health?.email?.enabled);
+function renderEmailFields() {
+  const required = Boolean(health?.email?.required), domains = health?.email?.domains || [];
+  $('#email-fields').hidden = !(register && emailOn());
+  $('#auth-form').elements.email.required = register && required;
+  $('#email-optional').textContent = required ? `(bắt buộc${domains.length ? ` · ${domains.map(d => '@' + d).join(', ')}` : ''})`
+    : '(không bắt buộc · dùng để lấy lại mật khẩu khi quên)';
+  $('#forgot-password').hidden = register || !emailOn();
+}
+// After a code goes out the button counts down to the next allowed resend.
+function cooldown(button, seconds) {
+  clearInterval(button.timer);
+  let left = seconds;
+  const tick = () => {
+    if (left <= 0) { clearInterval(button.timer); button.disabled = false; button.textContent = 'Gửi lại mã'; return; }
+    button.disabled = true; button.textContent = `Gửi lại (${left--}s)`;
+  };
+  tick(); button.timer = setInterval(tick, 1000);
+}
+function resetCode(button) { clearInterval(button.timer); button.disabled = false; button.textContent = button.dataset.label; }
+async function sendCode(button, path, data, status, error, reveal) {
+  error.textContent = ''; status.textContent = 'Đang gửi mã…'; button.disabled = true;
+  try {
+    const result = await api(path, data);
+    status.textContent = `${result.email ? `Đã gửi mã tới ${result.email}` : 'Nếu tài khoản có email, mã đã được gửi tới email đó'}${result.status === 'queued' ? ' (có thể chậm 1–2 phút)' : ''}. Mã dùng được ${Math.round((result.expires_in || 600) / 60)} phút; nhớ xem cả mục Spam/Quảng cáo.`;
+    reveal(); cooldown(button, result.resend_in || 60);
+  } catch (failure) { status.textContent = ''; error.textContent = failure.message; button.disabled = false; }
 }
 
 function openAuth(asRegister) {
@@ -113,6 +145,7 @@ function renderHealth() {
   $('#service-status').classList.toggle('online', health.runner_online && !health.open.read_only);
   $('#service-detail').textContent = health.runner_online && health.runner_modes.some(m => m !== 'docker') ? 'Đang thử nội bộ · Chưa chấm giải chính thức' : `${health.pending} lượt chấm đang chờ hoặc đang chạy`;
   $('#announcement').hidden = !health.announcement;
+  renderEmailFields();
   $('#announcement').textContent = health.announcement;
   $('#invite-field').hidden = !health.registration_invite;
   $('#team-caption').textContent = `Tối đa ${health.team_size} thành viên. Bot, Elo, huy hiệu và đăng ký giải thuộc về đội.`;
@@ -725,7 +758,54 @@ $('#account-button').addEventListener('click', () => {
   if (!me) return openAuth(false);
   $('#account-name').textContent = me.name;
   $('#account-detail').textContent = `@${me.username}${team ? ` · Đội ${team.name}` : ' · Chưa có đội'}`;
+  $('#account-email').hidden = !emailOn() && !me.email;
+  $('#account-email').textContent = me.email ? `Email: ${me.email} · đã xác minh` : 'Chưa gắn email: nếu quên mật khẩu bạn sẽ phải nhờ ban tổ chức.';
+  $('#open-email').hidden = !emailOn();
+  $('#open-email').textContent = me.email ? 'Đổi email' : 'Gắn email';
   $('#account-dialog').showModal();
+});
+$('#open-email').addEventListener('click', () => {
+  $('#account-dialog').close();
+  const form = $('#email-form');
+  form.reset(); resetCode($('#email-send'));
+  $('#email-code-field').hidden = $('#email-submit').hidden = true;
+  $('#email-status').textContent = $('#email-error').textContent = '';
+  $('#email-dialog').showModal();
+});
+$('#email-send').addEventListener('click', event => sendCode(event.currentTarget, '/me/email/code', {email: $('#email-form').elements.email.value},
+  $('#email-status'), $('#email-error'), () => { $('#email-code-field').hidden = $('#email-submit').hidden = false; $('#email-form').elements.code.focus(); }));
+$('#email-form').addEventListener('submit', async event => {
+  event.preventDefault(); $('#email-error').textContent = '';
+  const form = event.target;
+  try {
+    await api('/me/email', {email: form.elements.email.value, code: form.elements.code.value.trim()});
+    $('#email-dialog').close(); await loadMe(); notice('Đã gắn email. Từ giờ bạn có thể tự lấy lại mật khẩu.');
+  } catch (error) { $('#email-error').textContent = error.message; }
+});
+$('#forgot-password').addEventListener('click', () => {
+  const form = $('#reset-form');
+  form.reset(); resetCode($('#reset-send'));
+  form.elements.login.value = $('#auth-form').elements.username.value.trim();
+  $('#reset-step').hidden = $('#reset-submit').hidden = true;
+  $('#reset-status').textContent = $('#reset-error').textContent = '';
+  $('#reset-dialog').showModal();
+});
+$('#reset-send').addEventListener('click', event => sendCode(event.currentTarget, '/password/forgot', {login: $('#reset-form').elements.login.value.trim()},
+  $('#reset-status'), $('#reset-error'), () => { $('#reset-step').hidden = $('#reset-submit').hidden = false; $('#reset-form').elements.code.focus(); }));
+$('#reset-form').addEventListener('submit', async event => {
+  event.preventDefault(); $('#reset-error').textContent = '';
+  const form = event.target;
+  try {
+    await api('/password/reset', {login: form.elements.login.value.trim(), code: form.elements.code.value.trim(), password: form.elements.password.value});
+    $('#reset-dialog').close(); await loadMe(); forget(); notice('Đã đặt mật khẩu mới. Các phiên đăng nhập cũ đã bị đăng xuất.'); route();
+  } catch (error) { $('#reset-error').textContent = error.message; }
+});
+$('#register-send').addEventListener('click', event => sendCode(event.currentTarget, '/register/email-code', {email: $('#auth-form').elements.email.value},
+  $('#register-email-status'), $('#auth-error'), () => { $('#register-code-field').hidden = false; $('#auth-form').elements.email_code.focus(); }));
+$('#auth-form').elements.email.addEventListener('input', () => {
+  // A new address needs a new code.
+  $('#register-code-field').hidden = true; $('#auth-form').elements.email_code.value = '';
+  $('#register-email-status').textContent = ''; resetCode($('#register-send'));
 });
 $('#logout').addEventListener('click', event => action(event.target, async () => { await api('/logout', {}); me = team = badges = campaign = session.csrf = null; mineLive = []; forget(); $('#account-dialog').close(); watch.clear(); renderLiveBanner(); renderAccount(); setMode(false); refresher.now(); }));
 $('#change-password').addEventListener('click', () => { $('#account-dialog').close(); $('#password-dialog').showModal(); });
@@ -753,6 +833,9 @@ $('#auth-form').addEventListener('submit', async event => {
   event.submitter.disabled = true;
   const data = Object.fromEntries(new FormData(event.target)); data.username = data.username.trim().toLowerCase();
   if (!register) { delete data.name; delete data.student_id; delete data.invite; }
+  data.email = (data.email || '').trim(); data.email_code = (data.email_code || '').trim();
+  if (!register || !emailOn() || !data.email) { delete data.email; delete data.email_code; }
+  else if (!/^\d{6}$/.test(data.email_code)) { $('#auth-error').textContent = 'Bấm “Gửi mã” rồi nhập mã 6 số trong email (hoặc xóa email nếu không muốn gắn).'; event.submitter.disabled = false; return; }
   if (register && /^\s|\s$/.test(data.password)) { $('#auth-error').textContent = 'Mật khẩu không được bắt đầu hoặc kết thúc bằng khoảng trắng.'; event.submitter.disabled = false; return; }
   if (!/^[a-z0-9_]{3,32}$/.test(data.username)) { $('#auth-error').textContent = 'Tên đăng nhập chỉ gồm chữ thường không dấu, số và dấu gạch dưới (3–32 ký tự).'; event.submitter.disabled = false; return; }
   try {

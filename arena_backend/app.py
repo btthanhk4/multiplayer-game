@@ -1,3 +1,4 @@
+import concurrent.futures
 import csv
 import hashlib
 import io
@@ -16,6 +17,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory, g
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from .mailer import mailer_from_env
 from .store import Store, Problem, ROOT, RULES_HASH, LIMITS, TEAM_SIZE, SYSTEM_TEAM, MAPS, GEOMETRY_MAPS, uid, now
 
 PUBLIC_FILES = {'rules.js', 'arena/arena.js', 'arena/admin.js', 'arena/common.js', 'arena/watch.js', 'arena/arena.css',
@@ -59,7 +61,24 @@ RATES = {
     'campaign_team': (env_rate('CAMPAIGN_TEAM', 30), 3600),
     'team_user': (env_rate('TEAM_USER', 20), 3600),
     'tournament_code': (env_rate('TOURNAMENT_CODE', 20), 900),
+    # Verification emails: per address, per visitor, and for the whole server per day (stay under the SMTP
+    # provider's daily quota, e.g. 2,000 for Google Workspace, 500 for a personal Gmail).
+    'email_address': (env_rate('EMAIL_ADDRESS', 5), 3600),
+    'email_ip': (env_rate('EMAIL_IP', 300), 3600),
+    'email_day': (env_rate('EMAIL_DAY', 1800), 86400),
+    'reset_login': (env_rate('RESET_LOGIN', 10), 3600),
 }
+CODE_SECONDS, RESEND_SECONDS, CODE_ATTEMPTS = 600, 60, 5
+EMAIL = re.compile(r"[a-z0-9_%+'-]+(\.[a-z0-9_%+'-]+)*@[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+")
+
+
+def mask_email(email):
+    name, domain = email.split('@', 1)
+    return f'{name[:2]}{"•" * max(3, len(name) - 2)}@{domain}'
+
+
+def code_digest(cid, code):
+    return hashlib.sha256(f'{cid}:{code}'.encode()).hexdigest()
 
 
 def sheet_cell(value):
@@ -92,11 +111,20 @@ def text(data, key, minimum=1, maximum=80):
 
 
 FIELD_LABELS = {'username': 'Tên đăng nhập', 'password': 'Mật khẩu', 'name': 'Họ và tên', 'invite': 'Mã tham gia',
-                'current': 'Mật khẩu hiện tại'}
+                'current': 'Mật khẩu hiện tại', 'login': 'Tên đăng nhập hoặc email'}
 RESERVED_NAMES = {'admin', 'administrator', 'root', 'system', 'ottv2', 'btc', 'support', 'boss', 'moderator'}
 INVISIBLE = dict.fromkeys(map(ord, '\u200b\u200c\u200d\u2060\ufeff\u00ad'), None)
 # Hashed once so unknown usernames cost the same time as wrong passwords.
 DUMMY_HASH = generate_password_hash('not-a-real-password', method='scrypt')
+
+
+def new_password(data, username):
+    password = text(data, 'password', 12, 128)
+    if password != data['password']:
+        raise Problem('Mật khẩu không được có khoảng trắng ở đầu hoặc cuối.')
+    if len(set(password)) < 4 or username in password.lower():
+        raise Problem('Mật khẩu quá dễ đoán: cần ít nhất 4 ký tự khác nhau và không chứa tên đăng nhập.')
+    return password
 
 
 def clean_name(value, label='Họ và tên'):
@@ -130,7 +158,7 @@ class TTLCache:
             self.items.clear()
 
 
-def create_app(directory=None, origin=None, registration_code=None, bosses=True):
+def create_app(directory=None, origin=None, registration_code=None, bosses=True, mailer=None):
     app = Flask(__name__, static_folder=None)
     app.config['MAX_CONTENT_LENGTH'] = 400_000
     app.json.ensure_ascii = False
@@ -151,6 +179,8 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
     cache = TTLCache()
     app.extensions['cache'] = cache
     proxies = trusted_proxies()
+    mail = mailer if mailer is not None else mailer_from_env(local)
+    email_domains = [d.strip().lower().lstrip('@') for d in os.getenv('ARENA_EMAIL_DOMAINS', '').split(',') if d.strip()]
 
     def from_proxy(address):
         try:
@@ -183,12 +213,13 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         token = request.cookies.get('ott_session', '')
         if token:
             with store.connect() as db:
-                row = db.execute('SELECT s.*,u.username,u.name,u.role,u.team_id,u.must_change,u.disabled '
+                row = db.execute('SELECT s.*,u.username,u.name,u.role,u.team_id,u.must_change,u.disabled,u.email '
                                  'FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=? AND s.expires>?',
                                  (hashlib.sha256(token.encode()).hexdigest(), now())).fetchone()
             if row and not row['disabled']:
                 g.user = {'id': row['user_id'], 'username': row['username'], 'name': row['name'],
-                          'role': row['role'], 'team_id': row['team_id'], 'must_change': bool(row['must_change'])}
+                          'role': row['role'], 'team_id': row['team_id'], 'must_change': bool(row['must_change']),
+                          'email': row['email']}
                 g.session = dict(row)
         # Everything except the sign-in screen's own needs requires an account.
         if not g.user and request.method in ('GET', 'HEAD') and request.path not in ('/api/health', '/api/me'):
@@ -253,9 +284,102 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
             team = store.require_team(db, user)
         return user, team['id']
 
-    def rate(name, key):
+    def rate(name, key, message=None, status=429):
         maximum, window = RATES[name]
-        store.rate(f'{name}:{key}', maximum, window)
+        try:
+            store.rate(f'{name}:{key}', maximum, window)
+        except Problem:
+            if not message:
+                raise
+            raise Problem(message, status)
+
+    # ---- email codes ----------------------------------------------------
+
+    def email_required():
+        return bool(mail) and settings().get('email_required') == '1'
+
+    def need_mail():
+        if not mail:
+            raise Problem('Máy chủ chưa bật gửi email. Liên hệ ban tổ chức.', 404)
+
+    def clean_email(value):
+        email = value.strip().lower() if isinstance(value, str) else ''
+        if not email:
+            raise Problem('Hãy nhập email.')
+        if len(email) > 254 or not EMAIL.fullmatch(email):
+            raise Problem('Email không hợp lệ. Ví dụ đúng: ten.ban@gmail.com')
+        domain = email.rsplit('@', 1)[1]
+        if email_domains and not any(domain == d or domain.endswith('.' + d) for d in email_domains):
+            raise Problem(f'Chỉ nhận email {" hoặc ".join("@" + d for d in email_domains)}.')
+        return email
+
+    def email_free(email, user=None):
+        with store.connect() as db:
+            owner = db.execute('SELECT id FROM users WHERE email=?', (email,)).fetchone()
+        if owner and owner['id'] != user:
+            raise Problem('Email này đã gắn với một tài khoản khác. Hãy đăng nhập, hoặc dùng "Quên mật khẩu".', 409)
+
+    def code_message(purpose, code, username=None):
+        what = {'register': 'xác minh email để tạo tài khoản', 'verify': 'gắn email này vào tài khoản của bạn',
+                'reset': f'đặt lại mật khẩu cho tài khoản @{username}'}[purpose]
+        subject = f'{code} là mã {"đặt lại mật khẩu" if purpose == "reset" else "xác minh"} OTTv2 Arena'
+        body = (f'Xin chào,\n\nMã để {what} trên OTTv2 Arena là:\n\n    {code}\n\n'
+                f'Mã dùng được trong {CODE_SECONDS // 60} phút và chỉ một lần. Đừng gửi mã này cho ai, kể cả người '
+                f'xưng là ban tổ chức.\nNếu bạn không yêu cầu mã, hãy bỏ qua email này.\n\n{public_origin}\n')
+        return subject, body
+
+    def issue_code(purpose, email, user=None, username=None, wait=True):
+        """Store a fresh 6-digit code for (purpose, email) and email it. Returns 'sent' or 'queued'."""
+        with store.connect() as db:
+            last = db.execute('SELECT created FROM email_codes WHERE purpose=? AND email=? ORDER BY created DESC LIMIT 1',
+                              (purpose, email)).fetchone()
+        if last and now() - last['created'] < RESEND_SECONDS:
+            wait_for = int(RESEND_SECONDS - (now() - last['created'])) + 1
+            raise Problem(f'Mã vừa được gửi. Kiểm tra hộp thư (cả mục Spam/Quảng cáo) hoặc đợi {wait_for} giây rồi gửi lại.', 429)
+        rate('email_address', email, 'Địa chỉ này đã nhận nhiều mã trong một giờ. Hãy dùng mã mới nhất hoặc thử lại sau.')
+        rate('email_ip', g.client_ip)
+        rate('email_day', 'all', 'Hôm nay máy chủ đã gửi tối đa số email cho phép. Hãy báo ban tổ chức.', 503)
+        code, cid = f'{secrets.randbelow(10 ** 6):06d}', uid()
+        with store.connect(True) as db:
+            db.execute('DELETE FROM email_codes WHERE expires<?', (now(),))
+            db.execute('DELETE FROM email_codes WHERE purpose=? AND email=?', (purpose, email))
+            db.execute('INSERT INTO email_codes(id,purpose,email,user_id,digest,expires,created) VALUES(?,?,?,?,?,?,?)',
+                       (cid, purpose, email, user, code_digest(cid, code), now() + CODE_SECONDS, now()))
+        future = mail.send(email, *code_message(purpose, code, username))
+        if not wait:
+            return 'queued'
+        try:
+            future.result(timeout=8)
+            return 'sent'
+        except concurrent.futures.TimeoutError:
+            return 'queued'
+        except Exception:
+            with store.connect(True) as db:
+                db.execute('DELETE FROM email_codes WHERE id=?', (cid,))
+            raise Problem('Chưa gửi được email tới địa chỉ này. Kiểm tra lại địa chỉ, hoặc thử lại sau ít phút.', 502)
+
+    def check_code(purpose, email, code, user=None):
+        """Use up the code sent for (purpose, email); wrong guesses count, five end the code."""
+        code = str(code or '').strip()
+        if not re.fullmatch(r'\d{6}', code):
+            raise Problem('Nhập mã xác minh gồm 6 chữ số trong email.')
+        failure = None
+        with store.connect(True) as db:
+            row = db.execute('SELECT * FROM email_codes WHERE purpose=? AND email=? AND expires>? '
+                             'ORDER BY created DESC LIMIT 1', (purpose, email, now())).fetchone()
+            if not row or row['user_id'] != user:
+                failure = 'Mã xác minh đã hết hạn hoặc chưa được gửi. Bấm "Gửi mã" để nhận mã mới.'
+            elif row['attempts'] >= CODE_ATTEMPTS:
+                failure = 'Nhập sai quá nhiều lần. Hãy bấm "Gửi mã" để nhận mã mới.'
+            elif not secrets.compare_digest(row['digest'], code_digest(row['id'], code)):
+                db.execute('UPDATE email_codes SET attempts=attempts+1 WHERE id=?', (row['id'],))
+                left = CODE_ATTEMPTS - row['attempts'] - 1
+                failure = f'Mã xác minh không đúng. Còn {left} lần thử.' if left else \
+                    'Nhập sai quá nhiều lần. Hãy bấm "Gửi mã" để nhận mã mới.'
+            else:
+                db.execute('DELETE FROM email_codes WHERE id=?', (row['id'],))
+        if failure:
+            raise Problem(failure, 400)
 
     # ---- public ---------------------------------------------------------
 
@@ -267,6 +391,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         return {'ok': True, 'rules_hash': RULES_HASH, 'limits': LIMITS, 'runner_online': bool(active),
                 'runner_slots': len(active), 'runner_modes': sorted({r['mode'] for r in active}),
                 'pending': pending, 'registration_invite': bool(code), 'team_size': TEAM_SIZE,
+                'email': {'enabled': bool(mail), 'required': email_required(), 'domains': email_domains},
                 'announcement': values.get('announcement', ''),
                 'open': {key: values.get(key) == '1' for key in
                          ('registration_open', 'submissions_open', 'ranked_open', 'practice_open', 'campaign_open',
@@ -290,7 +415,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
                 team['entries'] = [dict(r) for r in db.execute(
                     'SELECT e.tournament_id,e.submission_id,e.status,s.name bot,s.status bot_status FROM entries e '
                     'JOIN submissions s ON s.id=e.submission_id WHERE e.team_id=?', (team['id'],))]
-        user = {k: g.user[k] for k in ('id', 'username', 'name', 'role', 'must_change')}
+        user = {k: g.user[k] for k in ('id', 'username', 'name', 'role', 'must_change', 'email')}
         return jsonify(user=user, csrf=g.session['csrf'], team=team)
 
     def session_response(user):
@@ -321,11 +446,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
             raise Problem('Tên đăng nhập chỉ gồm chữ thường không dấu, số và dấu gạch dưới (3–32 ký tự).')
         if username in RESERVED_NAMES:
             raise Problem('Tên đăng nhập này được dành riêng. Hãy chọn tên khác.', 409)
-        password = text(data, 'password', 12, 128)
-        if password != data['password']:
-            raise Problem('Mật khẩu không được có khoảng trắng ở đầu hoặc cuối.')
-        if len(set(password)) < 4 or username in password.lower():
-            raise Problem('Mật khẩu quá dễ đoán: cần ít nhất 4 ký tự khác nhau và không chứa tên đăng nhập.')
+        password = new_password(data, username)
         if code and not secrets.compare_digest(str(data.get('invite') or '').strip(), code):
             raise Problem('Mã tham gia không đúng. Hỏi ban tổ chức để lấy mã.', 403)
         student_id = str(data.get('student_id') or '').strip().upper()
@@ -335,15 +456,74 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         with store.connect() as db:
             if db.execute('SELECT 1 FROM users WHERE username=?', (username,)).fetchone():
                 raise Problem('Tên đăng nhập đã có người dùng.', 409)
+        # With email switched on, an address is optional unless the organisers require it; one given is always verified.
+        email = None
+        if mail and (data.get('email') or email_required()):
+            email = clean_email(data.get('email'))
+            email_free(email)
+            check_code('register', email, data.get('email_code'))
         password_hash = generate_password_hash(password, method='scrypt')
         try:
             with store.connect(True) as db:
-                db.execute('INSERT INTO users(id,username,name,password,role,created,student_id) VALUES(?,?,?,?,?,?,?)',
-                           (user['id'], username, user['name'], password_hash, 'player', now(), student_id or None))
-                store.audit(db, user['id'], 'user.registered', {'username': username})
+                db.execute('INSERT INTO users(id,username,name,password,role,created,student_id,email,email_verified) '
+                           'VALUES(?,?,?,?,?,?,?,?,?)', (user['id'], username, user['name'], password_hash, 'player', now(),
+                                                         student_id or None, email, now() if email else None))
+                store.audit(db, user['id'], 'user.registered', {'username': username, 'email': bool(email)})
         except sqlite3.IntegrityError:
-            raise Problem('Tên đăng nhập đã có người dùng.', 409)
+            raise Problem('Tên đăng nhập hoặc email vừa được người khác dùng. Hãy chọn cái khác.', 409)
         return session_response(user)
+
+    @app.post('/api/register/email-code')
+    def register_email_code():
+        data = body()
+        need_mail()
+        if settings().get('registration_open') != '1':
+            raise Problem('Ban tổ chức đang tạm đóng đăng ký tài khoản.', 403)
+        email = clean_email(data.get('email'))
+        email_free(email)
+        status = issue_code('register', email)
+        return jsonify(ok=True, email=mask_email(email), status=status, expires_in=CODE_SECONDS, resend_in=RESEND_SECONDS)
+
+    def account_for(login):
+        with store.connect() as db:
+            return db.execute('SELECT * FROM users WHERE username=? OR email=?', (login, login)).fetchone()
+
+    @app.post('/api/password/forgot')
+    def forgot_password():
+        data = body()
+        need_mail()
+        login = text(data, 'login', 3, 254).lower()
+        rate('login_ip', g.client_ip)
+        rate('reset_login', login)
+        user = account_for(login)
+        # The answer is the same whether or not the account exists or has an email, so it cannot be used to probe.
+        if user and user['email'] and not user['disabled']:
+            try:
+                issue_code('reset', user['email'], user['id'], user['username'], wait=False)
+            except Problem:
+                pass
+        return jsonify(ok=True, resend_in=RESEND_SECONDS, expires_in=CODE_SECONDS)
+
+    @app.post('/api/password/reset')
+    def reset_password():
+        data = body()
+        need_mail()
+        login = text(data, 'login', 3, 254).lower()
+        rate('login_user', f'{login}@{g.client_ip}')
+        rate('login_account', login)
+        rate('login_ip', g.client_ip)
+        user = account_for(login)
+        if not user or not user['email'] or user['disabled']:
+            raise Problem('Mã xác minh đã hết hạn hoặc chưa được gửi. Bấm "Gửi mã" để nhận mã mới.', 400)
+        password = new_password(data, user['username'])
+        check_code('reset', user['email'], data.get('code'), user['id'])
+        digest = generate_password_hash(password, method='scrypt')
+        with store.connect(True) as db:
+            db.execute('UPDATE users SET password=?,must_change=0 WHERE id=?', (digest, user['id']))
+            db.execute('DELETE FROM sessions WHERE user_id=?', (user['id'],))
+            store.audit(db, user['id'], 'user.password_reset_by_email', {})
+        g.session = None
+        return session_response(dict(user))
 
     @app.post('/api/login')
     def login():
@@ -374,11 +554,7 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
     def change_password():
         user, data = auth(), body()
         rate('login_user', f"{g.user['username']}@{g.client_ip}")
-        new = text(data, 'password', 12, 128)
-        if len(set(new)) < 4 or g.user['username'] in new.lower():
-            raise Problem('Mật khẩu quá dễ đoán: cần ít nhất 4 ký tự khác nhau và không chứa tên đăng nhập.')
-        if new != data['password']:
-            raise Problem('Mật khẩu không được có khoảng trắng ở đầu/cuối.')
+        new = new_password(data, g.user['username'])
         with store.connect() as db:
             row = db.execute('SELECT password FROM users WHERE id=?', (user,)).fetchone()
         if not check_password_hash(row['password'], str(data.get('current', ''))):
@@ -389,6 +565,32 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
             db.execute('DELETE FROM sessions WHERE user_id=? AND hash!=?', (user, g.session['hash']))
             store.audit(db, user, 'user.password_changed', {})
         return jsonify(ok=True)
+
+    @app.post('/api/me/email/code')
+    def my_email_code():
+        user, data = auth(), body()
+        need_mail()
+        email = clean_email(data.get('email'))
+        if email == g.user['email']:
+            raise Problem('Email này đã gắn với tài khoản của bạn.', 409)
+        email_free(email, user)
+        status = issue_code('verify', email, user)
+        return jsonify(ok=True, email=mask_email(email), status=status, expires_in=CODE_SECONDS, resend_in=RESEND_SECONDS)
+
+    @app.post('/api/me/email')
+    def my_email():
+        user, data = auth(), body()
+        need_mail()
+        email = clean_email(data.get('email'))
+        email_free(email, user)
+        check_code('verify', email, data.get('code'), user)
+        try:
+            with store.connect(True) as db:
+                db.execute('UPDATE users SET email=?,email_verified=? WHERE id=?', (email, now(), user))
+                store.audit(db, user, 'user.email_verified', {})
+        except sqlite3.IntegrityError:
+            raise Problem('Email này vừa được gắn với một tài khoản khác.', 409)
+        return jsonify(ok=True, email=email)
 
     # ---- teams ----------------------------------------------------------
 
@@ -832,19 +1034,22 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
             if not t:
                 raise Problem('Không tìm thấy giải.', 404)
             rows = store.standings(db, tid)
-            members = {}
-            for m in db.execute('SELECT team_id,name,student_id FROM users WHERE team_id IN '
+            members, emails = {}, {}
+            for m in db.execute('SELECT team_id,name,student_id,email FROM users WHERE team_id IN '
                                 '(SELECT team_id FROM entries WHERE tournament_id=?)', (tid,)):
                 members.setdefault(m['team_id'], []).append(m['name'] + (f" ({m['student_id']})" if m['student_id'] else ''))
+                if m['email']:
+                    emails.setdefault(m['team_id'], []).append(m['email'])
         out = io.StringIO()
         writer = csv.writer(out)
         writer.writerow(['Hạng', 'Xếp loại', 'Đội', 'Thành viên', 'Bot', 'Điểm cặp', 'Buchholz', 'Điểm ván',
-                         'Thắng', 'Hòa', 'Thua', 'BYE', 'Hạt giống', 'Trạng thái'])
+                         'Thắng', 'Hòa', 'Thua', 'BYE', 'Hạt giống', 'Trạng thái', 'Email'])
         for s in rows:
             writer.writerow([s['rank'] or '', s['tier'], sheet_cell(s['name']),
                              sheet_cell('; '.join(members.get(s['team_id'], []))), sheet_cell(s['bot']),
                              s['points'], s['buchholz'], s['game_points'], s['wins'], s['draws'], s['losses'],
-                             s['byes'], s['seed'] or '', s['entry_status']])
+                             s['byes'], s['seed'] or '', s['entry_status'],
+                             sheet_cell('; '.join(emails.get(s['team_id'], [])))])
         filename = re.sub(r'[^A-Za-z0-9_-]+', '-', t['name']).strip('-') or 'ket-qua'
         return Response('﻿' + out.getvalue(), mimetype='text/csv',
                         headers={'Content-Disposition': f'attachment; filename="{filename}.csv"'})
@@ -904,10 +1109,10 @@ def create_app(directory=None, origin=None, registration_code=None, bosses=True)
         q = f"%{request.args.get('q', '').strip()}%"
         with store.connect() as db:
             rows = db.execute('SELECT u.id,u.username,u.name,u.role,u.created,u.student_id,u.disabled,u.must_change,'
-                              't.name team,u.team_id,(SELECT COUNT(*) FROM users x WHERE x.team_id=u.team_id) team_size '
+                              'u.email,t.name team,u.team_id,(SELECT COUNT(*) FROM users x WHERE x.team_id=u.team_id) team_size '
                               'FROM users u LEFT JOIN teams t ON t.id=u.team_id WHERE u.username LIKE ? '
-                              'OR u.name LIKE ? OR u.student_id LIKE ? OR t.name LIKE ? '
-                              'ORDER BY u.created DESC LIMIT 50 OFFSET ?', (q, q, q, q, page()*50)).fetchall()
+                              'OR u.name LIKE ? OR u.student_id LIKE ? OR t.name LIKE ? OR u.email LIKE ? '
+                              'ORDER BY u.created DESC LIMIT 50 OFFSET ?', (q, q, q, q, q, page()*50)).fetchall()
         return jsonify(items=[dict(r) for r in rows])
 
     @app.post('/api/admin/users/<user>')

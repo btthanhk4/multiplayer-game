@@ -33,6 +33,8 @@
         <div class="admin-layout">
           <form method="post" action="/arena/enable-javascript" id="settings-form" class="paper-card"><p class="eyebrow">CÔNG TẮC SỰ KIỆN</p><h3>Mở / đóng chức năng</h3>
             <label class="switch"><input type="checkbox" name="registration_open"> Cho đăng ký tài khoản</label>
+            <label class="switch"><input type="checkbox" name="email_required"> Bắt buộc xác minh email khi tạo tài khoản</label>
+            <p class="caption" id="email-setting-note"></p>
             <label class="switch"><input type="checkbox" name="submissions_open"> Cho nộp bot trên web</label>
             <label class="switch"><input type="checkbox" name="ranked_open"> Mở đấu xếp hạng</label>
             <label class="switch"><input type="checkbox" name="practice_open"> Mở đấu tập</label>
@@ -128,7 +130,7 @@
       <section id="people" class="view" role="tabpanel" hidden>
         <div class="admin-layout even">
           <div class="paper-card"><p class="eyebrow">ĐỘI</p><label>Tìm (tên đội, mã, thành viên, MSSV)<input id="team-search" type="search"></label><div class="action-row"><button class="button" id="cleanup-teams" type="button">Dọn các đội không còn thành viên</button></div><div id="team-list"></div></div>
-          <div class="paper-card"><p class="eyebrow">TÀI KHOẢN</p><label>Tìm (tên đăng nhập, họ tên, MSSV, đội)<input id="user-search" type="search"></label><div id="user-list"></div></div>
+          <div class="paper-card"><p class="eyebrow">TÀI KHOẢN</p><label>Tìm (tên đăng nhập, họ tên, MSSV, email, đội)<input id="user-search" type="search"></label><div id="user-list"></div></div>
         </div>
       </section>
 

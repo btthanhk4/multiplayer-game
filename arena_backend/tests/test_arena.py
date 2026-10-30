@@ -2701,6 +2701,213 @@ class Geometry(Base):
             self.assertIn(field, plain, field)
 
 
+class FakeMailer:
+    """Collects messages instead of sending them; `fail` makes the next sends raise like a refused address."""
+    def __init__(self):
+        self.sent, self.fail = [], False
+
+    def send(self, to, subject, body):
+        future = concurrent.futures.Future()
+        if self.fail:
+            future.set_exception(OSError('550 mailbox unavailable'))
+        else:
+            self.sent.append((to, subject, body))
+            future.set_result(True)
+        return future
+
+    def code(self, to=None):
+        import re
+        mails = [m for m in self.sent if to is None or m[0] == to]
+        return re.search(r'\n {4}(\d{6})\n', mails[-1][2]).group(1)
+
+
+class EmailCodes(Base):
+    PASSWORD = 'test-only-password-123'
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.mailer = FakeMailer()
+        self.app = create_app(self.tmp.name, origin='http://localhost:8080', registration_code='test-invite',
+                              bosses=False, mailer=self.mailer)
+        self.app.testing = True
+        self.store = self.app.extensions['store']
+        self.client = self.app.test_client()
+        self.csrf = ''
+
+    def age_codes(self, seconds=61):
+        with self.store.connect(True) as db:
+            db.execute('UPDATE email_codes SET created=created-?', (seconds,))
+
+    def signup(self, client=None, **over):
+        data = {'username': 'newbie', 'name': 'Tân sinh viên', 'password': self.PASSWORD, 'invite': 'test-invite', **over}
+        return self.post('/register', data, client or self.app.test_client(), csrf='')
+
+    def test_register_with_a_verified_email_and_sign_in_with_it_to_reset_the_password(self):
+        sent = self.post('/register/email-code', {'email': '  An.Nguyen@Gmail.com '})
+        self.assertEqual(sent.status_code, 200, sent.json)
+        self.assertEqual((sent.json['email'], sent.json['status']), ('an•••••••@gmail.com', 'sent'))
+        to, subject, body = self.mailer.sent[-1]
+        self.assertEqual(to, 'an.nguyen@gmail.com')
+        code = self.mailer.code()
+        self.assertIn(code, subject)
+        self.assertIn('http://localhost:8080', body)
+        with self.store.connect() as db:
+            self.assertNotIn(code, json.dumps([dict(r) for r in db.execute('SELECT * FROM email_codes')]))
+        wrong = '000000' if code != '000000' else '111111'
+        self.assertIn('Còn 4 lần', self.signup(email='an.nguyen@gmail.com', email_code=wrong).json['error'])
+        made = self.signup(email='AN.NGUYEN@gmail.com', email_code=code)
+        self.assertEqual(made.status_code, 200, made.json)
+        self.assertEqual(self.signup(username='other', email='an.nguyen@gmail.com', email_code=code).status_code, 409)
+        # The code is used up, and the address now belongs to one account.
+        self.assertEqual(self.post('/register/email-code', {'email': 'an.nguyen@gmail.com'}).status_code, 409)
+        me = self.app.test_client()
+        self.post('/login', {'username': 'newbie', 'password': self.PASSWORD}, me, csrf='')
+        self.assertEqual(me.get('/api/me').json['user']['email'], 'an.nguyen@gmail.com')
+
+        # Forgot password, by email or by username: same answer for unknown accounts, code only to the owner.
+        before = len(self.mailer.sent)
+        for login in ('ghost', 'ghost@gmail.com'):
+            self.assertEqual(self.post('/password/forgot', {'login': login}).json, {'ok': True, 'resend_in': 60, 'expires_in': 600})
+        self.assertEqual(len(self.mailer.sent), before)
+        self.assertEqual(self.post('/password/forgot', {'login': 'AN.NGUYEN@gmail.com'}).status_code, 200)
+        reset_code = self.mailer.code('an.nguyen@gmail.com')
+        self.assertIn('@newbie', self.mailer.sent[-1][2])
+        self.assertEqual(self.post('/password/reset', {'login': 'newbie', 'code': reset_code, 'password': 'short'}).status_code, 400)
+        done = self.post('/password/reset', {'login': 'newbie', 'code': reset_code, 'password': 'a-brand-new-secret-9'})
+        self.assertEqual(done.status_code, 200, done.json)
+        self.assertEqual(me.get('/api/me').json['user'], None, 'old sessions end')
+        self.assertEqual(self.post('/password/reset', {'login': 'newbie', 'code': reset_code, 'password': 'another-new-secret-9'},
+                                   self.app.test_client(), csrf='').status_code, 400, 'one use')
+        self.assertEqual(self.post('/login', {'username': 'newbie', 'password': 'a-brand-new-secret-9'},
+                                   self.app.test_client(), csrf='').status_code, 200)
+
+    def test_codes_expire_lock_after_five_wrong_tries_and_cannot_be_resent_at_once(self):
+        self.post('/register/email-code', {'email': 'b@st.example.edu'})
+        again = self.post('/register/email-code', {'email': 'b@st.example.edu'})
+        self.assertEqual(again.status_code, 429)
+        self.assertIn('Spam', again.json['error'])
+        code = self.mailer.code()
+        wrong = '000000' if code != '000000' else '111111'
+        for _ in range(5):
+            self.signup(email='b@st.example.edu', email_code=wrong)
+        locked = self.signup(email='b@st.example.edu', email_code=code)
+        self.assertEqual(locked.status_code, 400)
+        self.assertIn('quá nhiều lần', locked.json['error'])
+        self.age_codes()
+        self.post('/register/email-code', {'email': 'b@st.example.edu'})
+        with self.store.connect(True) as db:
+            db.execute('UPDATE email_codes SET expires=?', (now() - 1,))
+        self.assertIn('hết hạn', self.signup(email='b@st.example.edu', email_code=self.mailer.code()).json['error'])
+        for bad in ('', 'no-at-sign', 'a@b', 'x@-bad.com', 'a b@c.com', 'a@b.com\r\nBcc: x@y.com', 'a' * 250 + '@b.com'):
+            self.assertEqual(self.post('/register/email-code', {'email': bad}).status_code, 400, bad)
+
+    def test_an_address_gets_five_codes_an_hour_and_a_failed_send_frees_the_retry(self):
+        for _ in range(5):
+            self.assertEqual(self.post('/register/email-code', {'email': 'c@gmail.com'}).status_code, 200)
+            self.age_codes()
+        capped = self.post('/register/email-code', {'email': 'c@gmail.com'})
+        self.assertEqual(capped.status_code, 429)
+        self.assertIn('một giờ', capped.json['error'])
+        self.mailer.fail = True
+        failed = self.post('/register/email-code', {'email': 'd@gmail.com'})
+        self.assertEqual(failed.status_code, 502)
+        self.mailer.fail = False
+        self.assertEqual(self.post('/register/email-code', {'email': 'd@gmail.com'}).status_code, 200, 'no wait after a failure')
+
+    def test_required_email_and_allowed_domains(self):
+        self.assertEqual(self.signup(username='noemail').status_code, 200, 'optional by default')
+        self.store.set_settings('admin', {'email_required': True})
+        self.app.extensions['cache'].clear()
+        self.assertEqual(self.client.get('/api/health').json['email'], {'enabled': True, 'required': True, 'domains': []})
+        self.assertIn('email', self.signup(username='noemail2').json['error'])
+        with unittest.mock.patch.dict('os.environ', {'ARENA_EMAIL_DOMAINS': 'st.example.edu, @example.org'}):
+            self.store.close()
+            self.app = create_app(self.tmp.name, origin='http://localhost:8080', registration_code='test-invite',
+                                  bosses=False, mailer=self.mailer)
+            self.store = self.app.extensions['store']
+        client = self.app.test_client()
+        self.assertIn('@st.example.edu hoặc @example.org',
+                      self.post('/register/email-code', {'email': 'x@gmail.com'}, client).json['error'])
+        for ok in ('x@st.example.edu', 'y@k66.st.example.edu', 'z@example.org'):
+            self.assertEqual(self.post('/register/email-code', {'email': ok}, client).status_code, 200, ok)
+
+    def test_an_existing_account_adds_an_email_and_the_admin_sees_it(self):
+        self.register('old_user')
+        self.assertEqual(self.post('/me/email', {'email': 'old@gmail.com', 'code': '123456'}).status_code, 400)
+        self.assertEqual(self.post('/me/email/code', {'email': 'old@gmail.com'}).status_code, 200)
+        # A code sent to sign up somebody else cannot attach the address to this account.
+        self.age_codes()
+        self.post('/register/email-code', {'email': 'old@gmail.com'})
+        self.assertEqual(self.post('/me/email', {'email': 'old@gmail.com', 'code': self.mailer.code()}).status_code, 400)
+        self.age_codes()
+        self.post('/me/email/code', {'email': 'old@gmail.com'})
+        saved = self.post('/me/email', {'email': 'old@gmail.com', 'code': self.mailer.code()})
+        self.assertEqual(saved.json, {'ok': True, 'email': 'old@gmail.com'})
+        self.assertEqual(self.client.get('/api/me').json['user']['email'], 'old@gmail.com')
+        with self.store.connect(True) as db:
+            db.execute("UPDATE users SET role='admin' WHERE username='old_user'")
+        found = self.client.get('/api/admin/users?q=old@gmail').json['items']
+        self.assertEqual([u['email'] for u in found], ['old@gmail.com'])
+
+    def test_the_smtp_mailer_keeps_one_connection_and_reconnects_when_dropped(self):
+        import socketserver
+        import threading
+        from arena_backend.mailer import SmtpMailer
+        received, connections = [], []
+
+        class Session(socketserver.StreamRequestHandler):
+            def handle(self):
+                connections.append(1)
+                self.wfile.write(b'220 test ESMTP\r\n')
+                while True:
+                    line = self.rfile.readline().decode().strip()
+                    verb = line[:4].upper()
+                    if not line or verb == 'QUIT':
+                        self.wfile.write(b'221 bye\r\n')
+                        return
+                    if verb == 'EHLO':
+                        self.wfile.write(b'250-test\r\n250 8BITMIME\r\n')
+                    elif verb == 'DATA':
+                        self.wfile.write(b'354 go\r\n')
+                        lines = []
+                        while (part := self.rfile.readline()) != b'.\r\n':
+                            lines.append(part)
+                        received.append(b''.join(lines).decode())
+                        self.wfile.write(b'250 queued\r\n')
+                        if len(received) == 2:
+                            return                    # drop the connection, as idle servers do
+                    else:
+                        self.wfile.write(b'250 ok\r\n')
+
+        server = socketserver.ThreadingTCPServer(('127.0.0.1', 0), Session)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        mailer = SmtpMailer('127.0.0.1', server.server_address[1], '', '', 'arena@example.org', 'none', workers=1)
+        try:
+            for n in range(3):
+                mailer.send(f'student{n}@example.org', f'{n}23456 là mã xác minh', f'Mã: {n}23456').result(timeout=10)
+        finally:
+            mailer.pool.shutdown()
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(len(received), 3)
+        self.assertEqual(len(connections), 2, 'one kept-open connection, plus one after the server hung up')
+        self.assertIn('Subject: 023456 =?utf-8?', received[0])        # Vietnamese subject encoded for any mail client
+        self.assertIn('student0@example.org', received[0])
+
+    def test_without_smtp_the_email_features_stay_off_and_registration_is_unchanged(self):
+        app = create_app(tempfile.mkdtemp(), origin='http://localhost:8080', registration_code='test-invite', bosses=False)
+        client = app.test_client()
+        self.assertEqual(client.get('/api/health').json['email'], {'enabled': False, 'required': False, 'domains': []})
+        for path, data in (('/register/email-code', {'email': 'a@gmail.com'}), ('/password/forgot', {'login': 'abc'})):
+            self.assertEqual(self.post(path, data, client).status_code, 404, path)
+        made = self.post('/register', {'username': 'plain', 'name': 'Plain', 'password': self.PASSWORD,
+                                        'invite': 'test-invite', 'email': 'ignored@gmail.com'}, client)
+        self.assertEqual(made.status_code, 200)
+        with app.extensions['store'].connect() as db:
+            self.assertIsNone(db.execute("SELECT email FROM users WHERE username='plain'").fetchone()[0])
+        app.extensions['store'].close()
+
+
 class AdminMatches(Base):
     def admin_client(self):
         self.register('boss_admin')

@@ -62,7 +62,8 @@ QUEUE_CAP_RANKED = int(os.getenv('ARENA_QUEUE_CAP_RANKED', '4000'))  # ranked ga
 # steady stream of higher-priority work cannot starve boss/practice games forever. Validation always goes first.
 AGING_SECONDS, AGING_LEVELS = 300.0, 1.5
 DEFAULT_SETTINGS = {'registration_open': '1', 'submissions_open': '1', 'ranked_open': '1',
-                    'practice_open': '1', 'campaign_open': '1', 'live_open': '1', 'read_only': '0', 'announcement': ''}
+                    'practice_open': '1', 'campaign_open': '1', 'live_open': '1', 'read_only': '0', 'announcement': '',
+                    'email_required': '0'}
 # Share of ranked teams (cumulative) that reach each classification.
 TIERS = [(0.10, 'Xuất sắc'), (0.30, 'Giỏi'), (0.60, 'Khá'), (1.0, 'Đạt')]
 ELO_TIERS = [(1150, 'Kim cương'), (1075, 'Vàng'), (1000, 'Bạc'), (0, 'Đồng')]
@@ -98,7 +99,8 @@ BADGES = [
     ('excellent', '🎓', 'Xuất sắc', 'Xếp loại Xuất sắc ở một giải đã hoàn tất'),
 ]
 # Columns added after a table first shipped; CREATE TABLE IF NOT EXISTS cannot add them.
-ADDED_COLUMNS = {'matches': ['plies INTEGER', "map TEXT NOT NULL DEFAULT 'standard'"],
+ADDED_COLUMNS = {'users': ['email TEXT', 'email_verified REAL'],
+                 'matches': ['plies INTEGER', "map TEXT NOT NULL DEFAULT 'standard'"],
                  'ranked_series': ['a_rating INTEGER', 'b_rating INTEGER'],
                  'tournaments': ["map TEXT NOT NULL DEFAULT 'standard'", 'final_map TEXT', 'join_code TEXT']}
 
@@ -151,6 +153,11 @@ SCHEMA = [
     '''CREATE TABLE IF NOT EXISTS audit (
         id INTEGER PRIMARY KEY, actor TEXT, action TEXT NOT NULL, detail TEXT NOT NULL, created REAL NOT NULL)''',
     'CREATE TABLE IF NOT EXISTS rate_limits (key TEXT PRIMARY KEY, start REAL NOT NULL, count INTEGER NOT NULL)',
+    # One-time email codes: `purpose` register | verify | reset; only a salted hash of the code is kept.
+    '''CREATE TABLE IF NOT EXISTS email_codes (
+        id TEXT PRIMARY KEY, purpose TEXT NOT NULL, email TEXT NOT NULL, user_id TEXT, digest TEXT NOT NULL,
+        expires REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL)''',
+    'CREATE INDEX IF NOT EXISTS v4_email_codes ON email_codes(purpose,email)',
     '''CREATE TABLE IF NOT EXISTS ratings (
         team_id TEXT PRIMARY KEY REFERENCES teams(id), rating INTEGER NOT NULL DEFAULT 1000,
         played INTEGER NOT NULL DEFAULT 0, wins INTEGER NOT NULL DEFAULT 0,
@@ -416,6 +423,8 @@ class Store:
                 for definition in definitions:
                     if definition.split()[0] not in existing:
                         db.execute(f'ALTER TABLE {table} ADD COLUMN {definition}')
+            # Needs the column added above; one email belongs to at most one account.
+            db.execute('CREATE UNIQUE INDEX IF NOT EXISTS v4_users_email ON users(email) WHERE email IS NOT NULL')
             for key, value in DEFAULT_SETTINGS.items():
                 db.execute('INSERT OR IGNORE INTO settings VALUES(?,?)', (key, value))
             if version < SCHEMA_VERSION:
@@ -804,6 +813,7 @@ class Store:
             team = self.team_of(db, user)
             self._leave(db, user, actor)
             db.execute('DELETE FROM sessions WHERE user_id=?', (user,))
+            db.execute('DELETE FROM email_codes WHERE user_id=?', (user,))
             db.execute('DELETE FROM users WHERE id=?', (user,))
             self.audit(db, actor, 'user.deleted', {'user': user, 'username': row['username'], 'name': row['name'],
                                                    'role': row['role'], 'team': team['id'] if team else None})
